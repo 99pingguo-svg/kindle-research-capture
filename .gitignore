@@ -1,0 +1,23 @@
+# Never commit captured copyrighted/user content
+output/
+captures/
+corpus/
+*.sqlite
+*.sqlite3
+pages.jsonl
+ocr_pages.jsonl
+merged_pages.jsonl
+ALL_TEXT*.txt
+images/
+*.png
+*.jpg
+*.jpeg
+
+# Local state
+state/
+sessions/
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+.env
