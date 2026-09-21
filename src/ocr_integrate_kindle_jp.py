@@ -12,6 +12,8 @@ Outputs:
 """
 import argparse, json, re, subprocess
 from pathlib import Path
+from PIL import Image
+import tempfile
 
 JP_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
 
@@ -29,13 +31,25 @@ def score_text(s):
     if not s: return -999
     jp=len(JP_RE.findall(s))
     bad=s.count("�")+s.count("|")+s.count("_")
+    ui_terms=("Kindle","レビュー","メモとハイライト","おすすめ","章を読み終えるまで")
+    ui_penalty=sum(s.count(x) for x in ui_terms)*80
     # Prefer substantial Japanese; penalize obvious UI/OCR garbage.
-    return jp*4 + min(len(s),5000)*0.08 - bad*4
+    return jp*4 + min(len(s),5000)*0.08 - bad*4 - ui_penalty
+
+def prepare_crop(img):
+    im=Image.open(img)
+    w,h=im.size
+    # Remove Kindle chrome and broad outer margins while retaining the page body.
+    box=(int(w*.10),int(h*.13),int(w*.90),int(h*.90))
+    crop=im.crop(box)
+    tmp=Path(tempfile.mkdtemp())/"crop.png"
+    crop.save(tmp)
+    return tmp, tmp.parent
 
 def run_ocr(img, lang, psm):
     cp=subprocess.run(
         ["tesseract",str(img),"stdout","-l",lang,"--psm",str(psm)],
-        capture_output=True,text=True)
+        capture_output=True,text=True,encoding="utf-8",errors="replace")
     return cp.stdout.strip(), cp.returncode
 
 def clean_ocr(s):
@@ -68,6 +82,8 @@ def main():
     imgs=sorted((root/"images").glob("page_*.png"))
 
     old=load_jsonl(root/"ocr_pages.jsonl")
+    old=[r for r in old if "step" in r and
+         (cutoff is None or int(r["step"])<=cutoff)]
     done={int(r["step"]):r for r in old if "step" in r}
     out=list(old)
 
@@ -80,13 +96,25 @@ def main():
         if step in ax_by_step or step in done:
             continue
         candidates=[]
-        for lang,psm in [("jpn_vert",5),("jpn",6),("jpn",3)]:
-            text,rc=run_ocr(img,lang,psm)
-            text=clean_ocr(text)
-            candidates.append({
-                "lang":lang,"psm":psm,"returncode":rc,
-                "score":score_text(text),"text":text
-            })
+        crop,cropdir=prepare_crop(img)
+        try:
+            specs=[
+                ("original","jpn_vert",5,img),
+                ("crop","jpn_vert",5,crop),
+                ("crop","jpn",6,crop),
+                ("crop","jpn",3,crop),
+                ("original","jpn",6,img),
+            ]
+            for variant,lang,psm,src in specs:
+                text,rc=run_ocr(src,lang,psm)
+                text=clean_ocr(text)
+                candidates.append({
+                    "variant":variant,"lang":lang,"psm":psm,"returncode":rc,
+                    "score":score_text(text),"text":text
+                })
+        finally:
+            import shutil
+            shutil.rmtree(cropdir,ignore_errors=True)
         best=max(candidates,key=lambda x:x["score"])
         row={
             "step":step,"image":img.name,"source_type":"OCR画像本文",

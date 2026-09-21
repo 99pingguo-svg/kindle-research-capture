@@ -171,11 +171,37 @@ def ensure_text(pid, bounds):
         main, heading, toolbar, loc, texts = snapshot(pid)
     return main, heading, toolbar, loc
 
+def page_number(location):
+    if not isinstance(location, str):
+        return None
+    m = re.search(r"(\d+)ページ中の(\d+)ページ目", location)
+    return int(m.group(2)) if m else None
+
 def exact_final_page(location):
     if not isinstance(location, str):
         return False
     m=re.search(r"(\d+)ページ中の(\d+)ページ目", location)
     return bool(m and int(m.group(1)) == int(m.group(2)))
+
+def acquire_output_lock(out):
+    lock=out/".capture.lock"
+    try:
+        lock.mkdir()
+    except FileExistsError:
+        pidfile=lock/"pid"
+        old=None
+        try: old=int(pidfile.read_text().strip())
+        except Exception: pass
+        if old:
+            try:
+                os.kill(old,0)
+                raise SystemExit(f"capture already running for {out} (pid {old})")
+            except ProcessLookupError:
+                pass
+        shutil.rmtree(lock,ignore_errors=True)
+        lock.mkdir()
+    (lock/"pid").write_text(str(os.getpid()))
+    return lock
 
 def main():
     ap = argparse.ArgumentParser()
@@ -189,6 +215,7 @@ def main():
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out/"images").mkdir(exist_ok=True)
+    lock = acquire_output_lock(out)
     pages_path = out/"pages.jsonl"
     events_path = out/"events.jsonl"
 
@@ -226,6 +253,7 @@ def main():
     previous_loc = None
     previous_hash = None
     stable_end = 0
+    last_page_number = None
     for step in range(args.max_pages):
         main_text, heading, toolbar, loc = ensure_text(pid, bounds)
         current_hash = hashlib.sha256(main_text.encode()).hexdigest() if main_text else None
@@ -252,6 +280,15 @@ def main():
 
         previous_hash = current_hash
         previous_loc = loc
+
+        pn = page_number(loc)
+        if pn is not None and last_page_number is not None and pn + 10 < last_page_number:
+            log("end", reason="page_number_reversed", step=step,
+                previous_page=last_page_number, current_page=pn, location=loc,
+                pages=len(seen_text))
+            break
+        if pn is not None:
+            last_page_number = pn
 
         if exact_final_page(loc):
             log("end", reason="exact_final_page", step=step, location=loc, pages=len(seen_text))
