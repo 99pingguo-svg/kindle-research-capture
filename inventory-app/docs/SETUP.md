@@ -19,7 +19,7 @@ INVENTORY_DATA="$HOME/Documents/商品台帳" npm start
 試しに触るだけなら: `npm run demo && INVENTORY_DATA=./demo-data npm start`
 
 ### 常駐させる（任意）
-ログイン時に自動起動したい場合は launchd を使います（`~/Library/LaunchAgents/jp.daicho.plist` で `node server/index.js` を `KeepAlive` 指定）。
+ログイン時に自動起動し、落ちても自動で再起動させるには `scripts/install-launchd.sh`（`scripts/start-lan.sh` を LaunchAgent `com.<ユーザー名>.shohin-daicho` として登録。ログは `~/Library/Logs/shohin-daicho.log`）。解除は `scripts/install-launchd.sh --uninstall`。常駐中は手で `npm start` しないこと（ポートが重なる）。
 撮影中に Mac がスリープすると iPhone から届かないので、作業中は「システム設定 → ディスプレイ → 詳細 → 電源アダプタ接続時はスリープさせない」等を推奨（写真は iPhone 側に保持され、復帰後に自動送信されます）。
 
 ## 2. iPhone から使う（推奨: Tailscale）
