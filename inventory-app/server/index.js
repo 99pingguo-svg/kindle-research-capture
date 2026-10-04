@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { X509Certificate } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Store, isUser } from './store.js';
 import { AppError, nowIso } from './util.js';
@@ -279,8 +280,11 @@ export function createApp({ dataDir, token = '' } = {}) {
     return sendJson(res, 200, out);
   }
 
+  // Requests that arrived through trustedHandler (the Mac-only 127.0.0.1 listener). A server-side mark, not a header, so clients cannot set it.
+  const trustedRequests = new WeakSet();
+
   function authorized(req, url) {
-    if (!token) return true;
+    if (!token || trustedRequests.has(req)) return true;
     const cookie = /(?:^|;\s*)inv_token=([^;]+)/.exec(req.headers.cookie || '')?.[1];
     const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '')?.[1];
     return cookie === token || bearer === token || url.searchParams.get('token') === token;
@@ -324,7 +328,12 @@ export function createApp({ dataDir, token = '' } = {}) {
     }
   }
 
-  return { store, handler, sseClients };
+  function trustedHandler(req, res) {
+    trustedRequests.add(req);
+    return handler(req, res);
+  }
+
+  return { store, handler, trustedHandler, sseClients };
 }
 
 function sendJson(res, status, value) {
@@ -403,17 +412,33 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const port = Number(process.env.PORT || 8787);
   const host = process.env.HOST || '127.0.0.1';
   const token = process.env.INVENTORY_TOKEN || '';
-  const { handler } = createApp({ dataDir, token });
+  const { handler, trustedHandler } = createApp({ dataDir, token });
   const tls = process.env.TLS_CERT && process.env.TLS_KEY ? { cert: fs.readFileSync(process.env.TLS_CERT), key: fs.readFileSync(process.env.TLS_KEY) } : null;
-  const server = tls ? https.createServer(tls, handler) : http.createServer(handler);
-  server.listen(port, host, () => {
-    const proto = tls ? 'https' : 'http';
-    console.log(`商品台帳 起動: ${proto}://${host === '0.0.0.0' ? 'localhost' : host}:${port}`);
-    console.log(`  データ: ${dataDir}`);
-    console.log(`  MCP:   ${proto}://localhost:${port}/mcp   （claude mcp add --transport http shohin-daicho ${proto}://localhost:${port}/mcp）`);
-    if (host === '0.0.0.0') for (const a of lanAddresses()) console.log(`  LAN:   ${proto}://${a}:${port}${token ? '/?token=…' : ''}`);
-    else console.log('  iPhoneから使うには: tailscale serve --bg ' + port + '  （HTTPSになりカメラも使えます。docs/SETUP.md 参照）');
-  });
+  if (tls) {
+    // Two doors on one store: HTTPS for the iPhone (token required when exposed beyond this Mac),
+    // and plain HTTP on 127.0.0.1 for Claude / MCP on this Mac, so .mcp.json and ai-worker.sh keep working unchanged.
+    if (host !== '127.0.0.1' && !token) throw new Error('HTTPS を LAN に公開するときは INVENTORY_TOKEN が必要です');
+    const tlsPort = Number(process.env.TLS_PORT || 8443);
+    https.createServer(tls, handler).listen(tlsPort, host, () => {
+      console.log(`商品台帳 起動（HTTPS・iPhone用）: https://${host === '0.0.0.0' ? 'localhost' : host}:${tlsPort}`);
+      // Show the names the certificate is valid for; opening by IP would fail the iPhone's certificate check.
+      const names = (new X509Certificate(tls.cert).subjectAltName || '').split(', ').filter((s) => s.startsWith('DNS:')).map((s) => s.slice(4));
+      if (host === '0.0.0.0') for (const n of names.length ? names : lanAddresses()) console.log(`  LAN:   https://${n}:${tlsPort}${token ? '/?token=…' : ''}`);
+    });
+    http.createServer(trustedHandler).listen(port, '127.0.0.1', () => {
+      console.log(`  Mac内:  http://127.0.0.1:${port}（このMacからのみ・トークン不要）`);
+      console.log(`  データ: ${dataDir}`);
+      console.log(`  MCP:   http://localhost:${port}/mcp`);
+    });
+  } else {
+    http.createServer(handler).listen(port, host, () => {
+      console.log(`商品台帳 起動: http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`);
+      console.log(`  データ: ${dataDir}`);
+      console.log(`  MCP:   http://localhost:${port}/mcp   （claude mcp add --transport http shohin-daicho http://localhost:${port}/mcp）`);
+      if (host === '0.0.0.0') for (const a of lanAddresses()) console.log(`  LAN:   http://${a}:${port}${token ? '/?token=…' : ''}`);
+      else console.log('  iPhoneから使うには: tailscale serve --bg ' + port + '  （HTTPSになりカメラも使えます。docs/SETUP.md 参照）');
+    });
+  }
   backupMetadata(dataDir);
   setInterval(() => backupMetadata(dataDir), 24 * 3600 * 1000).unref();
 }

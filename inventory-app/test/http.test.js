@@ -140,3 +140,22 @@ test('export zip is well-formed', async () => {
   assert.equal(buf.readUInt32LE(14), crc32(data));
   assert.equal(buf.slice(30, 30 + nameLen).toString(), 'Products/products.csv');
 });
+
+test('token: LAN door requires it, Mac-only trusted door does not', async () => {
+  const app = createApp({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-token-')), token: 'secret-123' });
+  const lan = http.createServer(app.handler);
+  const local = http.createServer(app.trustedHandler);
+  await Promise.all([lan, local].map((s) => new Promise((r) => s.listen(0, '127.0.0.1', r))));
+  const at = (s, p, init) => fetch(`http://127.0.0.1:${s.address().port}${p}`, init);
+  try {
+    assert.equal((await at(lan, '/api/meta')).status, 401);
+    assert.equal((await at(lan, '/api/meta', { headers: { authorization: 'Bearer secret-123' } })).status, 200);
+    assert.equal((await at(lan, '/api/meta?token=wrong')).status, 401);
+    assert.equal((await at(local, '/api/meta')).status, 200);
+    const mcp = await at(local, '/mcp', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
+    assert.equal(mcp.status, 200);
+    assert.equal((await at(lan, '/mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 401);
+  } finally {
+    for (const s of [lan, local]) { s.closeAllConnections(); s.close(); }
+  }
+});

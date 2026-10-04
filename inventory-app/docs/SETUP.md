@@ -36,15 +36,28 @@ iPhone のブラウザでカメラ（アプリ内ファインダー）を使う�
 
 サーバーは既定で 127.0.0.1 のみで待ち受けるため、Tailscale 経由以外からはアクセスできません。
 
-### Tailscale を使わない場合（同じ Wi-Fi 内）
+### Tailscale を使わない場合（同じ Wi-Fi 内・HTTPS・外部サービスなし）
+
+Mac 標準の openssl で自分専用の証明書を作り、アプリ内カメラが使える HTTPS で開きます。
 
 ```bash
-HOST=0.0.0.0 INVENTORY_TOKEN=好きな長い文字列 npm start
+scripts/make-lan-cert.sh   # 初回だけ。~/.shohin-daicho/ に CA・サーバー証明書・合言葉を作る
+scripts/start-lan.sh       # 起動
 ```
 
-iPhone で `http://<MacのIP>:8787/?token=…` を一度開くとログイン状態になります。
-ただし HTTP ではアプリ内カメラが使えず、シャッターを押すたびに標準カメラが起動する方式になります。
-HTTPS にするには mkcert 等で証明書を作り `TLS_CERT=… TLS_KEY=…` を指定し、iPhone に CA を信頼させてください。
+起動すると入口が2つできます（同じデータを共有）:
+- iPhone 用: `https://<Macの名前>.local:8443`（合言葉が必要。証明書が `.local` 名で発行されるので IP では開かない）
+- Mac 内の Claude / MCP 用: `http://127.0.0.1:8787`（この Mac からのみ・合言葉不要。`.mcp.json` はそのまま）
+
+iPhone 側（初回だけ）:
+1. `~/.shohin-daicho/ShohinDaicho-LocalCA.cer` を AirDrop で iPhone に送る
+2. 設定 → 一般 → VPNとデバイス管理 → ダウンロード済みプロファイル → インストール
+3. 設定 → 一般 → 情報 → 証明書信頼設定 → 「Shohin-Daicho Local CA」をオン
+4. `~/.shohin-daicho/iphone-url.txt` の URL を Safari で一度開く（合言葉が Cookie に保存される）→ 共有 → ホーム画面に追加
+
+CA は name constraints でこの Mac の `.local` 名にしか署名できないよう絞ってあります。Mac の名前を変えたら `scripts/make-lan-cert.sh --new-ca` で作り直し、iPhone にも入れ直してください。サーバー証明書の期限は約 2 年（`make-lan-cert.sh` の再実行で更新）。
+
+HTTP で手早く試すだけなら `HOST=0.0.0.0 INVENTORY_TOKEN=好きな長い文字列 npm start` → `http://<MacのIP>:8787/?token=…` でも開けますが、アプリ内カメラは使えず、シャッターのたびに標準カメラが起動します。
 
 ## 3. Claude（Mac）を接続
 
