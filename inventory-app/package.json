@@ -1,0 +1,19 @@
+{
+  "name": "shohin-daicho",
+  "version": "0.1.0",
+  "description": "AI共同型 商品在庫・メルカリ出品管理アプリ（商品台帳）",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test test/*.test.js",
+    "mcp:stdio": "node bin/mcp-stdio.js",
+    "backup": "node scripts/backup.js",
+    "demo": "node scripts/seed-demo.js",
+    "icons": "node scripts/make-icons.js"
+  }
+}

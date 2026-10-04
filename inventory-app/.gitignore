@@ -1,0 +1,5 @@
+# User data never goes into git (photos, ledger, backups)
+data/
+*.tar.gz
+# App icons are source assets (the repo root ignores *.png)
+!public/icons/*.png
