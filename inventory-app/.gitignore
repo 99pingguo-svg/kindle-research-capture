@@ -3,3 +3,5 @@ data/
 *.tar.gz
 # App icons are source assets (the repo root ignores *.png)
 !public/icons/*.png
+demo-data/
+backups-full/

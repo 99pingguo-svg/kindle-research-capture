@@ -69,10 +69,16 @@ test('REST: create, upload photo (multipart), list summary, bulk', async () => {
 });
 
 test('path traversal on /files is rejected', async () => {
-  const res = await fetch(base + '/files/../meta.json');
-  assert.notEqual(res.status, 200);
-  const res2 = await fetch(base + '/files/products/0001/product.json');
-  assert.equal(res2.status, 404);
+  const raw = (p) => new Promise((resolve) => http.get(base + p, (res) => {
+    let body = '';
+    res.on('data', (c) => (body += c));
+    res.on('end', () => resolve({ status: res.statusCode, body }));
+  }));
+  for (const p of ['/files/../meta.json', '/files/%2e%2e/meta.json', '/files/products/0001/../../meta.json', '/files/products/0001/product.json']) {
+    const r = await raw(p);
+    assert.ok(!r.body.includes('nextId') && !r.body.includes('"schemaVersion"'), `${p} leaked data`);
+  }
+  assert.equal((await raw('/files/products/0001/product.json')).status, 404);
 });
 
 test('MCP: initialize, list tools, call tools', async () => {
