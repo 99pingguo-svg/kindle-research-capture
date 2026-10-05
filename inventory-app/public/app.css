@@ -120,6 +120,8 @@ a { color: var(--accent); }
   background: var(--card); font-size: 20px; display: inline-flex; align-items: center; justify-content: center; flex: none;
 }
 .icon-btn.cam { background: var(--accent); border-color: var(--accent); color: #fff; width: 52px; height: 52px; font-size: 24px; border-radius: 14px; }
+a.icon-btn { text-decoration: none; }
+.icon-btn.link { width: 52px; font-size: 20px; border-radius: 14px; }
 
 /* ---------- list ---------- */
 .list { padding: 8px 8px calc(var(--safe-bottom) + 96px); display: flex; flex-direction: column; gap: 8px; }

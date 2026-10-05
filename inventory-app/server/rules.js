@@ -155,6 +155,9 @@ export function photoUrl(p, ph, variant = 'thumb') {
 }
 
 /** Compact record used by the list screen and by list_products. */
+/** The product's shop page (Amazon first), for a quick open-in-new-window link from the list. */
+const sourceUrlOf = (p) => (p.links.find((l) => /amazon\./i.test(l.url)) || p.links.find((l) => l.type === 'purchase'))?.url || null;
+
 export function summary(p, settings) {
   const rd = readiness(p, settings);
   const actual = actualPhotos(p);
@@ -174,6 +177,7 @@ export function summary(p, settings) {
     quantity: p.quantity,
     location: p.location,
     notes: p.notes,
+    sourceUrl: sourceUrlOf(p),
     decision: p.decision,
     stage: p.stage,
     archived: p.archived,

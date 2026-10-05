@@ -181,7 +181,12 @@ function renderItems() {
         !p.trashedAt && h('button', {
           class: 'icon-btn cam', 'aria-label': `${p.name || p.id} を撮影`,
           onclick: (e) => { e.stopPropagation(); openCamera({ ids, index: idx }); },
-        }, '📷'))));
+        }, '📷'),
+        p.sourceUrl && h('a', {
+          class: 'icon-btn link', href: p.sourceUrl, target: '_blank', rel: 'noopener noreferrer',
+          title: '購入ページを開く（別ウィンドウ）', 'aria-label': `${p.name || p.id} の購入ページを開く`,
+          onclick: (e) => e.stopPropagation(),
+        }, '🔗'))));
   });
   els.list.append(frag);
 }
