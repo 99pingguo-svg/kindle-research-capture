@@ -91,6 +91,7 @@ export const FILTERS = [
   { id: 'queued', label: '出品待ち' },
   { id: 'mercari', label: 'メルカリ入力済' },
   { id: 'listed', label: '出品中' },
+  { id: 'trading', label: '取引中' },
   { id: 'sold', label: '売却済み' },
   { id: 'hold', label: '保留' },
   { id: 'no_sell', label: '出さない' },
@@ -120,6 +121,7 @@ export function matchesFilter(sm, filter) {
     case 'queued': return active && sm.stage === 'queued';
     case 'mercari': return active && ['mercari_entered', 'final_check'].includes(sm.stage);
     case 'listed': return active && sm.stage === 'listed';
+    case 'trading': return active && sm.stage === 'trading';
     case 'sold': return !sm.trashedAt && sm.stage === 'sold';
     case 'archived': return !sm.trashedAt && sm.archived;
     case 'trash': return !!sm.trashedAt;

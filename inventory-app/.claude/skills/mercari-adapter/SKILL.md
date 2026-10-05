@@ -1,6 +1,6 @@
 ---
 name: mercari-adapter
-description: 商品台帳の「出品待ち」商品をメルカリWeb（Claude in Chrome）へ下書き入力し、入力内容を正本と照合（転記QC）する手順。「メルカリに入力して」「転記して」で使う。公開ボタンはユーザー承認がない限り押さない。
+description: 商品台帳の「出品待ち」商品をメルカリWeb（Claude in Chrome）へ下書き入力し、入力内容を正本と照合（転記QC）する手順と、メルカリの状況（出品中・取引中・売却済み）をアプリに反映する状況確認の手順。「メルカリに入力して」「転記して」「メルカリの状況を確認して」で使う。公開ボタンはユーザー承認がない限り押さない。
 ---
 
 # Mercari Adapter（メルカリ転記手順）
@@ -31,20 +31,36 @@ description: 商品台帳の「出品待ち」商品をメルカリWeb（Claude 
 5. `mercari_record_entry(id, saved_as="draft", draft_url=…)`。
 6. **転記QC**: 下書きを開き直し、画面に実際に入っている値を読み取って `mercari_verify_entry(id, observed)` に送る:
    `title, description, category（画面表示の階層）, brand, condition, shippingPayer, shippingMethod, shippingFrom, shippingDays, price, photoCount`
-   と、画像を見て判断する `photoOrderOk`（outbox の番号順か）、`photosMatchProduct`（この商品の現物写真か）、`productMatches`（別商品の下書きでないか）。
+   と、画像を見て判断する `photoOrderOk`（outbox の番号順か）、`photosMatchProduct`（この商品の写真・生成画像か）、`productMatches`（別商品の下書きでないか）。
    読み取れなかった項目は入れない（未確認として NG になる）。サーバーが正本と機械照合し、PASS なら「最終確認待ち」になる。
 7. NG なら画面を修正して 6 をやり直す。直せない場合は notes に理由を書いて次へ。
 
 ## 公開について
 
+- 出品判断が **「下書き」** の商品は、下書き保存と転記QCまでで止める。公開承認も公開もできない（サーバーも拒否する）。
 - 公開ボタンを押してよいのは、ユーザーがアプリで **「公開を承認」** した商品だけ（`get_product` の `channels.mercari.publishApproved` があり、その `rev` が現在の `rev` と一致）。
 - 公開したら `mercari_mark_listed(id, item_url)`。承認がない場合サーバーは記録を拒否する。
-- 売れたことを確認したら `mercari_mark_sold(id, price)`。
+- 売れたことを確認したら `mercari_mark_sold(id, price)`（状況確認の手順でまとめて反映してもよい）。
+
+## 状況確認（「メルカリの状況を確認して」と頼まれたときだけ。定期実行はしない）
+
+トークン節約のため **画面は文字で読む**（Claude in Chrome の get_page_text / read_page）。スクリーンショットは読めないときだけ。
+1. `channel_tracked(channel="mercari")` で、アプリが把握している商品（タイトル・状態・商品ID）と前回の確認日時を得る。
+2. マイページ →「出品した商品」の各タブ（**出品中 / 取引中 / 売却済み / 下書き**）を順に開き、文字で読む。
+   各商品のタイトル・価格・商品ページURL（`/item/m…`）を拾う。公開停止中の表示があれば stopped。
+   アプリの把握分（1）の商品が、どのタブにも見つからなければ removed。
+3. 拾った全件を **1回の** `channel_sync_status(channel="mercari", observations=[…])` で送る
+   （status: draft / listed / stopped / trading / sold / removed、item_url・title・price）。照合はサーバーが行う。
+4. 返ってきた `updated`（変化した商品）と `unmatched`（アプリに無い商品）をユーザーに報告する。
+   unmatched は推測で紐付けない。「アプリに無いメルカリの商品」として一覧で伝える。
+- 別の出品先（ジモティー等）でも同じ手順・同じツールで channel を変えて使う。ある出品先で取引中／売却済みになった商品が
+  別の出品先で出品中なら、アプリが「止めてください」とエラー表示するので、それも報告に含める（止める操作はユーザー）。
 
 ## 画面の探し方（メルカリUI変更時はここを更新）
 
 - 出品画面: トップの「出品」→「出品する」、または直接 `https://jp.mercari.com/sell/create`。
 - 下書き一覧: マイページ →「出品した商品」→「下書き」。
+- 状況確認: マイページ →「出品した商品」の「出品中」「取引中」「売却済み」タブ（実画面で確認したら URL もここに追記）。
 - 各項目は見出しテキスト（商品名 / 商品の説明 / カテゴリー / 商品の状態 / 配送料の負担 / 配送の方法 / 発送元の地域 / 発送までの日数 / 販売価格）で特定する。
 
 ## 最後の報告

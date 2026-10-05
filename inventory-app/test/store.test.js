@@ -6,6 +6,7 @@ import path from 'node:path';
 import { Store } from '../server/store.js';
 import { readiness, lint } from '../server/rules.js';
 import * as mercari from '../server/adapters/mercari.js';
+import * as channels from '../server/channels.js';
 import { IMAGE_QC_CHECK_IDS } from '../server/schema.js';
 
 const MODEL = 'claude-opus-5-5';
@@ -309,4 +310,33 @@ test('update ledger basis: photos carry sha256; Mercari snapshot flags later ima
   assert.ok(codes().includes('mercari_photos_changed'));
   store.updateFields(id, 'user', { 'listing.description': '説明を更新しました。' });
   assert.ok(codes().includes('mercari_text_changed'));
+});
+
+test('status check: platform lists sync into the app; cross-platform conflict is flagged', () => {
+  const store = new Store(tmp());
+  const id = preparedProduct(store);
+  passQc(store, id);
+  store.setStage(id, 'user', 'queued');
+  mercari.recordEntry(store, id, 'claude', { savedAs: 'draft' });
+  const title = store.get(id).listing.title;
+  // The user published it on Mercari by hand; the checker sees it in the 出品中 list (matched by title).
+  let r = channels.syncObserved(store, 'claude', 'mercari', [{ status: 'listed', title, itemUrl: 'https://jp.mercari.com/item/m11112222333', price: 2800 }]);
+  assert.deepEqual(r.updated.map((u) => u.to), ['listed']);
+  assert.equal(store.get(id).stage, 'listed');
+  assert.equal(store.get(id).channels.mercari.itemId, 'm11112222333');
+  // Same state again: nothing written, but the check time is kept.
+  r = channels.syncObserved(store, 'claude', 'mercari', [{ status: 'listed', itemUrl: 'https://jp.mercari.com/item/m11112222333' }]);
+  assert.equal(r.unchanged, 1);
+  assert.ok(store.get(id).channels.mercari.lastCheckedAt);
+  // An order comes in (取引中), matched by item id; an unknown item is reported, not guessed.
+  r = channels.syncObserved(store, 'claude', 'mercari', [{ status: 'trading', itemId: 'm11112222333' }, { status: 'listed', title: '知らない商品' }]);
+  assert.equal(store.get(id).stage, 'trading');
+  assert.equal(r.unmatched.length, 1);
+  // Also offered on ジモティー → must be withdrawn there.
+  store.updateChannel(id, 'user', 'jmty', { status: 'listed' });
+  assert.ok(lint(store.get(id), store.settings).some((x) => x.code === 'offered_elsewhere' && x.severity === 'error'));
+  channels.syncObserved(store, 'claude', 'mercari', [{ status: 'sold', itemId: 'm11112222333', price: 2800 }]);
+  assert.equal(store.get(id).stage, 'sold');
+  assert.equal(store.get(id).soldPrice, 2800);
+  assert.equal(store.meta.channelChecks.mercari.seen, 1);
 });

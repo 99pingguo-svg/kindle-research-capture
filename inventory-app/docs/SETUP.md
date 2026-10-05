@@ -124,3 +124,15 @@ iPhone で「撮影完了」すると AI 整理が自動で依頼されます。
 - 手動・写真込み: `npm run backup`（`BACKUP_DIR=/Volumes/USB npm run backup` も可）
 - 書き出し: 設定画面から ZIP（`Products/0001/product.json, listing.txt, originals/, edited/, listing_photos/, references/`）や CSV
 - `data/` フォルダ自体が普通のファイルなので、Time Machine や iCloud Drive へのコピーでも保全できます（同時に2台のサーバーで同じフォルダを使わないこと）。
+
+## 5. 399商品（Codex の素材・原稿・採用画像）の取り込みと更新
+
+```bash
+node scripts/import-399.js            # 初回は取り込み、2回目以降は「元フォルダで変わった分だけ」同期
+node scripts/import-399.js --dry-run  # 件数だけ確認（何も書かない）
+```
+
+- 元フォルダ（`~/Documents/Codex/…`）は読むだけ。商品名・タイトル／説明文の下書き・Amazon リンク、正式採用の紹介画像（生成画像＝出品用に選べる）、Amazon 商品ページ画像（参考画像＝出品不可）を登録する。
+- 再実行で、差し替わった採用画像（指紋 sha256 で判定）は新版に置き換え（旧版は残す）、原稿の変更は取り込み時のままの項目だけ更新。あなたが確定（🔒）した項目は「提案」になる。
+- 変化はアプリの「⋯ → 📒 更新台帳」と `data/imports/update-ledger.csv` に記録。メルカリに入れた版が変わった商品は、商品画面にも「メルカリ側の更新が必要」と出る。
+- メルカリの状況（出品中・取引中・売却済み）は「メルカリの状況を確認して」と頼んだときだけ Claude が確認して反映する（手順は `.claude/skills/mercari-adapter/SKILL.md`）。

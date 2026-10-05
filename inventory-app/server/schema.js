@@ -13,8 +13,29 @@ export const STAGES = [
   { id: 'mercari_entered', label: 'メルカリ入力済み' },
   { id: 'final_check', label: '最終確認待ち' },
   { id: 'listed', label: '出品中' },
+  { id: 'trading', label: '取引中' },
   { id: 'sold', label: '売却済み' },
 ];
+
+/** Where a product can be offered. Each channel keeps its own status under product.channels[id]. */
+export const CHANNELS = [
+  { id: 'mercari', label: 'メルカリ' },
+  { id: 'jmty', label: 'ジモティー' },
+];
+export const channelLabel = (id) => CHANNELS.find((c) => c.id === id)?.label ?? id;
+/** Statuses observed on a platform's own pages (what the platform shows), shared by all channels. */
+export const OBSERVED_STATUSES = [
+  { id: 'draft', label: '下書き' },
+  { id: 'listed', label: '出品中' },
+  { id: 'stopped', label: '公開停止中' },
+  { id: 'trading', label: '取引中（注文あり）' },
+  { id: 'sold', label: '売却済み' },
+  { id: 'removed', label: '見つからない（削除済み？）' },
+];
+/** Channel statuses that mean the item is committed to a buyer there. */
+export const COMMITTED_STATUSES = ['trading', 'sold'];
+/** Channel statuses that mean the item is still offered there. */
+export const OFFERED_STATUSES = ['entered', 'transfer_ok', 'transfer_ng', 'listed'];
 export const STAGE_IDS = STAGES.map((s) => s.id);
 export const STAGE_ORDER = Object.fromEntries(STAGE_IDS.map((id, i) => [id, i]));
 export const stageLabel = (id) => STAGES.find((s) => s.id === id)?.label ?? id;

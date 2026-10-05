@@ -1,5 +1,5 @@
 // Pure functions over a product: readiness, deterministic lint, list summary, duplicates.
-import { MERCARI_LIMITS, CONFIRM_FIELDS, FIELD_MAP, stageLabel, decisionLabel, LISTABLE_KINDS, PREPARE_DECISIONS } from './schema.js';
+import { MERCARI_LIMITS, CONFIRM_FIELDS, FIELD_MAP, stageLabel, decisionLabel, LISTABLE_KINDS, PREPARE_DECISIONS, COMMITTED_STATUSES, OFFERED_STATUSES, channelLabel } from './schema.js';
 import { norm, normUrl, similarity } from './util.js';
 
 export const livePhotos = (p) => p.photos.filter((ph) => !ph.deletedAt);
@@ -73,6 +73,14 @@ export function lint(p, settings = {}) {
   const lps = listingPhotos(p);
   if (lp > 0 && lps.every((ph) => ph.kind === 'generated')) add('warn', 'generated_only', '出品用写真が生成画像だけです（実物の写真がありません）');
   else if (lps[0]?.kind === 'generated') add('info', 'generated_cover', '1枚目（表紙）が生成画像です');
+  // Sold or in trade on one platform but still offered on another: the other listing must be withdrawn.
+  const chans = Object.entries(p.channels || {}).filter(([, c]) => c?.status);
+  const committed = chans.filter(([, c]) => COMMITTED_STATUSES.includes(c.status));
+  if (committed.length) {
+    for (const [name, c] of chans.filter(([, c]) => OFFERED_STATUSES.includes(c.status))) {
+      add('error', 'offered_elsewhere', `${committed.map(([n, x]) => `${channelLabel(n)}で${x.status === 'sold' ? '売却済み' : '取引中'}`).join('・')}です。${channelLabel(name)}の${c.status === 'listed' ? '出品' : '下書き'}を止めてください`);
+    }
+  }
   // What is on Mercari vs what the app has now (images replaced by an update, text edited after entry).
   const ch = p.channels?.mercari;
   const snap = ch && ['entered', 'transfer_ng', 'transfer_ok', 'listed'].includes(ch.status) ? ch.listed || ch.entered : null;
@@ -136,7 +144,8 @@ export function aiStateOf(p) {
   const last = p.aiTasks.at(-1);
   if (last?.status === 'error') return { state: 'error', label: 'AIエラー', message: last.message };
   if (p.qc) return { state: 'done', label: p.qc.rev === p.rev ? `QC ${p.qc.result === 'pass' ? 'PASS' : '要確認'}` : 'QC要再実行', model: p.qc.model };
-  if (p.listing.title || p.facts.length) return { state: 'done', label: 'AI整理済み' };
+  // A title alone may come from an import or the user; only finished AI work counts as AI整理済み.
+  if (p.aiTasks.some((t) => t.status === 'done') || p.facts.some((f) => f.by && f.by !== 'user' && f.by !== 'import')) return { state: 'done', label: 'AI整理済み' };
   return { state: 'idle', label: '' };
 }
 
@@ -174,6 +183,7 @@ export function summary(p, settings) {
     thumb: main ? photoUrl(p, main, 'thumb') : null,
     thumbIsReference: !!main && main.kind === 'reference',
     counts: { actual: actual.length, generated: generatedPhotos(p).length, listing: lp.length, reference: referencePhotos(p).length },
+    channels: Object.fromEntries(Object.entries(p.channels || {}).filter(([, c]) => c?.status).map(([k, c]) => [k, c.status])),
     lastPhotoAt: p.lastPhotoAt,
     shotDoneAt: p.shotDoneAt || null,
     openPhotoRequests: openPhotoRequests(p).map((r) => ({ id: r.id, label: r.label })),

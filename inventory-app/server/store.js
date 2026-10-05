@@ -896,6 +896,18 @@ export class Store extends EventEmitter {
     });
   }
 
+  /** Note when a channel was last checked, without a history entry (nothing about the product changed). */
+  touchChannel(id, channel, patch) {
+    const p = this.get(id);
+    p.channels[channel] = { ...(p.channels[channel] || {}), ...patch };
+    this.persist(p);
+  }
+
+  recordChannelCheck(channel, info) {
+    this.meta.channelChecks = { ...(this.meta.channelChecks || {}), [channel]: info };
+    this.saveMeta();
+  }
+
   // ---------- undo ----------
 
   /**

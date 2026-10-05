@@ -54,6 +54,7 @@ export function createApp({ dataDir, token = '' } = {}) {
     aiTaskTypes: schema.AI_TASK_TYPES, qcChecks: schema.QC_CHECKS, limits: schema.MERCARI_LIMITS,
     shipping: { payers: schema.SHIPPING_PAYERS, methods: schema.SHIPPING_METHODS, days: schema.SHIPPING_DAYS, prefectures: schema.PREFECTURES },
     settings: store.settings, dataDir: store.dataDir, mcpPath: '/mcp',
+    channels: schema.CHANNELS, observedStatuses: schema.OBSERVED_STATUSES, photoKinds: schema.PHOTO_KINDS, channelChecks: store.meta.channelChecks || {},
   }));
   route('PUT', '/api/settings', ({ body, actor }) => {
     if (!isUser(actor)) throw new AppError(403, '設定変更はユーザーのみ');
@@ -192,6 +193,13 @@ export function createApp({ dataDir, token = '' } = {}) {
     return full(store.revert(params.id, actor, body.historyId));
   });
   route('GET', '/api/activity', ({ query }) => store.activity({ limit: Number(query.limit) || 300, since: query.since }));
+  // Update ledger written by scripts/import-399.js (source material re-synced), newest first.
+  route('GET', '/api/update-ledger', ({ query }) => {
+    const file = path.join(store.dataDir, 'imports/update-ledger.jsonl');
+    const lines = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean) : [];
+    const entries = lines.map((l) => JSON.parse(l)).reverse().slice(0, Number(query.limit) || 500);
+    return { entries, total: lines.length, channelChecks: store.meta.channelChecks || {} };
+  });
   route('POST', '/api/revert-actor', ({ body, actor }) => store.revertActorSince(actor, body.actor, body.since));
 
   // bulk — one item failing never fails the others

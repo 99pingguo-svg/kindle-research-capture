@@ -11,6 +11,8 @@ import {
 import { summary, readiness, lint, listingPhotos, livePhotos, openPhotoRequests } from './rules.js';
 import { IMAGE_QC_CHECK_IDS } from './schema.js';
 import * as mercari from './adapters/mercari.js';
+import * as channels from './channels.js';
+import { CHANNELS, OBSERVED_STATUSES } from './schema.js';
 
 const SERVER_INFO = { name: 'shohin-daicho', title: '商品台帳', version: '0.1.0' };
 const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -37,7 +39,7 @@ const s = {
   enumOf: (values, description) => ({ type: 'string', enum: values, description }),
 };
 
-const LIST_FILTERS = ['all', 'sell', 'draft', 'undecided', 'hold', 'no_sell', 'needs_photos', 'shot_today', 'shoot_plan', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'sold', 'archived', 'trash'];
+const LIST_FILTERS = ['all', 'sell', 'draft', 'undecided', 'hold', 'no_sell', 'needs_photos', 'shot_today', 'shoot_plan', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'trading', 'sold', 'archived', 'trash'];
 
 function today() {
   const d = new Date();
@@ -68,6 +70,7 @@ export function matchesFilter(sm, filter) {
     case 'queued': return active && sm.stage === 'queued';
     case 'mercari': return active && ['mercari_entered', 'final_check'].includes(sm.stage);
     case 'listed': return active && sm.stage === 'listed';
+    case 'trading': return active && sm.stage === 'trading';
     case 'sold': return !sm.trashedAt && sm.stage === 'sold';
     case 'archived': return !sm.trashedAt && sm.archived;
     case 'trash': return !!sm.trashedAt;
@@ -397,6 +400,33 @@ result: pass=問題なし / needs_review=ユーザー確認が必要 / fail=修�
 
   tool('mercari_mark_sold', 'メルカリで売れたことを記録する。', { id: s.id, price: s.int('売却価格') }, ['id'],
     ({ id, price }) => json(mercari.markSold(store, id, actor, { price }).channels.mercari));
+
+  // ---- status check (頼まれたときだけ): read the platform's own lists as text, send everything in one call ----
+  const channelIds = CHANNELS.map((c) => c.id);
+  tool('channel_tracked', '出品先（メルカリ等）にあるとアプリが把握している商品の一覧（id・タイトル・状態・商品ID/URL・最終確認日時）。状況確認の前に一度呼ぶ。', {
+    channel: s.enumOf(channelIds, '既定 mercari'),
+  }, [], ({ channel = 'mercari' }) => json({ tracked: channels.tracked(store, channel), lastCheck: store.meta.channelChecks?.[channel] || null }), { readOnlyHint: true });
+
+  tool('channel_sync_status', '状況確認の結果をまとめて記録する。出品先の一覧ページで見えた商品ごとに、状態（下書き/出品中/公開停止中/取引中/売却済み/見つからない）と、商品ID・URL・タイトル・価格を observations に入れる。アプリの商品との照合（商品ID→タイトル）はサーバーが行い、変わったもの・照合できなかったものを返す。公開や承認の操作ではない。', {
+    channel: s.enumOf(channelIds, '既定 mercari'),
+    observations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          status: s.enumOf(OBSERVED_STATUSES.map((x) => x.id), OBSERVED_STATUSES.map((x) => `${x.id}=${x.label}`).join(' / ')),
+          item_id: s.str('出品先の商品ID（例: m12345678901）'),
+          item_url: s.str('商品ページURL'),
+          title: s.str('一覧に表示されたタイトル'),
+          price: s.int('表示価格'),
+          product_id: s.str('アプリの商品IDが分かっていれば（照合を省略）'),
+        },
+        required: ['status'],
+      },
+    },
+  }, ['observations'], ({ channel = 'mercari', observations }) => json(channels.syncObserved(store, actor, channel, observations.map((o) => ({
+    status: o.status, itemId: o.item_id, itemUrl: o.item_url, title: o.title, price: o.price, productId: o.product_id,
+  })))));
 
   return T;
 }

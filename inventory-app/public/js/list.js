@@ -97,13 +97,21 @@ function toggleSelect() {
 
 const STATUS_CLASS = {
   unsorted: '', needs_photos: 'warn', shooting: 'info', ai_pending: 'ai', ai_processing: 'ai', needs_review: 'warn',
-  ready: 'ok', queued: 'accent', mercari_entered: 'accent', final_check: 'accent', listed: 'ok', sold: '', hold: 'warn', no_sell: '', archived: '', trash: 'danger',
+  ready: 'ok', queued: 'accent', mercari_entered: 'accent', final_check: 'accent', listed: 'ok', trading: 'accent', sold: '', hold: 'warn', no_sell: '', archived: '', trash: 'danger',
 };
+
+const CHANNEL_STATUS_LABEL = { entered: '下書き', transfer_ok: '下書き', transfer_ng: '下書き要修正', listed: '出品中', stopped: '公開停止', trading: '取引中', sold: '売却済み', removed: '見つからない' };
+const channelName = (id) => state.meta.channels?.find((c) => c.id === id)?.label || id;
 
 function badgesFor(p) {
   const b = [h('span', { class: `badge ${STATUS_CLASS[p.status.id] || ''}` }, p.status.label)];
   b.push(h('span', { class: `badge ${p.counts.actual ? '' : 'warn'}` }, `📷 ${p.counts.actual}`));
+  if (p.counts.generated) b.push(h('span', { class: 'badge' }, `生成 ${p.counts.generated}`));
   if (p.counts.listing) b.push(h('span', { class: 'badge' }, `出品用 ${p.counts.listing}`));
+  for (const [ch, st] of Object.entries(p.channels || {})) {
+    const label = CHANNEL_STATUS_LABEL[st];
+    if (label) b.push(h('span', { class: `badge ${st === 'trading' ? 'accent' : st === 'listed' ? 'ok' : ''}` }, `${channelName(ch)}: ${label}`));
+  }
   if (p.ai.label) b.push(h('span', { class: `badge ${p.ai.state === 'error' ? 'danger' : p.qc && !p.qc.stale && p.qc.result === 'pass' ? 'ok' : 'ai'}` }, (p.ai.state === 'processing' ? '⏳ ' : '') + p.ai.label));
   if (p.proposals) b.push(h('span', { class: 'badge ai' }, `AI提案 ${p.proposals}`));
   if (p.price != null) b.push(h('span', { class: 'badge' }, yen(p.price)));
@@ -296,6 +304,7 @@ export function newProductForm() {
 async function mainMenu() {
   const v = await choose(null, [
     { label: '🕘 共同作業の履歴', value: '#/activity' },
+    { label: '📒 更新台帳（素材の更新・出品先の確認）', value: '#/ledger' },
     { label: '📋 商品リストを一括登録', value: '#/import' },
     { label: '⚙️ 設定・AI接続・書き出し', value: '#/settings' },
     { label: '↻ 再読み込み', value: 'reload' },

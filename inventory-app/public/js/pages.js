@@ -17,6 +17,43 @@ function frame(title, ...body) {
     ...body));
 }
 
+const CHANNEL_STATUS = { entered: '下書き', transfer_ok: '下書き', transfer_ng: '下書き', listed: '出品中', stopped: '公開停止', trading: '取引中', sold: '売却済み', removed: '見つからない' };
+
+/** What changed in the source material after import, and when each platform was last checked. */
+export async function showLedger() {
+  frame('更新台帳', h('div', { class: 'card' }, '読み込み中…'));
+  let r;
+  try {
+    r = await api.get('/api/update-ledger?limit=500');
+  } catch (e) {
+    return showError(e);
+  }
+  const checks = Object.entries(r.channelChecks || {});
+  const chName = (id) => state.meta.channels?.find((c) => c.id === id)?.label || id;
+  const byDay = new Map();
+  for (const e of r.entries) {
+    const d = new Date(e.at).toLocaleDateString('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' });
+    if (!byDay.has(d)) byDay.set(d, []);
+    byDay.get(d).push(e);
+  }
+  frame('更新台帳',
+    h('p', { class: 'muted small' }, '取り込み元（素材・原稿・採用画像）が後から更新されたときの記録です。メルカリに入れた版が変わった商品は、商品画面にも「メルカリ側の更新が必要」と出ます。表計算で開く場合は data/imports/update-ledger.csv。'),
+    h('div', { class: 'card' },
+      h('h2', null, '出品先の最終確認'),
+      checks.length
+        ? checks.map(([ch, c]) => h('div', { class: 'small' }, `${chName(ch)}: ${fmtDate(c.at)}（確認${c.seen}件・変化${c.updated}件・照合できず${c.unmatched}件）`))
+        : h('div', { class: 'muted small' }, 'まだ確認していません（「メルカリの状況を確認して」と頼むと実行されます）')),
+    r.entries.length
+      ? [...byDay.entries()].map(([day, list]) => h('div', { class: 'card' },
+          h('h2', null, day, h('span', { class: 'spacer' }), h('span', { class: 'muted small' }, `${list.length}件`)),
+          list.map((e) => h('a', { class: 'row', href: `#/p/${e.productId}`, style: { display: 'block', padding: '8px 0', borderTop: '1px solid var(--border)' } },
+            h('div', null, h('b', null, `#${e.productId}`), ` ${e.productName || ''}`),
+            h('div', { class: 'small' }, `${e.kind}「${e.item}」${e.change} → ${e.applied}`),
+            (e.inMercari || CHANNEL_STATUS[e.mercariStatus]) && h('div', { class: 'small', style: { color: e.inMercari ? 'var(--danger)' : 'var(--muted)' } },
+              e.inMercari ? `メルカリ（${CHANNEL_STATUS[e.mercariStatus] || '入力済み'}）に入れた版です。メルカリ側の更新が必要` : `メルカリ: ${CHANNEL_STATUS[e.mercariStatus]}`)))))
+      : h('div', { class: 'card muted small' }, `更新の記録はまだありません（全${r.total}件）`));
+}
+
 export async function showActivity() {
   frame('共同作業の履歴', h('div', { class: 'card' }, '読み込み中…'));
   let items;
