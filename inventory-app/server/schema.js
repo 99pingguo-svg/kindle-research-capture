@@ -21,11 +21,15 @@ export const stageLabel = (id) => STAGES.find((s) => s.id === id)?.label ?? id;
 
 export const DECISIONS = [
   { id: 'undecided', label: '未定' },
-  { id: 'sell', label: '出品する' },
+  { id: 'sell', label: '出品' },
+  { id: 'draft', label: '下書き' },
   { id: 'hold', label: '保留' },
-  { id: 'no_sell', label: '出品しない' },
+  { id: 'no_sell', label: '出さない' },
 ];
 export const DECISION_IDS = DECISIONS.map((d) => d.id);
+export const decisionLabel = (id) => DECISIONS.find((d) => d.id === id)?.label ?? id;
+/** Decisions that move a product through preparation. 'draft' goes as far as a saved Mercari draft and is never published. */
+export const PREPARE_DECISIONS = ['sell', 'draft'];
 
 /** Stages the AI may never move a product into on its own. */
 export const USER_ONLY_STAGES = new Set(['queued', 'listed']);
@@ -78,8 +82,12 @@ export const PHOTO_TAGS = ['全体', '正面', '背面', '側面', '上面', '�
 
 export const PHOTO_KINDS = [
   { id: 'actual', label: '現物写真', note: 'ユーザーが撮影した現物。出品用画像はここから選ぶ。' },
+  { id: 'generated', label: '生成画像', note: 'AIで作った紹介画像（画像内に「AI生成・実物と異なる場合あり」と明記）。出品用に選べるが現物写真ではない。' },
   { id: 'reference', label: '参考資料画像', note: '公式・購入ページ等の画像。メルカリへはアップロードしない。' },
 ];
+export const PHOTO_KIND_IDS = PHOTO_KINDS.map((k) => k.id);
+/** Kinds that may be chosen as 出品用 photos. */
+export const LISTABLE_KINDS = ['actual', 'generated'];
 
 export const FACT_CONFIDENCE = [
   { id: 'confirmed', label: '確定' },

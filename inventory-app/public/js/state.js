@@ -83,6 +83,7 @@ export const FILTERS = [
   { id: 'shot_today', label: '今日撮影済み' },
   { id: 'undecided', label: '未判断' },
   { id: 'sell', label: '出品予定' },
+  { id: 'draft', label: '下書き' },
   { id: 'ai_queue', label: 'AI処理中' },
   { id: 'review', label: '要確認' },
   { id: 'qc_issue', label: 'QC問題' },
@@ -92,7 +93,7 @@ export const FILTERS = [
   { id: 'listed', label: '出品中' },
   { id: 'sold', label: '売却済み' },
   { id: 'hold', label: '保留' },
-  { id: 'no_sell', label: '出品しない' },
+  { id: 'no_sell', label: '出さない' },
   { id: 'archived', label: 'アーカイブ' },
   { id: 'trash', label: 'ゴミ箱' },
 ];
@@ -105,10 +106,11 @@ export function matchesFilter(sm, filter) {
   switch (filter) {
     case 'all': return active;
     case 'sell': return active && sm.decision === 'sell' && sm.stage !== 'sold';
+    case 'draft': return active && sm.decision === 'draft' && sm.stage !== 'sold';
     case 'undecided': return active && sm.decision === 'undecided';
     case 'hold': return active && sm.decision === 'hold';
     case 'no_sell': return active && sm.decision === 'no_sell';
-    case 'needs_photos': return active && sm.decision !== 'no_sell' && sm.stage !== 'sold' && (sm.counts.actual === 0 || sm.openPhotoRequests.length > 0 || sm.stage === 'needs_photos');
+    case 'needs_photos': return active && sm.decision !== 'no_sell' && sm.stage !== 'sold' && (sm.counts.actual + (sm.counts.generated || 0) === 0 || sm.openPhotoRequests.length > 0 || sm.stage === 'needs_photos');
     case 'shot_today': return active && isToday(sm.lastPhotoAt);
     case 'shoot_plan': return active && sm.shootPlan;
     case 'ai_queue': return active && ['pending', 'processing'].includes(sm.ai.state);

@@ -19,9 +19,10 @@ const INSTRUCTIONS = `商品台帳（個人の商品在庫・メルカリ出品�
 原則:
 - このアプリのデータが正本。メルカリはコピー先。
 - 情報には確度を付ける: confirmed(確定)/reference(参考情報)/unverified(要確認)/unknown(不明)。推測を事実として書かない。
-- 写真: kind=actual は現物写真、kind=reference は参考資料画像。参考画像は絶対に出品用にしない（サーバーも拒否する）。
+- 写真: kind=actual は現物写真、kind=generated は生成画像（AIで作った紹介画像。画像内に「AI生成・実物と異なる場合あり」の注記がある前提で出品用に選べる）、kind=reference は参考資料画像。参考画像は絶対に出品用にしない（サーバーも拒否する）。生成画像を現物写真として扱ったり、原稿で実物写真のように書いたりしない。
 - ユーザーが確定(🔒)した項目をAIが更新すると「提案」として保存され、ユーザーが採用するまで反映されない。
-- 出品する/しない判断・公開承認・削除・「出品待ち」への移動はユーザーのみ。販売価格と商品の状態はユーザーの確定が必要。
+- 出品判断（出品／下書き／保留／出さない）・公開承認・削除・「出品待ち」への移動はユーザーのみ。販売価格と商品の状態はユーザーの確定が必要。
+- 判断が「下書き」の商品はメルカリへ下書き保存までで、公開はしない（サーバーも拒否する）。
 - 作業の流れ: ai_task_queue → start_ai_task → get_product/get_photos → set_facts → save_listing_draft → save_qc_result → finish_ai_task。
 - QC は get_reference_data の qcChecks を全項目評価し、足りない写真は photo_requests で依頼する。
 - 画像QC（画質・写真間の整合性・違和感チェック）を含むQCは Claude Opus 5.5（claude-opus-5-5）が実施する。save_qc_result の model に実際のモデルIDを入れる。他モデルのQCは拒否される。
@@ -36,7 +37,7 @@ const s = {
   enumOf: (values, description) => ({ type: 'string', enum: values, description }),
 };
 
-const LIST_FILTERS = ['all', 'sell', 'undecided', 'hold', 'no_sell', 'needs_photos', 'shot_today', 'shoot_plan', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'sold', 'archived', 'trash'];
+const LIST_FILTERS = ['all', 'sell', 'draft', 'undecided', 'hold', 'no_sell', 'needs_photos', 'shot_today', 'shoot_plan', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'sold', 'archived', 'trash'];
 
 function today() {
   const d = new Date();
@@ -53,10 +54,11 @@ export function matchesFilter(sm, filter) {
   switch (filter) {
     case 'all': return active;
     case 'sell': return active && sm.decision === 'sell' && sm.stage !== 'sold';
+    case 'draft': return active && sm.decision === 'draft' && sm.stage !== 'sold';
     case 'undecided': return active && sm.decision === 'undecided';
     case 'hold': return active && sm.decision === 'hold';
     case 'no_sell': return active && sm.decision === 'no_sell';
-    case 'needs_photos': return active && sm.decision !== 'no_sell' && sm.stage !== 'sold' && (sm.counts.actual === 0 || sm.openPhotoRequests.length > 0 || sm.stage === 'needs_photos');
+    case 'needs_photos': return active && sm.decision !== 'no_sell' && sm.stage !== 'sold' && (sm.counts.actual + (sm.counts.generated || 0) === 0 || sm.openPhotoRequests.length > 0 || sm.stage === 'needs_photos');
     case 'shot_today': return active && isToday(sm.lastPhotoAt);
     case 'shoot_plan': return active && sm.shootPlan;
     case 'ai_queue': return active && ['pending', 'processing'].includes(sm.ai.state);
@@ -158,7 +160,7 @@ function buildTools(store, actor) {
 
   tool('get_photos', '商品の写真を画像として取得する。kind=listing は出品用の順番どおり。参考画像(reference)は出品に使わないこと。', {
     id: s.id,
-    kind: s.enumOf(['actual', 'listing', 'reference', 'all'], '既定 all'),
+    kind: s.enumOf(['actual', 'generated', 'listing', 'reference', 'all'], '既定 all'),
     photo_ids: { type: 'array', items: { type: 'string' }, description: '特定の写真のみ' },
     size: s.enumOf(['thumb', 'work'], 'thumb=小(一覧確認用) / work=大(詳細確認用、既定)'),
     limit: s.int('最大枚数（既定 work:8 / thumb:20）'),
@@ -184,7 +186,7 @@ function buildTools(store, actor) {
         continue;
       }
       const mime = /\.png$/i.test(file) ? 'image/png' : /\.webp$/i.test(file) ? 'image/webp' : 'image/jpeg';
-      content.push({ type: 'text', text: `[${ph.id}] ${ph.kind === 'actual' ? '現物写真' : '参考資料画像（出品不可）'}${ph.tag ? ` タグ:${ph.tag}` : ''}${order.get(ph.id) ? ` 出品用#${order.get(ph.id)}` : ''}${ph.derivedFrom ? ` 編集版(元:${ph.derivedFrom})` : ''}${ph.note ? ` メモ:${ph.note}` : ''}` });
+      content.push({ type: 'text', text: `[${ph.id}] ${ph.kind === 'actual' ? '現物写真' : ph.kind === 'generated' ? '生成画像（AI作成・注記入り。実物写真ではない）' : '参考資料画像（出品不可）'}${ph.tag ? ` タグ:${ph.tag}` : ''}${order.get(ph.id) ? ` 出品用#${order.get(ph.id)}` : ''}${ph.derivedFrom ? ` 編集版(元:${ph.derivedFrom})` : ''}${ph.note ? ` メモ:${ph.note}` : ''}` });
       content.push({ type: 'image', data: data.toString('base64'), mimeType: mime });
     }
     return { content };

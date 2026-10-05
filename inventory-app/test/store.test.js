@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../server/store.js';
-import { readiness } from '../server/rules.js';
+import { readiness, lint } from '../server/rules.js';
 import * as mercari from '../server/adapters/mercari.js';
 import { IMAGE_QC_CHECK_IDS } from '../server/schema.js';
 
@@ -256,4 +256,57 @@ test('QC (incl. image QC) only accepted from the configured model, with all imag
   // a QC made by a model that is later removed from the allow-list no longer counts
   store.updateSettings({ imageQcModels: ['some-other-model'] });
   assert.ok(readiness(store.get(id), store.settings).missing.some((m) => m.code === 'qc_model'));
+});
+
+test('decision 下書き: prepares like 出品 but can never be approved or published', () => {
+  const store = new Store(tmp());
+  const id = preparedProduct(store);
+  store.setDecision(id, 'user', 'draft');
+  assert.throws(() => store.setDecision(id, 'claude', 'sell'), /ユーザーのみ/);
+  passQc(store, id);
+  assert.equal(readiness(store.get(id), store.settings).ok, true);
+  store.setStage(id, 'user', 'queued');
+  mercari.recordEntry(store, id, 'claude', { savedAs: 'draft' });
+  assert.throws(() => mercari.recordEntry(store, id, 'claude', { savedAs: 'listed' }), /公開承認/);
+  const L = store.get(id).listing;
+  mercari.recordVerification(store, id, 'claude', { ...L, category: 'モバイルバッテリー', photoCount: 3, photoOrderOk: true, photosMatchProduct: true, productMatches: true });
+  assert.throws(() => mercari.approvePublish(store, id, 'user'), /下書き/);
+  assert.throws(() => mercari.markListed(store, id, 'claude', {}), /下書き/);
+  store.setDecision(id, 'user', 'sell');
+  mercari.approvePublish(store, id, 'user');
+});
+
+test('generated images: listable with a warning, never confused with own photos', () => {
+  const store = new Store(tmp());
+  const { product } = store.create({ name: '生成画像だけの商品' });
+  const id = product.id;
+  const gen = store.addPhoto(id, 'import', { kind: 'generated' }, { original: { buffer: JPEG, mime: 'image/jpeg' } }).photo;
+  const ref = store.addPhoto(id, 'import', { kind: 'reference' }, { original: { buffer: JPEG, mime: 'image/jpeg' } }).photo;
+  assert.equal(gen.source, 'generated');
+  assert.throws(() => store.setListingPhotos(id, 'user', [gen.id, ref.id]), /参考資料画像/);
+  store.setListingPhotos(id, 'user', [gen.id]);
+  const rd = readiness(store.get(id), store.settings);
+  assert.ok(!rd.missing.some((m) => m.code === 'no_photos'));
+  assert.ok(rd.warnings.some((w) => w.code === 'generated_only'));
+  assert.throws(() => store.updatePhoto(id, 'claude', gen.id, { kind: 'actual' }), /ユーザーのみ/);
+  store.updatePhoto(id, 'claude', gen.id, { kind: 'reference' });
+  assert.deepEqual(store.get(id).listingPhotoIds, []);
+});
+
+test('update ledger basis: photos carry sha256; Mercari snapshot flags later image/text changes', () => {
+  const store = new Store(tmp());
+  const id = preparedProduct(store);
+  const first = store.get(id).photos[0];
+  assert.match(first.sha256, /^[0-9a-f]{64}$/);
+  passQc(store, id);
+  store.setStage(id, 'user', 'queued');
+  mercari.recordEntry(store, id, 'claude', { savedAs: 'draft' });
+  const codes = () => lint(store.get(id), store.settings).map((x) => x.code);
+  assert.ok(!codes().includes('mercari_photos_changed'));
+  // An updated image replaces the first listing photo (different bytes → different fingerprint).
+  const newer = store.addPhoto(id, 'user', { kind: 'actual' }, { original: { buffer: Buffer.concat([JPEG, Buffer.from([1])]), mime: 'image/jpeg' } }).photo;
+  store.setListingPhotos(id, 'user', [newer.id, ...store.get(id).listingPhotoIds.slice(1)]);
+  assert.ok(codes().includes('mercari_photos_changed'));
+  store.updateFields(id, 'user', { 'listing.description': '説明を更新しました。' });
+  assert.ok(codes().includes('mercari_text_changed'));
 });

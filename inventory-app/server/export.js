@@ -26,6 +26,7 @@ const CSV_COLUMNS = [
   ['カテゴリー', (p) => p.listing.category],
   ['商品の状態', (p) => p.listing.condition],
   ['現物写真数', (p) => p.photos.filter((x) => x.kind === 'actual' && !x.deletedAt).length],
+  ['生成画像数', (p) => p.photos.filter((x) => x.kind === 'generated' && !x.deletedAt).length],
   ['出品用写真数', (p) => listingPhotos(p).length],
   ['QC', (p) => (p.qc ? p.qc.result : '')],
   ['メルカリURL', (p) => p.channels.mercari?.itemUrl || ''],
@@ -60,7 +61,7 @@ export function exportEntries(store, products, { photos = true } = {}) {
       i++;
       const tag = ph.tag ? `_${safeSegment(ph.tag)}` : '';
       const ext = path.extname(ph.files.original) || '.jpg';
-      const folder = ph.kind === 'reference' ? 'references' : ph.derivedFrom ? 'edited' : 'originals';
+      const folder = ph.kind === 'reference' ? 'references' : ph.kind === 'generated' ? 'generated' : ph.derivedFrom ? 'edited' : 'originals';
       entries.push({ name: `${base}/${folder}/${String(i).padStart(2, '0')}${tag}_${ph.id}${ext}`, file: path.join(dir, ph.files.original) });
     }
     listingPhotos(p).forEach((ph, idx) => {

@@ -116,12 +116,12 @@ function issuesFor(p) {
   const lines = [];
   for (const r of p.openPhotoRequests) lines.push(`📷 追加撮影: ${r.label}`);
   for (const i of p.issues) if (!i.startsWith('追加撮影')) lines.push(`⚠ ${i}`);
-  if (!lines.length || p.decision !== 'sell') return null;
+  if (!lines.length || !['sell', 'draft'].includes(p.decision)) return null;
   return h('div', { class: 'issues' }, lines.slice(0, 2).map((l) => h('div', null, l)), lines.length > 2 && h('div', { class: 'muted' }, `ほか${lines.length - 2}件`));
 }
 
 function decisionSeg(p) {
-  const opts = [['sell', '出品'], ['hold', '保留'], ['no_sell', '出さない']];
+  const opts = state.meta.decisions.filter((d) => d.id !== 'undecided').map((d) => [d.id, d.label]);
   return h('div', { class: 'seg', style: { marginTop: '7px' } },
     opts.map(([v, l]) => h('button', {
       class: `${v} ${p.decision === v ? 'on' : ''}`,
@@ -218,9 +218,7 @@ function renderBulk() {
       h('button', { class: 'btn small', onclick: run('ai', 'qc', 'QCを依頼') }, 'QC'),
       h('button', { class: 'btn small', onclick: () => ids.length && openCamera({ ids }) }, '📷 撮影')),
     h('div', { class: 'row' },
-      h('button', { class: 'btn small', onclick: run('decision', 'sell', '出品する') }, '出品する'),
-      h('button', { class: 'btn small', onclick: run('decision', 'hold', '保留') }, '保留'),
-      h('button', { class: 'btn small', onclick: run('decision', 'no_sell', '出品しない') }, '出品しない'),
+      ...state.meta.decisions.filter((d) => d.id !== 'undecided').map((d) => h('button', { class: 'btn small', onclick: run('decision', d.id, d.label) }, d.label)),
       h('button', { class: 'btn small', onclick: run('shootPlan', true, '撮影予定に追加') }, '撮影予定+'),
       h('button', { class: 'btn small', onclick: run('shootPlan', false, '撮影予定から外す') }, '撮影予定−')),
     h('div', { class: 'row' },

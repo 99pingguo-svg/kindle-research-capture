@@ -2,6 +2,7 @@
 // readable without this app: data/products/<id>/{product.json,listing.txt,history.jsonl,photos/,versions/}.
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
   AppError, nowIso, newId, clone, getPath, setPath, same, writeJson, writeFileAtomic, readJson,
@@ -10,10 +11,12 @@ import {
 import {
   FIELD_MAP, DECISION_IDS, STAGE_IDS, USER_ONLY_STAGES, DEFAULT_SETTINGS, FACT_CONFIDENCE,
   LINK_TYPES, PHOTO_TAGS, AI_TASK_TYPES, MERCARI_LIMITS, IMAGE_QC_CHECK_IDS, QC_CHECKS, coerceField, stageLabel,
+  decisionLabel, PREPARE_DECISIONS, PHOTO_KINDS, PHOTO_KIND_IDS, LISTABLE_KINDS,
 } from './schema.js';
-import { readiness, actualPhotos, livePhotos, findDuplicates } from './rules.js';
+import { readiness, actualPhotos, listablePhotos, livePhotos, findDuplicates } from './rules.js';
 
 const VERSIONS_KEPT = 100;
+const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'image/heif': 'heif', 'image/gif': 'gif' };
 
 export const isUser = (actor) => actor === 'user';
@@ -130,6 +133,7 @@ export class Store extends EventEmitter {
       const file = path.join(this.productsDir, dir, 'product.json');
       if (!fs.existsSync(file)) continue;
       const p = this.migrate(readJson(file));
+      if (this.backfillPhotoHashes(p)) this.persist(p);
       this.products.set(p.id, p);
       const n = parseInt(p.id, 10);
       if (Number.isFinite(n) && n >= this.meta.nextId) this.meta.nextId = n + 1;
@@ -140,6 +144,19 @@ export class Store extends EventEmitter {
     const base = newProduct(p.id, p.createdAt || nowIso(), {});
     const out = { ...base, ...p, listing: { ...base.listing, ...p.listing }, channels: { ...base.channels, ...p.channels } };
     return out;
+  }
+
+  /** One-time: give older photos a sha256 of their original file, so changed images can be detected later. */
+  backfillPhotoHashes(p) {
+    let changed = false;
+    for (const ph of p.photos || []) {
+      if (ph.sha256 || !ph.files?.original) continue;
+      const f = path.join(this.dir(p.id), ph.files.original);
+      if (!fs.existsSync(f)) continue;
+      ph.sha256 = sha256(fs.readFileSync(f));
+      changed = true;
+    }
+    return changed;
   }
 
   saveMeta() {
@@ -243,8 +260,8 @@ export class Store extends EventEmitter {
     if (p.trashedAt || p.archived) return;
     const from = p.stage;
     let to = from;
-    const hasPhotos = actualPhotos(p).length > 0;
-    if (p.decision === 'sell' && to === 'unsorted') to = hasPhotos ? 'shooting' : 'needs_photos';
+    const hasPhotos = listablePhotos(p).length > 0;
+    if (PREPARE_DECISIONS.includes(p.decision) && to === 'unsorted') to = hasPhotos ? 'shooting' : 'needs_photos';
     if (to === 'needs_photos' && hasPhotos && !p.shotDoneAt) to = 'shooting';
     const rd = readiness(p, this.settings);
     if (rd.ok && ['unsorted', 'needs_photos', 'shooting', 'ai_pending', 'needs_review'].includes(to)) to = 'ready';
@@ -395,12 +412,11 @@ export class Store extends EventEmitter {
   }
 
   setDecision(id, actor, decision) {
-    forbidAi(actor, '出品する／保留／出品しない の判断');
+    forbidAi(actor, '出品／下書き／保留／出さない の判断');
     if (!DECISION_IDS.includes(decision)) throw new AppError(400, `decision が不正: ${decision}`);
     return this.mutate(id, actor, 'decision', (p, ctx) => {
       if (p.decision === decision) return;
-      const labels = { undecided: '未定', sell: '出品する', hold: '保留', no_sell: '出品しない' };
-      ctx.changes.push({ path: 'decision', label: '出品判断', from: labels[p.decision], to: labels[decision] });
+      ctx.changes.push({ path: 'decision', label: '出品判断', from: decisionLabel(p.decision), to: decisionLabel(decision) });
       ctx.dirty = true;
       p.decision = decision;
     });
@@ -514,7 +530,7 @@ export class Store extends EventEmitter {
    */
   addPhoto(id, actor, meta, files) {
     const kind = meta.kind || 'actual';
-    if (!['actual', 'reference'].includes(kind)) throw new AppError(400, `kind が不正: ${kind}`);
+    if (!PHOTO_KIND_IDS.includes(kind)) throw new AppError(400, `kind が不正: ${kind}`);
     if (!files?.original?.buffer?.length) throw new AppError(400, '画像データがありません');
     const existing = meta.clientId && this.get(id).photos.find((ph) => ph.clientId === meta.clientId);
     if (existing) return { photo: existing, duplicate: true };
@@ -531,7 +547,7 @@ export class Store extends EventEmitter {
     const record = {
       id: pid,
       kind,
-      source: meta.source || (kind === 'reference' ? 'reference' : 'camera'),
+      source: meta.source || (kind === 'actual' ? 'camera' : kind),
       tag: meta.tag && PHOTO_TAGS.includes(meta.tag) ? meta.tag : meta.tag || '',
       note: meta.note || '',
       sourceUrl: meta.sourceUrl || '',
@@ -540,6 +556,7 @@ export class Store extends EventEmitter {
       width: Number(meta.width) || null,
       height: Number(meta.height) || null,
       clientId: meta.clientId || null,
+      sha256: sha256(files.original.buffer),
       takenAt: meta.takenAt || null,
       createdAt: nowIso(),
       by: actor,
@@ -559,7 +576,7 @@ export class Store extends EventEmitter {
 
     this.mutate(id, actor, 'photo_add', (p, ctx) => {
       p.photos.push(record);
-      const kindLabel = kind === 'actual' ? (record.derivedFrom ? '編集写真' : '現物写真') : '参考画像';
+      const kindLabel = kind === 'actual' ? (record.derivedFrom ? '編集写真' : '現物写真') : kind === 'generated' ? '生成画像' : '参考画像';
       ctx.note(`${kindLabel}追加${record.tag ? `（${record.tag}）` : ''}`);
       if (kind === 'actual') {
         p.lastPhotoAt = record.createdAt;
@@ -600,11 +617,11 @@ export class Store extends EventEmitter {
         ctx.note('写真メモ更新');
       }
       if (patch.kind !== undefined && patch.kind !== ph.kind) {
-        if (!['actual', 'reference'].includes(patch.kind)) throw new AppError(400, `kind が不正: ${patch.kind}`);
-        if (patch.kind === 'actual') forbidAi(actor, '参考画像を現物写真に変更すること');
+        if (!PHOTO_KIND_IDS.includes(patch.kind)) throw new AppError(400, `kind が不正: ${patch.kind}`);
+        if (patch.kind === 'actual') forbidAi(actor, '現物写真への変更（自分で撮った写真かはユーザーにしか分からない）');
         ph.kind = patch.kind;
-        if (ph.kind === 'reference') p.listingPhotoIds = p.listingPhotoIds.filter((x) => x !== ph.id);
-        ctx.note(`写真の種別を「${ph.kind === 'actual' ? '現物写真' : '参考資料画像'}」に変更`);
+        if (!LISTABLE_KINDS.includes(ph.kind)) p.listingPhotoIds = p.listingPhotoIds.filter((x) => x !== ph.id);
+        ctx.note(`写真の種別を「${PHOTO_KINDS.find((k) => k.id === ph.kind).label}」に変更`);
         ctx.bump();
       }
     });
@@ -638,7 +655,7 @@ export class Store extends EventEmitter {
     for (const x of uniq) {
       const ph = valid.get(x);
       if (!ph) throw new AppError(400, `写真 ${x} が見つかりません`);
-      if (ph.kind !== 'actual') throw new AppError(400, `写真 ${x} は参考資料画像のため出品用にできません`);
+      if (!LISTABLE_KINDS.includes(ph.kind)) throw new AppError(400, `写真 ${x} は参考資料画像のため出品用にできません`);
     }
     if (uniq.length > MERCARI_LIMITS.photosMax) throw new AppError(400, `出品用写真は${MERCARI_LIMITS.photosMax}枚までです`);
     if (same(uniq, p.listingPhotoIds)) return false;
@@ -647,7 +664,7 @@ export class Store extends EventEmitter {
     return true;
   }
 
-  /** Ordered selection of 出品用 photos. Only 現物 (actual) photos may be chosen. */
+  /** Ordered selection of 出品用 photos: 現物 (actual) photos and disclaimed AI-generated images; never reference images. */
   setListingPhotos(id, actor, ids, { reason } = {}) {
     return this.mutate(id, actor, 'listing_photos', (p, ctx) => {
       if (!isUser(actor) && p.locks.listingPhotos) {

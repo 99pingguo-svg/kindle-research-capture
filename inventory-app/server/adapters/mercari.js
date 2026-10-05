@@ -131,19 +131,31 @@ export function compare(p, observed = {}) {
   return { result: mismatches.length === 0 && unchecked.length === 0 ? 'pass' : 'fail', mismatches, unchecked };
 }
 
+/** What went to Mercari: listing photo fingerprints in order plus the main text, so later changes can be flagged. */
+export function snapshot(p) {
+  return {
+    at: nowIso(),
+    rev: p.rev,
+    photos: listingPhotos(p).map((ph) => ({ id: ph.id, sha256: ph.sha256 || null, kind: ph.kind })),
+    title: p.listing.title,
+    description: p.listing.description,
+    price: p.listing.price,
+  };
+}
+
 export function recordEntry(store, id, actor, { draftUrl = '', itemUrl = '', itemId = '', savedAs = 'draft', note = '' } = {}) {
   const p = store.get(id);
   if (!['queued', 'ready', 'mercari_entered', 'final_check'].includes(p.stage)) {
     throw new AppError(409, `ステータス「${p.stage}」の商品は転記対象ではありません（出品待ち／出品準備完了のみ）`);
   }
-  if (savedAs === 'listed' && !isUser(actor) && !p.channels.mercari?.publishApproved) {
+  if (savedAs === 'listed' && !isUser(actor) && (p.decision !== 'sell' || !p.channels.mercari?.publishApproved)) {
     throw new AppError(403, 'ユーザーの公開承認なしに公開状態で記録することはできません', 'forbidden');
   }
   return store.updateChannel(
     id,
     actor,
     CHANNEL,
-    { status: 'entered', savedAs, draftUrl, itemUrl, itemId, note, enteredAt: nowIso(), enteredRev: p.rev, transferQc: null },
+    { status: 'entered', savedAs, draftUrl, itemUrl, itemId, note, enteredAt: nowIso(), enteredRev: p.rev, transferQc: null, entered: snapshot(p), listed: null },
     { summary: `メルカリ入力完了（${savedAs === 'draft' ? '下書き保存' : savedAs}）`, stage: 'mercari_entered' }
   );
 }
@@ -175,6 +187,7 @@ export function recordVerification(store, id, actor, observed) {
 export function approvePublish(store, id, actor, approved = true) {
   if (!isUser(actor)) throw new AppError(403, '公開承認はユーザーのみ可能です', 'forbidden');
   const p = store.get(id);
+  if (approved && p.decision !== 'sell') throw new AppError(409, '出品判断が「下書き」などのため公開承認できません（公開するなら判断を「出品」に変えてください）');
   if (approved && p.channels.mercari?.status !== 'transfer_ok') throw new AppError(409, '転記QCがPASSしていません');
   return store.updateChannel(id, actor, CHANNEL, { publishApproved: approved ? { by: actor, at: nowIso(), rev: p.rev } : null }, { summary: approved ? '公開を承認' : '公開承認を取り消し' });
 }
@@ -182,6 +195,9 @@ export function approvePublish(store, id, actor, approved = true) {
 export function markListed(store, id, actor, { itemUrl = '', itemId = '', price } = {}) {
   const p = store.get(id);
   const ch = p.channels.mercari || {};
+  if (!isUser(actor) && p.decision !== 'sell') {
+    throw new AppError(403, '出品判断が「出品」ではない（下書きなど）ため、AIは公開できません', 'forbidden');
+  }
   if (!isUser(actor) && (!ch.publishApproved || ch.publishApproved.rev !== p.rev)) {
     throw new AppError(403, 'ユーザーの公開承認がない（または承認後に内容が変わった）ため、AIは公開できません', 'forbidden');
   }
@@ -189,7 +205,7 @@ export function markListed(store, id, actor, { itemUrl = '', itemId = '', price 
     id,
     actor,
     CHANNEL,
-    { status: 'listed', itemUrl: itemUrl || ch.itemUrl || '', itemId: itemId || ch.itemId || '', listedAt: nowIso(), listedPrice: price ?? p.listing.price },
+    { status: 'listed', itemUrl: itemUrl || ch.itemUrl || '', itemId: itemId || ch.itemId || '', listedAt: nowIso(), listedPrice: price ?? p.listing.price, listed: snapshot(p) },
     { summary: `メルカリ出品中${itemUrl ? `: ${itemUrl}` : ''}`, stage: 'listed' }
   );
 }

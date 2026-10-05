@@ -1,15 +1,18 @@
 // Pure functions over a product: readiness, deterministic lint, list summary, duplicates.
-import { MERCARI_LIMITS, CONFIRM_FIELDS, FIELD_MAP, stageLabel } from './schema.js';
+import { MERCARI_LIMITS, CONFIRM_FIELDS, FIELD_MAP, stageLabel, decisionLabel, LISTABLE_KINDS, PREPARE_DECISIONS } from './schema.js';
 import { norm, normUrl, similarity } from './util.js';
 
 export const livePhotos = (p) => p.photos.filter((ph) => !ph.deletedAt);
 export const actualPhotos = (p) => livePhotos(p).filter((ph) => ph.kind === 'actual');
 export const referencePhotos = (p) => livePhotos(p).filter((ph) => ph.kind === 'reference');
+export const generatedPhotos = (p) => livePhotos(p).filter((ph) => ph.kind === 'generated');
+/** Photos that can go on a listing: own photos of the item, or AI-generated images that carry their own disclaimer. */
+export const listablePhotos = (p) => livePhotos(p).filter((ph) => LISTABLE_KINDS.includes(ph.kind));
 export const openPhotoRequests = (p) => p.photoRequests.filter((r) => !r.doneAt && !r.cancelledAt);
 
 export function listingPhotos(p) {
   const byId = new Map(livePhotos(p).map((ph) => [ph.id, ph]));
-  return p.listingPhotoIds.map((id) => byId.get(id)).filter((ph) => ph && ph.kind === 'actual');
+  return p.listingPhotoIds.map((id) => byId.get(id)).filter((ph) => ph && LISTABLE_KINDS.includes(ph.kind));
 }
 
 const EXAGGERATION = ['絶対', '完璧', '完全', '最高', '激レア', '超レア', '確実', '100%', '１００％', '保証します', '間違いなく'];
@@ -67,6 +70,20 @@ export function lint(p, settings = {}) {
   const lp = listingPhotos(p).length;
   if (lp > 0 && lp < minPhotos) add('warn', 'few_photos', `出品用写真が${lp}枚です（推奨${minPhotos}枚以上）`);
   if (lp > MERCARI_LIMITS.photosMax) add('error', 'too_many_photos', `出品用写真は${MERCARI_LIMITS.photosMax}枚までです（${lp}枚）`);
+  const lps = listingPhotos(p);
+  if (lp > 0 && lps.every((ph) => ph.kind === 'generated')) add('warn', 'generated_only', '出品用写真が生成画像だけです（実物の写真がありません）');
+  else if (lps[0]?.kind === 'generated') add('info', 'generated_cover', '1枚目（表紙）が生成画像です');
+  // What is on Mercari vs what the app has now (images replaced by an update, text edited after entry).
+  const ch = p.channels?.mercari;
+  const snap = ch && ['entered', 'transfer_ng', 'transfer_ok', 'listed'].includes(ch.status) ? ch.listed || ch.entered : null;
+  if (snap) {
+    const where = ch.status === 'listed' ? '出品中のメルカリ' : 'メルカリの下書き';
+    const fp = (ph) => ph.sha256 || ph.id;
+    if (listingPhotos(p).map(fp).join(',') !== snap.photos.map(fp).join(',')) add('warn', 'mercari_photos_changed', `${where}に入れた時点から出品用画像が変わっています（メルカリ側の更新が必要）`);
+    const names = { title: 'タイトル', description: '説明文', price: '価格' };
+    const changed = Object.keys(names).filter((k) => (snap[k] ?? '') !== (p.listing[k] ?? ''));
+    if (changed.length) add('warn', 'mercari_text_changed', `${where}に入れた時点から${changed.map((k) => names[k]).join('・')}が変わっています`);
+  }
   return out;
 }
 
@@ -78,8 +95,8 @@ export function readiness(p, settings = {}) {
   const add = (code, message, extra) => missing.push({ code, message, ...extra });
   const L = p.listing;
 
-  if (p.decision !== 'sell') add('decision', '出品判断が「出品する」になっていません');
-  if (actualPhotos(p).length === 0) add('no_photos', '現物写真がありません');
+  if (!PREPARE_DECISIONS.includes(p.decision)) add('decision', '出品判断が「出品」か「下書き」になっていません');
+  if (listablePhotos(p).length === 0) add('no_photos', '出品に使える写真（現物写真または生成画像）がありません');
   else if (listingPhotos(p).length === 0) add('no_listing_photos', '出品用写真が選ばれていません');
   if (!L.title) add('title', 'タイトル未作成');
   if (!L.description) add('description', '説明文未作成');
@@ -108,7 +125,7 @@ export function statusOf(p) {
   if (p.trashedAt) return { id: 'trash', label: 'ゴミ箱' };
   if (p.archived) return { id: 'archived', label: 'アーカイブ' };
   if (p.decision === 'hold') return { id: 'hold', label: '保留' };
-  if (p.decision === 'no_sell') return { id: 'no_sell', label: '出品しない' };
+  if (p.decision === 'no_sell') return { id: 'no_sell', label: decisionLabel('no_sell') };
   return { id: p.stage, label: stageLabel(p.stage) };
 }
 
@@ -156,7 +173,7 @@ export function summary(p, settings) {
     status: st,
     thumb: main ? photoUrl(p, main, 'thumb') : null,
     thumbIsReference: !!main && main.kind === 'reference',
-    counts: { actual: actual.length, listing: lp.length, reference: referencePhotos(p).length },
+    counts: { actual: actual.length, generated: generatedPhotos(p).length, listing: lp.length, reference: referencePhotos(p).length },
     lastPhotoAt: p.lastPhotoAt,
     shotDoneAt: p.shotDoneAt || null,
     openPhotoRequests: openPhotoRequests(p).map((r) => ({ id: r.id, label: r.label })),

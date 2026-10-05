@@ -119,7 +119,7 @@ function header(p) {
 }
 
 function topControls(p) {
-  const decisions = [['sell', '出品する'], ['hold', '保留'], ['no_sell', '出品しない']];
+  const decisions = state.meta.decisions.filter((d) => d.id !== 'undecided').map((d) => [d.id, d.label]);
   return h('div', { class: 'card' },
     h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
       h('div', { class: 'seg wide', style: { flex: 1 } },
@@ -170,16 +170,17 @@ function photosCard(p) {
   const live = p.photos.filter((x) => !x.deletedAt);
   const actual = live.filter((x) => x.kind === 'actual');
   const refs = live.filter((x) => x.kind === 'reference');
+  const gens = live.filter((x) => x.kind === 'generated');
   const trash = p.photos.filter((x) => x.deletedAt);
   const byId = new Map(live.map((x) => [x.id, x]));
   const listing = p.listingPhotoIds.map((id) => byId.get(id)).filter(Boolean);
   const order = new Map(p.listingPhotoIds.map((id, i) => [id, i + 1]));
   const pending = uploads.pendingFor(p.id);
 
-  const tile = (ph, extra) => h('button', { class: `ph ${ph.kind === 'reference' ? 'ref' : ''}`, onclick: () => photoSheet(p, ph) },
+  const tile = (ph, extra) => h('button', { class: `ph ${ph.kind === 'reference' ? 'ref' : ph.kind === 'generated' ? 'gen' : ''}`, onclick: () => photoSheet(p, ph) },
     h('img', { src: fileUrl(p, ph), loading: 'lazy', alt: ph.tag || '' }),
     order.get(ph.id) && h('span', { class: 'order' }, order.get(ph.id)),
-    (ph.tag || ph.derivedFrom) && h('span', { class: 'tag' }, [ph.derivedFrom && '編集', ph.tag].filter(Boolean).join('・')),
+    (ph.tag || ph.derivedFrom || ph.kind === 'generated') && h('span', { class: 'tag' }, [ph.kind === 'generated' && '生成', ph.derivedFrom && '編集', ph.tag].filter(Boolean).join('・')),
     extra);
   const pendingTile = (x) => h('button', { class: 'ph', onclick: async () => {
     const v = await choose(x.error ? `送信失敗: ${x.error}` : 'アップロード待ち', [{ label: '再送', value: 'r' }, { label: '破棄', value: 'd', danger: true }]);
@@ -190,12 +191,14 @@ function photosCard(p) {
   const tabs = [
     ['actual', `現物写真 ${actual.length}`],
     ['listing', `出品用 ${listing.length}`],
+    ...(gens.length ? [['generated', `生成画像 ${gens.length}`]] : []),
     ['reference', `参考資料 ${refs.length}`],
     ...(trash.length ? [['trash', `削除済み ${trash.length}`]] : []),
   ];
   let grid;
   if (photoTab === 'actual') grid = [...pending.filter((x) => x.kind === 'actual').map(pendingTile), ...actual.map((ph) => tile(ph))];
   else if (photoTab === 'listing') grid = listing.map((ph) => tile(ph));
+  else if (photoTab === 'generated') grid = gens.map((ph) => tile(ph));
   else if (photoTab === 'reference') grid = [...pending.filter((x) => x.kind === 'reference').map(pendingTile), ...refs.map((ph) => tile(ph))];
   else grid = trash.map((ph) => tile(ph, h('span', { class: 'pending' }, '削除済み')));
 
@@ -204,6 +207,7 @@ function photosCard(p) {
   const hint = {
     actual: 'あなたが撮影した現物。番号付きが出品用（タップで出し入れ・編集）。',
     listing: 'メルカリにアップロードする写真と順番（1枚目がサムネイル）。現物写真からのみ選べます。',
+    generated: 'AIで作った紹介画像（画像内に「AI生成・実物と異なる場合あり」と明記）。出品用に選べますが、現物写真ではありません。',
     reference: '公式・購入ページ等の参考画像。AIの確認用で、メルカリには使いません。',
     trash: '削除した写真。タップで復元できます。',
   }[photoTab];
@@ -243,14 +247,14 @@ function photoSheet(p, ph) {
     const b = (label, fn, cls = '') => h('button', { class: `btn ${cls}`, onclick: async () => { close(); await fn(); } }, label);
     const actions = [];
     if (ph.deletedAt) actions.push(b('復元する', () => act(api.post(url(`/photos/${ph.id}/restore`)), '復元しました'), 'primary'));
-    else if (ph.kind === 'actual') {
+    else if (ph.kind === 'actual' || ph.kind === 'generated') {
       if (inListing) {
         if (idx > 0) actions.push(b('出品用の1枚目（サムネイル）にする', () => setListing([ph.id, ...p.listingPhotoIds.filter((x) => x !== ph.id)])));
         if (idx > 0) actions.push(b('← 順番を前へ', () => { const ids = [...p.listingPhotoIds]; [ids[idx - 1], ids[idx]] = [ids[idx], ids[idx - 1]]; return setListing(ids); }));
         if (idx < p.listingPhotoIds.length - 1) actions.push(b('順番を後ろへ →', () => { const ids = [...p.listingPhotoIds]; [ids[idx + 1], ids[idx]] = [ids[idx], ids[idx + 1]]; return setListing(ids); }));
         actions.push(b('出品用から外す', () => setListing(p.listingPhotoIds.filter((x) => x !== ph.id))));
       } else actions.push(b('出品用に追加', () => setListing([...p.listingPhotoIds, ph.id]), 'primary'));
-      actions.push(b('✂️ 編集（元写真は残ります）', () => editor(p, ph)));
+      if (ph.kind === 'actual') actions.push(b('✂️ 編集（元写真は残ります）', () => editor(p, ph)));
       actions.push(b('タグを変更', async () => {
         const t = await choose('タグ', [{ label: '（なし）', value: '' }, ...state.meta.photoTags.map((x) => ({ label: x, value: x }))]);
         if (t !== undefined) await act(api.patch(url(`/photos/${ph.id}`), { tag: t }));
@@ -264,7 +268,7 @@ function photoSheet(p, ph) {
     return h('div', null,
       h('img', { class: 'big-img', src: fileUrl(p, ph, 'work') }),
       h('p', { class: 'small muted' },
-        `${ph.kind === 'actual' ? (ph.derivedFrom ? '編集版の現物写真' : '現物写真') : '参考資料画像（出品不可）'}`,
+        `${ph.kind === 'actual' ? (ph.derivedFrom ? '編集版の現物写真' : '現物写真') : ph.kind === 'generated' ? '生成画像（AI作成・実物と異なる場合あり。出品用に選べます）' : '参考資料画像（出品不可）'}`,
         ph.tag && ` ・ ${ph.tag}`, ` ・ ${actorLabel(ph.by)} ${fmtDate(ph.createdAt)}`,
         ph.sourceUrl && h('span', null, ' ・ ', h('a', { href: ph.sourceUrl, target: '_blank', rel: 'noopener' }, '出典')),
         ' ・ ', h('a', { href: fileUrl(p, ph, 'original'), target: '_blank' }, '元画像'),
