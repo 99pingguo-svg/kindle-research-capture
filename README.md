@@ -28,3 +28,12 @@ Requirements: macOS, Kindle for Mac, Python with PyObjC
 `jpn_vert`, and optionally PyMuPDF.
 
 See [SKILL.md](SKILL.md) for the compact agent procedure.
+
+## Affiliate editorial app
+
+[`affiliate-editorial/`](affiliate-editorial/README.md) is a separate, private
+editorial manager and static site builder for an Amazon.co.jp product
+introduction site (owner approval of exact versions, rights tracking,
+Antigravity CLI polishing, scheduled publishing to a dummy target). It keeps
+all real data in its git-ignored `var/` directory.
+

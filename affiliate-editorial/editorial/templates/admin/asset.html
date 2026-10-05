@@ -1,0 +1,105 @@
+{% extends "admin/base.html" %}
+{% from "admin/_macros.html" import rights_badge, quality_badge, hidden, yesno, tristate_select %}
+{% block title %}素材#{{ a.id }}{% endblock %}
+{% block content %}
+<p class="crumbs">{% if a.product_id %}<a href="/products/{{ a.product_id }}">商品へ戻る</a> ›{% endif %}</p>
+<h1>素材#{{ a.id }} {{ a.title or "" }}</h1>
+<p class="meta-line">{{ ASSET_KIND_LABELS[a.kind] }} {{ rights_badge(a.rights_status) }} {{ quality_badge(a.quality_verdict) }}
+  <span class="mono small">sha256 {{ a.sha256[:16] }}…</span> {% if a.width %}<span class="small">{{ a.width }}×{{ a.height }}</span>{% endif %}</p>
+
+<div class="compare">
+  <figure>
+    <img src="/assets/{{ a.id }}/file" alt="素材#{{ a.id }}">
+    <figcaption>この素材</figcaption>
+  </figure>
+  {% if parent %}
+  <figure>
+    <img src="/assets/{{ parent.id }}/file" alt="元素材#{{ parent.id }}">
+    <figcaption><a href="/assets/{{ parent.id }}">元素材#{{ parent.id }}</a> {{ rights_badge(parent.rights_status) }}</figcaption>
+  </figure>
+  {% endif %}
+  {% for r in refs[:3] %}
+  <figure>
+    <img src="/assets/{{ r.id }}/file" alt="参照写真#{{ r.id }}">
+    <figcaption><a href="/assets/{{ r.id }}">参照写真#{{ r.id }}</a>（公開不可）</figcaption>
+  </figure>
+  {% endfor %}
+</div>
+
+<div class="grid-2">
+<section class="panel {% if rights_problems %}danger{% else %}ok{% endif %}">
+  <h2>公開できるか</h2>
+  {% if rights_problems or file_problems %}
+  <ul>{% for p in rights_problems + file_problems %}<li>{{ p }}</li>{% endfor %}</ul>
+  {% else %}<p>権利・ファイルとも公開可能です。</p>{% endif %}
+  <h3>AIへの入力</h3>
+  {% if ai_problems %}<ul>{% for p in ai_problems %}<li>{{ p }}</li>{% endfor %}</ul>{% else %}<p>入力可能です。</p>{% endif %}
+  <h3>使用中の記事</h3>
+  {% if used_in %}<ul>{% for aid, where in used_in %}<li><a href="/articles/{{ aid }}">記事#{{ aid }}</a>（{{ where | join("・") }}）</li>{% endfor %}</ul>{% else %}<p class="muted">ありません。</p>{% endif %}
+</section>
+
+<section class="panel">
+  <h2>品質判定（権利とは別）</h2>
+  <form method="post" action="/assets/{{ a.id }}/quality" class="stack">
+    {{ hidden(csrf, nonce) }}
+    <select name="verdict">{% for k, v in QUALITY_LABELS.items() %}<option value="{{ k }}" {% if a.quality_verdict == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select>
+    <label>メモ<textarea name="note" rows="2">{{ a.quality_note or "" }}</textarea></label>
+    <button type="submit">品質判定を保存</button>
+  </form>
+  {% if a.upstream_state %}<p class="small muted">上流の記録: {{ a.upstream_state }}（参考情報。品質採用・権利・公開承認の代わりにはなりません）</p>{% endif %}
+</section>
+</div>
+
+<section class="panel">
+  <h2>権利の記録</h2>
+  <form method="post" action="/assets/{{ a.id }}/rights" class="stack">
+    {{ hidden(csrf, nonce) }}
+    <div class="row">
+      <label>種類<select name="kind">{% for k, v in ASSET_KIND_LABELS.items() %}<option value="{{ k }}" {% if a.kind == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+      <label>権利状態<select name="rights_status">{% for k, v in RIGHTS_LABELS.items() %}<option value="{{ k }}" {% if a.rights_status == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+    </div>
+    <div class="row">
+      <label>出典<input name="source" value="{{ a.source or '' }}"></label>
+      <label>権利者<input name="rights_holder" value="{{ a.rights_holder or '' }}"></label>
+    </div>
+    <label>許諾の根拠（許諾文・契約・自撮りである旨など）<textarea name="license_basis" rows="2">{{ a.license_basis or "" }}</textarea></label>
+    <div class="row">
+      <label>許諾の出典URL<input name="license_url" value="{{ a.license_url or '' }}"></label>
+      <label>許諾期限（日本時間の日付）<input name="license_expires_at" type="date" value="{{ (a.license_expires_at | jst_input)[:10] if a.license_expires_at else '' }}"></label>
+    </div>
+    <div class="row">
+      <label>商用公開{{ tristate_select("commercial_ok", a.commercial_ok) }}</label>
+      <label>加工（トリミング等）{{ tristate_select("modification_ok", a.modification_ok) }}</label>
+      <label>AIへの入力{{ tristate_select("ai_input_ok", a.ai_input_ok) }}</label>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" name="has_people" value="1" {% if a.has_people %}checked{% endif %}> 人物が写っている</label>
+      <label class="check"><input type="checkbox" name="has_third_party_work" value="1" {% if a.has_third_party_work %}checked{% endif %}> 第三者の作品が写っている</label>
+      <label>写り込みの確認{{ tristate_select("third_party_cleared", a.third_party_cleared) }}</label>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" name="derived_from_amazon" value="1" {% if a.derived_from_amazon %}checked{% endif %}> Amazonの商品画像を元にしている</label>
+      <label class="check"><input type="checkbox" name="is_fictional_scene" value="1" {% if a.is_fictional_scene %}checked{% endif %}> 架空の使用場面（漫画・イメージ）</label>
+    </div>
+    <label>入力素材・制作経緯（生成画像・漫画は必須）<textarea name="provenance_note" rows="2">{{ a.provenance_note or "" }}</textarea></label>
+    <label>元素材<select name="parent_asset_id"><option value="">なし</option>{% for s in siblings %}<option value="{{ s.id }}" {% if a.parent_asset_id == s.id %}selected{% endif %}>#{{ s.id }} {{ s.title or "" }}（{{ ASSET_KIND_LABELS[s.kind] }}）</option>{% endfor %}</select></label>
+    <p class="small muted">最終確認: {{ a.rights_checked_by or "—" }} {{ a.rights_checked_at | jst }}</p>
+    <button type="submit" class="primary">権利の記録を保存</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>加工履歴</h2>
+  <ol>{% for s in steps %}<li>{{ s.ts | jst }} {{ s.by }}: {{ s.step }}</li>{% else %}<li class="muted">記録はありません。</li>{% endfor %}</ol>
+  <form method="post" action="/assets/{{ a.id }}/history" class="inline">
+    {{ hidden(csrf, nonce) }}
+    <input name="step" placeholder="例: 背景を白に調整" required>
+    <button type="submit">追加</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>変更履歴</h2>
+  <ul class="rows small">{% for e in history %}<li>{{ e.ts | jst }} {{ e.actor }} {{ e.action }}</li>{% endfor %}</ul>
+</section>
+{% endblock %}

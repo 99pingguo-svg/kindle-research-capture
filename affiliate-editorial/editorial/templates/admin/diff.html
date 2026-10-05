@@ -1,0 +1,24 @@
+{% extends "admin/base.html" %}
+{% block title %}差分{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/articles/{{ art.id }}">記事へ戻る</a> ›</p>
+<h1>差分：{{ title }}</h1>
+<form method="get" class="filters">
+  <label>比較元<select name="a">{% for v in vers %}<option value="{{ v.id }}" {% if v.id == a.id %}selected{% endif %}>{{ "提案" if v.track == "proposal" else "版" }}{{ v.version_no }}（{{ AUTHOR_LABELS[v.author_kind] }}）</option>{% endfor %}</select></label>
+  <label>比較先<select name="b">{% for v in vers %}<option value="{{ v.id }}" {% if v.id == b.id %}selected{% endif %}>{{ "提案" if v.track == "proposal" else "版" }}{{ v.version_no }}（{{ AUTHOR_LABELS[v.author_kind] }}）</option>{% endfor %}</select></label>
+  <button type="submit">比較</button>
+</form>
+<p class="small muted"><del>削除</del> と <ins>追加</ins> を示します。</p>
+{% for d in diff %}
+<section class="panel diff-field">
+  <h2>{{ d.field }}</h2>
+  {% if d.segments %}
+  <p class="diff">{% for op, t in d.segments %}{% if op == "equal" %}{{ t }}{% elif op == "delete" %}<del>{{ t }}</del>{% else %}<ins>{{ t }}</ins>{% endif %}{% endfor %}</p>
+  {% else %}
+  <div class="grid-2"><div><h3>変更前</h3><ul>{% for x in d.before %}<li>{{ x }}</li>{% endfor %}</ul></div><div><h3>変更後</h3><ul>{% for x in d.after %}<li>{{ x }}</li>{% endfor %}</ul></div></div>
+  {% endif %}
+</section>
+{% else %}
+<p class="muted">違いはありません。</p>
+{% endfor %}
+{% endblock %}

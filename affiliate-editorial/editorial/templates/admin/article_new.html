@@ -1,0 +1,21 @@
+{% extends "admin/base.html" %}
+{% from "admin/_macros.html" import hidden %}
+{% block title %}記事を作る{% endblock %}
+{% block content %}
+<h1>記事を作る</h1>
+<form method="post" action="/articles/new" class="panel stack">
+  {{ hidden(csrf, nonce) }}
+  <label>種類<select name="kind">
+    <option value="product">商品紹介（1商品）</option>
+    <option value="comparison">比較記事（2商品以上）</option>
+    <option value="page">固定ページ（運営者情報 about・プライバシー privacy など）</option>
+  </select></label>
+  <label>タイトル<input name="title" required></label>
+  <label>URL名（半角英小文字・数字・ハイフン。運営者情報は about、プライバシーは privacy）<input name="slug" class="mono" pattern="[a-z0-9-]+" required autocapitalize="off"></label>
+  <fieldset class="checks">
+    <legend>商品（固定ページでは選びません）</legend>
+    {% for p in plist %}<label class="check"><input type="checkbox" name="product_ids" value="{{ p.id }}"> {{ p.name }} <span class="mono small">{{ p.asin or "" }}</span></label>{% else %}<p class="muted">商品がありません。</p>{% endfor %}
+  </fieldset>
+  <button type="submit" class="primary">下書きを作る</button>
+</form>
+{% endblock %}

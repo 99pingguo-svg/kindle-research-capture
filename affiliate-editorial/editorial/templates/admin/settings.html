@@ -1,0 +1,52 @@
+{% extends "admin/base.html" %}
+{% from "admin/_macros.html" import hidden %}
+{% block title %}設定{% endblock %}
+{% block content %}
+<h1>設定</h1>
+<p class="small">広告表示・運営者名・トラッキングIDなど公開ページに出る設定を変えると、未公開の承認と予約は無効になり、再承認が必要です（公開中のページは承認時の設定のまま表示されます）。</p>
+<form method="post" action="/settings" class="panel stack">
+  {{ hidden(csrf, nonce) }}
+  <h2>サイト</h2>
+  <label>サイト名<input name="site_name" value="{{ s.site_name }}"></label>
+  <label>サイトの説明（ヘッダー下）<input name="site_tagline" value="{{ s.site_tagline }}"></label>
+  <label>公開URL（https://〜）<input name="base_url" value="{{ s.base_url }}" placeholder="https://example.com" inputmode="url"></label>
+  <h2>運営者情報</h2>
+  <div class="row">
+    <label>運営者名（Amazon指定の開示文に入ります）<input name="operator_name" value="{{ s.operator_name }}"></label>
+    <label>編集責任者<input name="editor_name" value="{{ s.editor_name }}"></label>
+  </div>
+  <label>問い合わせ方法（フォームURLまたはメールアドレス）<input name="contact" value="{{ s.contact }}"></label>
+  <h2>収益化と広告表示</h2>
+  <label>モード<select name="monetization_mode">
+    <option value="editorial_only" {% if s.monetization_mode == "editorial_only" %}selected{% endif %}>独自記事のみ（トラッキングIDなしの通常リンク）</option>
+    <option value="associates" {% if s.monetization_mode == "associates" %}selected{% endif %}>Amazonアソシエイトのリンク付き</option>
+  </select></label>
+  <label>トラッキングID（例: yourname-22）<input name="tracking_id" value="{{ s.tracking_id }}" class="mono" autocapitalize="off"></label>
+  <label>記事冒頭の広告表示<input name="ad_label_text" value="{{ s.ad_label_text }}"></label>
+  <p class="small muted">サイト全体の開示文: 「Amazonのアソシエイトとして、{{ s.operator_name }}は適格販売により収入を得ています。」（アソシエイトモードで自動表示）</p>
+  <h2>AI利用の表示</h2>
+  <div class="row">
+    <label>ラベル<input name="ai_label_text" value="{{ s.ai_label_text }}"></label>
+  </div>
+  <label>説明文（記事冒頭）<textarea name="ai_disclosure_text" rows="2">{{ s.ai_disclosure_text }}</textarea></label>
+  <h2>星評価</h2>
+  <label>星評価の扱い<select name="rating_policy">
+    <option value="none" {% if s.rating_policy == "none" %}selected{% endif %}>使わない（API利用資格がない間はこちら）</option>
+    <option value="require_api_min" {% if s.rating_policy == "require_api_min" %}selected{% endif %}>公式APIの星評価が基準以上の商品だけ掲載し、評価を表示する</option>
+  </select></label>
+  <label>基準（星いくつ以上）<input name="rating_min" value="{{ s.rating_min }}" inputmode="decimal" class="short"></label>
+  <p class="small muted">星評価は Creators API で取得した値だけを使い、24時間以内に更新します。基準を下回った記事は定期更新で自動的に取り下げます。</p>
+  <h2>規約確認</h2>
+  <label>確認記録の有効日数<input name="policy_review_max_age_days" value="{{ s.policy_review_max_age_days }}" inputmode="numeric" class="short"></label>
+  <button type="submit" class="primary">設定を保存</button>
+</form>
+
+<section class="panel">
+  <h2>接続状況（設定ファイル・非公開）</h2>
+  <ul class="rows">
+    <li>取り込み元：{% for alias, ok in roots.items() %}{{ alias }} {% if ok %}接続中{% else %}未接続{% endif %}{% if not loop.last %}、{% endif %}{% else %}未設定{% endfor %}</li>
+    <li>Creators API：{% if api %}設定済み{% else %}未設定（利用資格: 直近30日で適格販売10件など。資格を得てから設定します）{% endif %}</li>
+    <li>文章整形：{{ polish_cfg.tool_name }}（<code>{{ polish_cfg.command[0] }}</code>）{% if polish_available %}利用可能{% else %}見つかりません{% endif %}・公開に必須: {{ "はい" if polish_cfg.require_for_publish else "いいえ" }}</li>
+  </ul>
+</section>
+{% endblock %}

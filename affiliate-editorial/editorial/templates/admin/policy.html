@@ -1,0 +1,40 @@
+{% extends "admin/base.html" %}
+{% from "admin/_macros.html" import hidden %}
+{% block title %}規約確認{% endblock %}
+{% block content %}
+<h1>規約・ガイドラインの確認記録</h1>
+<p class="small">公式ページを本人が読み、確認日・変更点・次回見直し日を記録します。公開に必要な資料の確認が古い場合、公開は止まります（定期実行は設定していません）。</p>
+<div class="table-wrap">
+<table class="table">
+  <thead><tr><th>資料</th><th>状態</th><th>最終確認</th><th>次回見直し</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td><span class="mono">{{ r.key }}</span> <a href="{{ r.url }}" target="_blank" rel="noopener">{{ r.title }}</a>{% if r.key in required %} <span class="badge">公開に必要</span>{% endif %}</td>
+    <td>{% if r.status == "確認済み" %}<span class="badge ok">{{ r.status }}</span>{% else %}<span class="badge warn">{{ r.status }}</span>{% endif %}</td>
+    <td>{% if r.latest %}{{ r.latest.checked_on }}（{{ r.latest.checked_by }}）{% else %}—{% endif %}</td>
+    <td>{% if r.latest %}{{ r.latest.next_due }}{% else %}—{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<form method="post" action="/policy" class="panel stack">
+  {{ hidden(csrf, nonce) }}
+  <h2>確認を記録する</h2>
+  <fieldset class="checks">
+    {% for r in rows %}<label class="check"><input type="checkbox" name="source_key" value="{{ r.key }}"> {{ r.key }} {{ r.title }}</label>{% endfor %}
+  </fieldset>
+  <div class="row">
+    <label>確認日<input type="date" name="checked_on" value="{{ today }}" required></label>
+    <label>次回見直し日（空欄なら30日後）<input type="date" name="next_due"></label>
+  </div>
+  <label>要点<textarea name="summary" rows="2"></textarea></label>
+  <label>前回からの変更点<textarea name="changes" rows="2"></textarea></label>
+  <button type="submit" class="primary">記録する</button>
+</form>
+<section class="panel">
+  <h2>記録の履歴</h2>
+  <ul class="rows small">{% for h in hist %}<li>{{ h.checked_on }} {{ h.source_key }} {{ h.checked_by }} {{ h.summary or "" }}{% if h.changes %}（変更: {{ h.changes }}）{% endif %}</li>{% endfor %}</ul>
+</section>
+{% endblock %}

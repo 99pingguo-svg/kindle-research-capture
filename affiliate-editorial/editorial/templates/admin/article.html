@@ -1,0 +1,347 @@
+{% extends "admin/base.html" %}
+{% from "admin/_macros.html" import state_badge, pub_badge, rights_badge, quality_badge, hidden %}
+{% block title %}{{ content.title or "（無題）" }}{% endblock %}
+{% block body_class %}editor-page{% endblock %}
+{% block main_class %}editor{% endblock %}
+{% block content %}
+<aside class="pane pane-list" aria-label="記事一覧">
+  <h2 class="pane-title">編集待ち</h2>
+  <ul class="list">
+    {% for a in queue_list %}
+    <li class="{% if a.id == art.id %}current{% endif %}"><a href="/articles/{{ a.id }}">{{ a.title }}</a>{{ state_badge(a.state) }}</li>
+    {% endfor %}
+  </ul>
+</aside>
+
+<header class="pane-head">
+  <div class="article-head">
+    <h1>{{ content.title or "（無題）" }}</h1>
+    <p class="meta-line">{{ state_badge(art.state) }} {{ pub_badge(art.publication_status) }}
+      <span>版{{ hv.version_no }}（{{ AUTHOR_LABELS[hv.author_kind] }}・{{ hv.created_at | jst }}）</span>
+      {% if polished %}<span class="badge ok">{{ polish_tool }}で整形済み</span>{% else %}<span class="badge warn">未整形</span>{% endif %}
+      {% if art.publication_status == "live" %}<span>公開URL: {{ url }}</span>{% endif %}
+    </p>
+    <ol class="pipeline" aria-label="進み具合">
+      <li class="{% if content.title and content.summary %}done{% endif %}">ドラフト</li>
+      <li class="{% if polished %}done{% endif %}">文章整形</li>
+      <li class="{% if art.state in ('review','approved','scheduled','published') %}done{% endif %}">確認</li>
+      <li class="{% if art.state in ('approved','scheduled','published') %}done{% endif %}">承認</li>
+      <li class="{% if art.publication_status == 'live' %}done{% endif %}">公開</li>
+    </ol>
+  </div>
+  {% if conflict %}
+  <div class="panel danger" role="alert">
+    <p><strong>{{ conflict.message }}</strong></p>
+    {% if not conflict.validation %}
+    <p>あなたの入力はフォームに残してあります。下の変更点（他で保存された内容）を確認し、必要なら反映してから保存し直してください。</p>
+    {% for d in conflict.diff %}<div class="diff-field"><h4>{{ d.field }}</h4>{% if d.segments %}<p class="diff">{% for op, t in d.segments %}{% if op == "equal" %}{{ t }}{% elif op == "delete" %}<del>{{ t }}</del>{% else %}<ins>{{ t }}</ins>{% endif %}{% endfor %}</p>{% else %}<p>{{ d.before | join("、") }} → {{ d.after | join("、") }}</p>{% endif %}</div>{% endfor %}
+    {% endif %}
+  </div>
+  {% endif %}
+</header>
+
+<section class="pane pane-preview" aria-label="プレビュー">
+  <div class="device-toggle" role="group" aria-label="表示幅">
+    <button type="button" class="seg" data-device="mac" aria-pressed="true">Mac</button>
+    <button type="button" class="seg" data-device="iphone" aria-pressed="false">iPhone</button>
+    <a class="small" href="/articles/{{ art.id }}/preview?version={{ hv.id }}" target="_blank" rel="noopener">別タブで開く</a>
+  </div>
+  <div class="frame-wrap" data-frame>
+    <iframe src="/articles/{{ art.id }}/preview?version={{ hv.id }}" title="公開時の見え方（プレビュー）" loading="lazy"></iframe>
+  </div>
+</section>
+
+<section class="pane pane-side" aria-label="編集と承認">
+  <nav class="tabs" role="tablist">
+    <button type="button" role="tab" data-tab="edit" aria-selected="true">本文</button>
+    <button type="button" role="tab" data-tab="images" aria-selected="false">画像・商品</button>
+    <button type="button" role="tab" data-tab="approve" aria-selected="false">確認・承認</button>
+    <button type="button" role="tab" data-tab="history" aria-selected="false">履歴</button>
+    <button type="button" role="tab" data-tab="preview" aria-selected="false" class="tab-preview">見え方</button>
+  </nav>
+
+  <form method="post" action="/articles/{{ art.id }}/save" id="editor-form" data-dirty-guard>
+    {{ hidden(csrf, nonce) }}
+    <input type="hidden" name="base_version_id" value="{{ hv.id }}">
+
+    <div class="tab-panel" data-panel="edit">
+      {% if unsaved %}<p class="flash flash-error">未保存の入力を表示しています。</p>{% endif %}
+      <label>タイトル<input name="title" value="{{ content.title }}" maxlength="120"></label>
+      <label>概要（記事冒頭・検索結果の説明文）<textarea name="summary" rows="3" maxlength="300">{{ content.summary }}</textarea></label>
+      {% for sec in sections %}
+      <fieldset class="section-edit">
+        <input type="hidden" name="sec_key" value="{{ sec.key }}">
+        <label>見出し{% if not sec.key %}（追加する場合）{% endif %}<input name="sec_heading" value="{{ sec.heading }}"></label>
+        <label class="sr-only" for="body-{{ loop.index }}">本文</label>
+        <textarea id="body-{{ loop.index }}" name="sec_body" rows="{{ 8 if sec.body|length > 200 else 4 }}">{{ sec.body }}</textarea>
+      </fieldset>
+      {% endfor %}
+      <p class="small muted">書式: 空行で段落、行頭「- 」で箇条書き、行頭「### 」で小見出し、**太字**。</p>
+      <div class="row">
+        <label>記事の根拠<select name="content_basis">{% for k, v in CONTENT_BASIS.items() %}<option value="{{ k }}" {% if content.content_basis == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+        <label>情報確認日<input type="date" name="info_checked_on" value="{{ content.info_checked_on }}"></label>
+      </div>
+      <div class="row">
+        <label>商品提供・依頼<select name="relationship">{% for k, v in RELATIONSHIP.items() %}<option value="{{ k }}" {% if content.relationship == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+        <label>関係の説明（提供・依頼がある場合）<input name="relationship_note" value="{{ content.relationship_note }}"></label>
+      </div>
+      <fieldset>
+        <legend>根拠（出典と確認日）— 公開ページには種類・出典・確認日だけが出ます</legend>
+        {% for ev in evidence %}
+        <div class="evidence-row">
+          <select name="ev_kind" aria-label="根拠の種類">{% for k, v in EVIDENCE_KINDS.items() %}<option value="{{ k }}" {% if ev.kind == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select>
+          <input name="ev_claim" value="{{ ev.claim }}" placeholder="確認した内容（非公開メモ）" aria-label="確認した内容">
+          <input name="ev_source" value="{{ ev.source }}" placeholder="出典（URLまたは資料名）" aria-label="出典">
+          <input type="date" name="ev_checked" value="{{ ev.checked_on }}" aria-label="確認日">
+        </div>
+        {% endfor %}
+      </fieldset>
+      <label>この版のメモ（任意）<input name="note" placeholder="何を直したか"></label>
+      <button type="submit" class="primary wide">保存（新しい版を作る）</button>
+    </div>
+
+    <div class="tab-panel" data-panel="images" hidden>
+      <h3>選択中の画像（公開する順）</h3>
+      {% for img in content.images %}{% set info = asset_info.get(img.asset_id) %}
+      <fieldset class="image-row">
+        <input type="hidden" name="img_asset" value="{{ img.asset_id }}">
+        <img src="/assets/{{ img.asset_id }}/file" alt="" class="thumb">
+        <div>
+          <p class="small">#{{ img.asset_id }} {% if info %}{{ rights_badge(info.a.rights_status) }} {{ quality_badge(info.a.quality_verdict) }}{% endif %}</p>
+          {% if info and info.problems %}<p class="small danger-text">公開不可: {{ info.problems | join("／") }}</p>{% endif %}
+          <label>順番<input type="number" name="img_order" value="{{ loop.index }}" min="1" class="short" inputmode="numeric"></label>
+          <label>代替テキスト（alt・必須）<input name="img_alt" value="{{ img.alt }}"></label>
+          <label>説明文<input name="img_caption" value="{{ img.caption }}"></label>
+          {% if info and info.a.modification_ok == 1 %}
+          <details><summary class="small">トリミング（%指定・加工許可あり）</summary>
+            <div class="row">
+              <label>左<input name="img_crop_x" value="{{ img.crop.x if img.crop else '' }}" class="short" inputmode="decimal"></label>
+              <label>上<input name="img_crop_y" value="{{ img.crop.y if img.crop else '' }}" class="short" inputmode="decimal"></label>
+              <label>幅<input name="img_crop_w" value="{{ img.crop.w if img.crop else '' }}" class="short" inputmode="decimal"></label>
+              <label>高さ<input name="img_crop_h" value="{{ img.crop.h if img.crop else '' }}" class="short" inputmode="decimal"></label>
+            </div>
+          </details>
+          {% else %}
+          <input type="hidden" name="img_crop_x" value=""><input type="hidden" name="img_crop_y" value=""><input type="hidden" name="img_crop_w" value=""><input type="hidden" name="img_crop_h" value="">
+          <p class="small muted">加工許可がないためトリミングできません。</p>
+          {% endif %}
+          <label class="check"><input type="checkbox" name="img_remove" value="{{ img.asset_id }}"> この画像を外す</label>
+        </div>
+      </fieldset>
+      {% else %}<p class="muted">選択中の画像はありません。</p>{% endfor %}
+
+      <h3>候補</h3>
+      <div class="candidate-grid">
+        {% for c in candidates if not c.chosen %}
+        <label class="candidate {% if c.problems %}disabled{% endif %}">
+          {% if c.a.storage == "private" %}<img src="/assets/{{ c.a.id }}/file" alt="" loading="lazy">{% endif %}
+          <span class="small">#{{ c.a.id }} {{ rights_badge(c.a.rights_status) }} {{ quality_badge(c.a.quality_verdict) }}</span>
+          {% if c.problems %}<span class="small danger-text">{{ c.problems[0] }}</span>{% else %}<span><input type="checkbox" name="img_add" value="{{ c.a.id }}"> 追加</span>{% endif %}
+          <a class="small" href="/assets/{{ c.a.id }}">権利・品質を確認</a>
+        </label>
+        {% else %}<p class="muted">候補はありません。</p>{% endfor %}
+      </div>
+
+      <h3>商品カード・Amazonリンク</h3>
+      {% for p in plist if p.asin %}{% set card = card_by_asin.get(p.asin) %}{% set item = items.get(p.asin) %}
+      <fieldset class="card-row">
+        <input type="hidden" name="card_asin" value="{{ p.asin }}">
+        <label class="check"><input type="checkbox" name="card_on" value="{{ p.asin }}" {% if card %}checked{% endif %}> <span class="mono">{{ p.asin }}</span> のカードとリンクを置く</label>
+        <label>表示する商品名<input name="card_name" value="{{ card.name if card else p.name }}"></label>
+        <label class="check"><input type="checkbox" name="card_img" value="{{ p.asin }}" {% if not card or card.show_image %}checked{% endif %}> 公式画像を表示（APIの画像URLを無加工で表示）</label>
+        {% if fresh.get(p.asin) %}
+          <p class="small ok-text">公式データあり（{{ item.fetched_at | jst }}取得）{% if item.star_rating is not none %}・星{{ "%.1f"|format(item.star_rating) }}{% endif %}</p>
+        {% else %}
+          <p class="small muted">24時間以内の公式データがないため、画像なしのテキストリンクで表示されます。</p>
+        {% endif %}
+        {% if not p.asin_verified_at %}<p class="small danger-text">ASINの対応が未確認です（<a href="/products/{{ p.id }}">確認する</a>）</p>{% endif %}
+      </fieldset>
+      {% endfor %}
+      <button type="submit" class="primary wide">保存（新しい版を作る）</button>
+    </div>
+  </form>
+
+  <div class="tab-panel" data-panel="edit">
+    <details class="panel">
+      <summary>ドラフトを貼り付けて取り込む</summary>
+      <form method="post" action="/articles/{{ art.id }}/paste-draft" class="stack">
+        {{ hidden(csrf, nonce) }}
+        <textarea name="draft" rows="8" placeholder="# タイトル&#10;概要の段落&#10;&#10;## 何に使うか&#10;本文…&#10;## 向く人・向かない人&#10;本文…"></textarea>
+        <p class="small muted">見出しが「何に使うか／向く人・向かない人／選ぶときのポイント／購入前の注意／確認できた仕様」に当たる部分はその欄へ入ります。本人の編集がある記事では「提案」として保存されます。</p>
+        <button type="submit">取り込む</button>
+      </form>
+    </details>
+    <section class="panel">
+      <h3>文章整形（{{ polish_tool }}）</h3>
+      <p class="small">公開する文章はすべて整形を通します。整形後に文章を直した場合は、もう一度整形してください。送るのは記事の文章だけです（収集済みレビュー・Amazonデータ・メモは送りません）。</p>
+      {% if not polish_available %}<p class="small danger-text">{{ polish_tool }} のコマンドが見つかりません。設定を確認してください。</p>{% endif %}
+      <form method="post" action="/articles/{{ art.id }}/polish">
+        {{ hidden(csrf, nonce) }}<input type="hidden" name="base_version_id" value="{{ hv.id }}">
+        <button type="submit" {% if not polish_available %}disabled{% endif %} data-busy="整形中…">{{ "もう一度整形する" if polished else "文章を整形する" }}</button>
+      </form>
+      {% if polish_runs %}<ul class="rows small">{% for r in polish_runs[:3] %}<li>{{ r.started_at | jst }} {{ "成功" if r.status == "succeeded" else ("失敗: " ~ (r.error or "")) if r.status == "failed" else "実行中" }}{% if r.output_version_id %}（<a href="/articles/{{ art.id }}/diff?a={{ r.input_version_id }}&b={{ r.output_version_id }}">差分</a>）{% endif %}</li>{% endfor %}</ul>{% endif %}
+    </section>
+    {% if review_count %}
+    <section class="panel private">
+      <h3>収集済みレビュー（本人の目視確認用・{{ review_count }}件）</h3>
+      <p class="small">ドラフトと食い違いがないかの確認だけに使います。文章の転載・要約、AIへの入力はできません（公開前の検査で同じ文が見つかると止まります）。</p>
+      {% if show_reviews %}
+        {% for r in review_refs %}<article class="review-ref"><p class="small muted">{{ r.review_date or "" }}</p>{% if r.title %}<p><strong>{{ r.title }}</strong></p>{% endif %}<p class="pre">{{ r.body }}</p></article>{% endfor %}
+      {% else %}<a href="/articles/{{ art.id }}?reviews=1">表示する</a>{% endif %}
+    </section>
+    {% endif %}
+  </div>
+
+  <div class="tab-panel" data-panel="approve" hidden>
+    <section class="panel {% if report.blocks %}danger{% else %}ok{% endif %}">
+      <h3>公開前の判定（版{{ hv.version_no }}）</h3>
+      {% if report.blocks %}
+        <p><strong>公開できない理由（{{ report.blocks | length }}件）</strong></p>
+        <ul>{% for p in report.blocks %}<li>{{ p.message }}</li>{% endfor %}</ul>
+      {% else %}<p>必須の判定はすべて満たしています。</p>{% endif %}
+      {% if report.warnings %}<p><strong>確認が必要な点（{{ report.warnings | length }}件）</strong></p>
+      <ul>{% for p in report.warnings %}<li>{{ p.message }}</li>{% endfor %}</ul>{% endif %}
+    </section>
+
+    {% if open_requests %}
+    <section class="panel notice"><h3>未対応の修正指示</h3><ul>{% for r in open_requests %}<li>{{ r.body }} <span class="muted small">{{ r.created_at | jst }}</span></li>{% endfor %}</ul></section>
+    {% endif %}
+
+    {% if art.state in ("draft", "changes") %}
+    <form method="post" action="/articles/{{ art.id }}/submit" class="panel">
+      {{ hidden(csrf, nonce) }}
+      <p class="small">編集が終わったら確認待ちにします。</p>
+      <button type="submit" class="primary wide">確認待ちにする</button>
+    </form>
+    {% endif %}
+
+    {% if art.state == "review" %}
+    <form method="post" action="/articles/{{ art.id }}/approve" class="panel">
+      {{ hidden(csrf, nonce) }}<input type="hidden" name="version_id" value="{{ hv.id }}">
+      <p>承認するのは <strong>版{{ hv.version_no }}</strong>（<span class="mono small">{{ hv.content_hash[:12] }}</span>）です。本文・画像・並び順・リンク・広告表示を含めて固定されます。</p>
+      {% for w in report.warnings %}
+      <label class="check"><input type="checkbox" name="ack" value="{{ w.key }}" required> 確認しました: {{ w.message }}</label>
+      {% endfor %}
+      <button type="submit" class="primary wide" {% if report.blocks %}disabled{% endif %} data-confirm="版{{ hv.version_no }}を承認しますか？">この版を承認する</button>
+    </form>
+    {% endif %}
+
+    {% if art.state in ("review", "draft", "approved", "scheduled", "error") %}
+    <form method="post" action="/articles/{{ art.id }}/request-changes" class="panel">
+      {{ hidden(csrf, nonce) }}
+      <label>修正指示（差し戻し）<textarea name="body" rows="3" required placeholder="直してほしい点"></textarea></label>
+      <button type="submit">差し戻す</button>
+    </form>
+    {% endif %}
+
+    {% if art.state == "approved" %}
+    <section class="panel">
+      <h3>公開</h3>
+      <form method="post" action="/articles/{{ art.id }}/publish-now" class="stack">
+        {{ hidden(csrf, nonce) }}<input type="hidden" name="version_id" value="{{ hv.id }}">
+        <button type="submit" class="primary wide" data-confirm="版{{ hv.version_no }}を今すぐ公開しますか？" data-busy="公開中…">今すぐ公開する</button>
+      </form>
+      <form method="post" action="/articles/{{ art.id }}/schedule" class="stack">
+        {{ hidden(csrf, nonce) }}<input type="hidden" name="version_id" value="{{ hv.id }}">
+        <label>公開日時（日本時間）<input type="datetime-local" name="run_at" required></label>
+        <button type="submit">この日時に予約する</button>
+      </form>
+      <form method="post" action="/articles/{{ art.id }}/revoke">{{ hidden(csrf, nonce) }}<button type="submit" class="link" data-confirm="承認を取り消しますか？">承認を取り消す</button></form>
+    </section>
+    {% endif %}
+
+    {% if art.state == "scheduled" and pending_job %}
+    <section class="panel">
+      <h3>予約</h3>
+      <p>{{ pending_job.run_at | jst }} に版{{ hv.version_no }}を公開します（ジョブ#{{ pending_job.id }}）。</p>
+      <form method="post" action="/articles/{{ art.id }}/cancel-schedule">{{ hidden(csrf, nonce) }}<button type="submit" data-confirm="予約を取り消しますか？">予約を取り消す</button></form>
+    </section>
+    {% endif %}
+
+    {% if art.state == "error" %}
+    <section class="panel danger"><h3>公開エラー</h3><p>{{ art.last_error }}</p><p class="small"><a href="/jobs">公開ジョブ</a>から同じ命令を再試行できます。内容を直す場合は保存すると再承認が必要になります。</p></section>
+    {% endif %}
+
+    {% if art.publication_status == "live" %}
+    <form method="post" action="/articles/{{ art.id }}/takedown" class="panel">
+      {{ hidden(csrf, nonce) }}
+      <h3>公開の取り下げ</h3>
+      <p class="small">公開先からこのページを削除します（検索結果や他サイトのキャッシュがすぐ消えるとは限りません）。</p>
+      <label>理由<input name="reason" required></label>
+      <button type="submit" class="danger" data-confirm="公開を取り下げますか？" data-busy="取り下げ中…">取り下げる</button>
+    </form>
+    {% endif %}
+
+    {% if restorable %}
+    <details class="panel">
+      <summary>過去の承認版を復元する</summary>
+      <p class="small">権利が今も有効かを再検査してから公開します。</p>
+      {% for v in restorable %}
+      <form method="post" action="/articles/{{ art.id }}/restore" class="inline">
+        {{ hidden(csrf, nonce) }}<input type="hidden" name="version_id" value="{{ v.id }}">
+        <span>版{{ v.version_no }}（承認 {{ v.last_approved_at | jst }}）</span>
+        <a class="small" href="/articles/{{ art.id }}/preview?version={{ v.id }}" target="_blank" rel="noopener">見る</a>
+        <label class="check small"><input type="checkbox" name="ack_all" value="1"> 表示された注意事項を確認済み</label>
+        <button type="submit" data-confirm="版{{ v.version_no }}を復元して公開しますか？">復元して公開</button>
+      </form>
+      {% endfor %}
+    </details>
+    {% endif %}
+
+    <details class="panel">
+      <summary>その他の操作</summary>
+      {% if art.state not in ("rejected", "archived", "published") %}
+      <form method="post" action="/articles/{{ art.id }}/reject" class="stack">
+        {{ hidden(csrf, nonce) }}
+        <label>不採用の理由<input name="reason" required></label>
+        <button type="submit" class="danger" data-confirm="不採用にしますか？">不採用にする</button>
+      </form>
+      {% endif %}
+      {% if art.state == "rejected" %}<form method="post" action="/articles/{{ art.id }}/revive">{{ hidden(csrf, nonce) }}<button type="submit">下書きとして作り直す</button></form>{% endif %}
+      {% if art.state == "archived" %}<form method="post" action="/articles/{{ art.id }}/unarchive">{{ hidden(csrf, nonce) }}<button type="submit">保管を解除</button></form>
+      {% elif art.publication_status != "live" and art.state != "scheduled" %}<form method="post" action="/articles/{{ art.id }}/archive">{{ hidden(csrf, nonce) }}<button type="submit" data-confirm="保管しますか？">保管する</button></form>{% endif %}
+    </details>
+  </div>
+
+  <div class="tab-panel" data-panel="history" hidden>
+    {% if proposals %}
+    <section class="panel notice">
+      <h3>未処理の提案</h3>
+      {% for pr in proposals %}
+      <div class="proposal">
+        <p>{{ AUTHOR_LABELS[pr.author_kind] }} 案{{ pr.version_no }}（{{ pr.created_at | jst }}）{% if pr.base_version_id != hv.id %}<span class="badge warn">古い版が元</span>{% endif %} {{ pr.note or "" }}</p>
+        <a href="/articles/{{ art.id }}/diff?a={{ hv.id }}&b={{ pr.id }}">現在の版との差分</a>
+        <form method="post" action="/proposals/{{ pr.id }}/adopt" class="inline">{{ hidden(csrf, nonce) }}<input type="hidden" name="base_version_id" value="{{ hv.id }}"><button type="submit" data-confirm="この提案で本文を置き換えますか？（今の版は履歴に残ります）">採用</button></form>
+        <form method="post" action="/proposals/{{ pr.id }}/dismiss" class="inline">{{ hidden(csrf, nonce) }}<button type="submit">見送る</button></form>
+      </div>
+      {% endfor %}
+    </section>
+    {% endif %}
+    <section class="panel">
+      <h3>版の履歴</h3>
+      <ul class="rows small">
+        {% for v in versions %}
+        <li>版{{ v.version_no }} {{ AUTHOR_LABELS[v.author_kind] }}（{{ v.author }}）{{ v.created_at | jst }} {{ v.note or "" }}
+          {% if v.base_version_id %}<a href="/articles/{{ art.id }}/diff?a={{ v.base_version_id }}&b={{ v.id }}">差分</a>{% endif %}
+          <a href="/articles/{{ art.id }}/preview?version={{ v.id }}" target="_blank" rel="noopener">表示</a>
+          {% if v.id == art.live_version_id %}<span class="badge pub-live">公開中</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </section>
+    <section class="panel">
+      <h3>承認の記録</h3>
+      <ul class="rows small">{% for a in approvals_hist %}<li>{{ a.approved_at | jst }} {{ a.approved_by }} — 版ID{{ a.version_id }}（{{ a.status }}{% if a.status_reason %}: {{ a.status_reason }}{% endif %}）{% if a.batch_id %} 一括{% endif %}</li>{% else %}<li class="muted">ありません。</li>{% endfor %}</ul>
+    </section>
+    <section class="panel">
+      <h3>公開の記録</h3>
+      <ul class="rows small">{% for l in publog %}<li>{{ l.ts | jst }} {{ l.action }} 版ID{{ l.version_id }} {{ l.url or "" }}</li>{% else %}<li class="muted">ありません。</li>{% endfor %}</ul>
+      <ul class="rows small">{% for j in jobs_hist %}<li>ジョブ#{{ j.id }} {{ JOB_ACTIONS[j.action] }} {{ JOB_STATUS[j.status] }} {{ j.run_at | jst }}{% if j.last_error %}・{{ j.last_error }}{% endif %}</li>{% endfor %}</ul>
+    </section>
+    <section class="panel">
+      <h3>コメント</h3>
+      <form method="post" action="/articles/{{ art.id }}/comment" class="stack">{{ hidden(csrf, nonce) }}<textarea name="body" rows="2" required></textarea><button type="submit">コメントを追加</button></form>
+      <ul class="rows small">{% for c in comments %}<li><span class="badge">{{ {"comment":"コメント","change_request":"修正指示","reject_reason":"不採用理由","system":"システム"}[c.kind] }}</span> {{ c.body }} <span class="muted">{{ c.author }} {{ c.created_at | jst }}{% if c.resolved_at %}・対応済み{% endif %}</span></li>{% endfor %}</ul>
+    </section>
+  </div>
+</section>
+{% endblock %}

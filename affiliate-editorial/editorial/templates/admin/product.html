@@ -1,0 +1,152 @@
+{% extends "admin/base.html" %}
+{% from "admin/_macros.html" import state_badge, pub_badge, rights_badge, quality_badge, hidden %}
+{% block title %}{{ p.name }}{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/products">商品・素材</a> ›</p>
+<h1>{{ p.name }}</h1>
+<p class="meta-line">
+  <span class="mono">ASIN {{ p.asin or "未設定" }}</span>
+  {% if p.asin_verified_at %}<span class="badge ok">ASIN確認済み {{ p.asin_verified_at | jst_date }}</span>{% elif p.asin %}<span class="badge warn">ASIN未確認</span>{% endif %}
+  {% if p.legacy_id %}<span>既存ID {{ p.legacy_id }}</span>{% endif %}
+  {% if p.status == "held" %}<span class="badge warn">保留: {{ p.hold_reason }}</span>{% endif %}
+</p>
+
+<div class="grid-2">
+<section class="panel">
+  <h2>記事</h2>
+  {% if arts %}
+  <ul class="rows">{% for a in arts %}<li><a href="/articles/{{ a.id }}">{{ KIND_LABELS[a.kind] }} /{{ a.slug }}</a> {{ state_badge(a.state) }} {{ pub_badge(a.publication_status) }}</li>{% endfor %}</ul>
+  {% else %}
+  <form method="post" action="/products/{{ p.id }}/articles" class="inline">
+    {{ hidden(csrf, nonce) }}
+    <label>URL名<input name="slug" value="item-{{ (p.asin or p.id|string) | lower }}" class="mono" pattern="[a-z0-9-]+"></label>
+    <button type="submit" class="primary">紹介記事の下書きを作る</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Amazonデータ（公式APIのみ・24時間有効）</h2>
+  {% if item and item.status in ("ok","error") %}
+    <p>取得 {{ item.fetched_at | jst }}／有効期限 {{ item.expires_at | jst }}</p>
+    {% if item.image_url %}<img src="{{ item.image_url }}" alt="" class="thumb">{% endif %}
+    {% if item.star_rating is not none %}<p>星評価 {{ "%.1f"|format(item.star_rating) }}（{{ item.review_count or 0 }}件）</p>{% endif %}
+    {% if item.error %}<p class="muted small">直近の更新エラー: {{ item.error }}</p>{% endif %}
+  {% else %}
+    <p class="muted">取得していません（Creators API の利用資格・設定後に取得できます）。</p>
+  {% endif %}
+</section>
+</div>
+
+<section class="panel">
+  <h2>商品情報</h2>
+  <form method="post" action="/products/{{ p.id }}/update" class="stack">
+    {{ hidden(csrf, nonce) }}
+    <label>商品名（記事の商品カードに表示）<input name="name" value="{{ p.name }}" required></label>
+    <div class="row">
+      <label>ASIN<input name="asin" value="{{ p.asin or '' }}" class="mono" autocapitalize="characters"></label>
+      <label>既存ID<input name="legacy_id" value="{{ p.legacy_id or '' }}"></label>
+    </div>
+    <label>選定メモ（非公開・サイトには出ません）<textarea name="selection_note" rows="2">{{ p.selection_note or "" }}</textarea></label>
+    <label class="check"><input type="checkbox" name="manuscript_cleared_for_ai" value="1" {% if p.manuscript_cleared_for_ai %}checked{% endif %}> 既存原稿（manuscript）は本人の文章で、AIへの入力を許可する</label>
+    <button type="submit">保存</button>
+  </form>
+  {% if p.asin %}
+  <form method="post" action="/products/{{ p.id }}/verify-asin" class="inline">
+    {{ hidden(csrf, nonce) }}
+    <label>ASINの対応を確認した根拠<input name="evidence" placeholder="例: Amazon商品ページで型番と一致を確認" value="{{ p.asin_evidence or '' }}" required></label>
+    <button type="submit">ASIN対応を確認済みにする</button>
+  </form>
+  {% endif %}
+  <form method="post" action="/products/{{ p.id }}/status" class="inline">
+    {{ hidden(csrf, nonce) }}
+    <select name="status">
+      <option value="active" {% if p.status == "active" %}selected{% endif %}>通常</option>
+      <option value="held" {% if p.status == "held" %}selected{% endif %}>保留</option>
+      <option value="archived" {% if p.status == "archived" %}selected{% endif %}>保管</option>
+    </select>
+    <input name="reason" placeholder="保留の理由" value="{{ p.hold_reason or '' }}">
+    <button type="submit">状態を変更</button>
+  </form>
+</section>
+
+<section class="panel" id="notes">
+  <h2>調査メモ（ドラフト作成の材料）</h2>
+  <p class="muted small">「AI入力可」のメモだけが Claude への依頼ファイルに入ります。Amazon由来・出所不明の情報はAIに渡せません。</p>
+  <ul class="rows">
+    {% for n in notes %}
+    <li>
+      <span class="badge">{{ NOTE_KINDS[n.kind] }}</span> <span class="badge">出所: {{ NOTE_ORIGINS[n.origin] }}</span>
+      {% if n.ai_input_ok %}<span class="badge ok">AI入力可</span>{% else %}<span class="badge">AI入力不可</span>{% endif %}
+      <div class="note-body">{{ n.body }}</div>
+      <span class="muted small">{% if n.source_url %}出典 {{ n.source_url }}{% endif %}{% if n.checked_on %}・確認日 {{ n.checked_on }}{% endif %}</span>
+      <form method="post" action="/notes/{{ n.id }}/ai" class="inline">{{ hidden(csrf, nonce) }}<input type="hidden" name="value" value="{{ 0 if n.ai_input_ok else 1 }}"><button class="small" type="submit">{{ "AI入力を止める" if n.ai_input_ok else "AI入力を許可" }}</button></form>
+      <form method="post" action="/notes/{{ n.id }}/archive" class="inline">{{ hidden(csrf, nonce) }}<button class="small" type="submit" data-confirm="このメモを保管しますか？">保管</button></form>
+    </li>
+    {% else %}<li class="muted">まだありません。</li>{% endfor %}
+  </ul>
+  <form method="post" action="/products/{{ p.id }}/notes" class="stack">
+    {{ hidden(csrf, nonce) }}
+    <div class="row">
+      <label>種類<select name="kind">{% for k, v in NOTE_KINDS.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+      <label>出所<select name="origin">{% for k, v in NOTE_ORIGINS.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+    </div>
+    <label>内容<textarea name="body" rows="3" required></textarea></label>
+    <div class="row">
+      <label>出典URL<input name="source_url" type="url"></label>
+      <label>確認日<input name="checked_on" type="date"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="ai_input_ok" value="1" checked> AIへの入力を許可（本人・メーカー情報のみ有効）</label>
+    <button type="submit">メモを追加</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>素材（品質と権利は別々に判定）</h2>
+  <div class="asset-grid">
+    {% for row in assets %}{% set a = row.a %}
+    <a class="asset-card" href="/assets/{{ a.id }}">
+      {% if a.storage == "private" %}<img src="/assets/{{ a.id }}/file" alt="" loading="lazy">{% else %}<div class="ph">参照のみ</div>{% endif %}
+      <span class="small">#{{ a.id }} {{ ASSET_KIND_LABELS[a.kind] }}</span>
+      <span>{{ rights_badge(a.rights_status) }} {{ quality_badge(a.quality_verdict) }}</span>
+      {% if row.problems %}<span class="small danger-text">公開不可: {{ row.problems[0] }}{% if row.problems|length > 1 %} ほか{{ row.problems|length - 1 }}件{% endif %}</span>{% else %}<span class="small ok-text">公開可</span>{% endif %}
+    </a>
+    {% else %}<p class="muted">素材はありません。</p>{% endfor %}
+  </div>
+  <form method="post" action="/products/{{ p.id }}/assets" enctype="multipart/form-data" class="inline">
+    {{ hidden(csrf, nonce) }}
+    <input type="file" name="file" accept="image/jpeg,image/png,image/webp" required>
+    <select name="kind">{% for k, v in ASSET_KIND_LABELS.items() if k not in ("reference_photo",) %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
+    <input name="title" placeholder="素材名">
+    <button type="submit">素材を追加（権利は未確認で登録）</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>取り込んだ元データ（非公開）</h2>
+  {% for r in records %}
+  <details>
+    <summary>{{ r.kind }} <span class="badge">出所: {{ NOTE_ORIGINS.get(r.origin, r.origin) }}</span> <span class="muted small">{{ r.root_alias }}/{{ r.relpath }}・{{ r.imported_at | jst }}</span></summary>
+    {% if r.origin == "amazon" %}<p class="small danger-text">Amazonページ由来の情報です。サイトへの転載・AIへの入力はできません。</p>{% endif %}
+    <dl class="kv">{% for k, v in r.data.items() %}<dt>{{ k }}</dt><dd class="pre">{{ v }}</dd>{% endfor %}</dl>
+  </details>
+  {% else %}<p class="muted">ありません。</p>{% endfor %}
+</section>
+
+<section class="panel private">
+  <h2>収集済みレビュー（本人の目視確認用・非公開）</h2>
+  <p class="small">{{ review_count }}件。ドラフトの内容がレビューと食い違っていないかを本人が確かめるためだけに表示します。サイトへの転載・要約、AI（Antigravity CLI・Claude）への入力はできません。</p>
+  {% if reviews %}
+    {% for r in reviews %}
+    <article class="review-ref"><p class="small muted">{{ r.review_date or "" }} {{ r.source_label or "" }}</p>{% if r.title %}<p><strong>{{ r.title }}</strong></p>{% endif %}<p class="pre">{{ r.body }}</p></article>
+    {% endfor %}
+  {% elif review_count %}<p><a href="/products/{{ p.id }}?reviews=1">表示する</a></p>{% endif %}
+</section>
+
+{% if holds %}
+<section class="panel notice">
+  <h2>この商品の保留</h2>
+  <ul class="rows">{% for h in holds %}<li>{{ h.reason }} <span class="muted small">{{ h.detail or "" }}</span></li>{% endfor %}</ul>
+</section>
+{% endif %}
+{% endblock %}

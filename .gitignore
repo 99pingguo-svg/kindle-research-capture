@@ -21,3 +21,9 @@ __pycache__/
 *.pyc
 .venv/
 .env
+
+# affiliate-editorial: private data, settings, builds and exports
+affiliate-editorial/var/
+*.db
+*.db-wal
+*.db-shm

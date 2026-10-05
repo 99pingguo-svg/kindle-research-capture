@@ -1,0 +1,33 @@
+{% extends "public/base.html" %}
+{% block title %}{{ page.title }}｜{{ site.name }}{% endblock %}
+{% block meta %}
+<meta name="description" content="{{ page.description }}">
+{% if page.canonical %}<link rel="canonical" href="{{ page.canonical }}">{% endif %}
+{% if page.jsonld %}<script type="application/ld+json">{{ page.jsonld }}</script>{% endif %}
+{% endblock %}
+{% block preview_banner %}{% if page.preview %}<div class="preview-banner">プレビュー（未公開）</div>{% endif %}{% endblock %}
+{% block main %}
+<article class="article page">
+  <p class="ai-label small"><span class="tag">{{ page.ai_label }}</span>{{ page.ai_disclosure }}</p>
+  <h1 class="article-title">{{ page.title }}</h1>
+  <div class="article-lead">{{ page.summary | md }}</div>
+  {% for section in page.sections %}
+  <section class="article-section" id="{{ section.key }}">
+    {% if section.heading and section.key != "body" %}<h2>{{ section.heading }}</h2>{% endif %}
+    {{ section.html }}
+  </section>
+  {% endfor %}
+  {% if about %}
+  <section class="operator-info">
+    <h2>運営者</h2>
+    <dl>
+      <dt>運営者</dt><dd>{{ about.operator }}</dd>
+      <dt>編集責任者</dt><dd>{{ about.editor }}</dd>
+      <dt>お問い合わせ</dt><dd>{% if about.contact.startswith("https://") %}<a href="{{ about.contact }}">{{ about.contact }}</a>{% else %}{{ about.contact }}{% endif %}</dd>
+    </dl>
+    {% if about.monetized %}<p>{{ site.amazon_disclosure }}</p>{% endif %}
+  </section>
+  {% endif %}
+  <p class="article-meta"><span>更新日：{{ page.modified_at | jst_date }}</span></p>
+</article>
+{% endblock %}

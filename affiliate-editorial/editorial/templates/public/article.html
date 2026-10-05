@@ -1,0 +1,79 @@
+{% extends "public/base.html" %}
+{% block title %}{{ page.title }}｜{{ site.name }}{% endblock %}
+{% block meta %}
+<meta name="description" content="{{ page.description }}">
+{% if page.canonical %}<link rel="canonical" href="{{ page.canonical }}">{% endif %}
+<meta property="og:type" content="article">
+<meta property="og:title" content="{{ page.title }}">
+<meta property="og:description" content="{{ page.description }}">
+{% if page.canonical %}<meta property="og:url" content="{{ page.canonical }}">{% endif %}
+{% if page.og_image %}<meta property="og:image" content="{{ page.og_image }}">{% endif %}
+{% if page.jsonld %}<script type="application/ld+json">{{ page.jsonld }}</script>{% endif %}
+{% endblock %}
+{% block preview_banner %}{% if page.preview %}<div class="preview-banner">プレビュー（未公開）</div>{% endif %}{% endblock %}
+{% block main %}
+<article class="article">
+  <div class="disclosure-box" role="note">
+    {% if page.ad_label %}<p class="ad-label"><span class="tag">広告</span>{{ page.ad_label }}</p>{% endif %}
+    <p class="ai-label"><span class="tag">{{ page.ai_label }}</span>{{ page.ai_disclosure }}</p>
+    {% if page.relationship_note %}<p class="relationship-note"><span class="tag">提供・依頼</span>{{ page.relationship_note }}</p>{% endif %}
+  </div>
+
+  <h1 class="article-title">{{ page.title }}</h1>
+  <p class="article-meta">
+    {% if page.info_checked_on %}<span>情報確認日：{{ page.info_checked_on }}</span>{% endif %}
+    <span>更新日：{{ page.modified_at | jst_date }}</span>
+    {% if page.basis %}<span>記事の種類：{{ page.basis }}</span>{% endif %}
+  </p>
+  <div class="article-lead">{{ page.summary | md }}</div>
+
+  {% include "public/_card.html" %}
+
+  {% for section in page.sections %}
+  <section class="article-section" id="{{ section.key }}">
+    <h2>{{ section.heading }}</h2>
+    {{ section.html }}
+  </section>
+  {% if loop.first and page.figures %}
+  <div class="figures">
+    {% for fig in page.figures %}
+    <figure class="figure{% if fig.fictional %} figure-fictional{% endif %}">
+      {% if fig.crop %}
+      <div class="crop" style="{{ fig.crop.wrapper }}"><img src="{{ fig.src }}" alt="{{ fig.alt }}" style="{{ fig.crop.img }}" loading="lazy" decoding="async"></div>
+      {% else %}
+      <img src="{{ fig.src }}" alt="{{ fig.alt }}"{% if fig.width %} width="{{ fig.width }}" height="{{ fig.height }}"{% endif %} loading="lazy" decoding="async">
+      {% endif %}
+      <figcaption>
+        {% if fig.fictional %}<span class="fictional-note">架空の使用場面を描いたイメージです。実際の商品仕様を示すものではありません。</span>{% endif %}
+        {{ fig.caption }}
+        {% if fig.warning %}<span class="preview-warning">（公開時は非表示：{{ fig.warning }}）</span>{% endif %}
+      </figcaption>
+    </figure>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endfor %}
+
+  {% if page.cards %}
+  <div class="article-bottom-links">
+    {% for card in page.cards %}
+    <a class="product-card-button" href="{{ card.url }}" rel="{{ card.rel }}" target="_blank">{{ card.name }}をAmazonで見る</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if page.evidence %}
+  <section class="sources">
+    <h2>確認した情報源</h2>
+    <ul>
+      {% for e in page.evidence %}
+      <li>{{ e.kind }}：{% if e.is_url %}<a href="{{ e.source }}" rel="nofollow noopener" target="_blank">{{ e.source }}</a>{% else %}{{ e.source }}{% endif %}{% if e.checked_on %}（{{ e.checked_on }}確認）{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if page.amazon_disclosure %}<p class="article-disclosure">{{ page.amazon_disclosure }}</p>{% endif %}
+  <p class="article-correction">内容に誤りを見つけた場合は、<a href="/about/">運営者情報</a>の窓口からお知らせください。確認のうえ訂正します。</p>
+</article>
+{% endblock %}

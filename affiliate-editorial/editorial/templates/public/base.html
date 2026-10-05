@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ site.name }}{% endblock %}</title>
+{% block meta %}{% endblock %}
+{% if page is defined and page.preview %}<meta name="robots" content="noindex, nofollow">{% endif %}
+<link rel="stylesheet" href="/assets/site.css">
+<script src="/assets/amzn-expiry.js" defer></script>
+</head>
+<body>
+{% block preview_banner %}{% endblock %}
+<header class="site-header">
+  <a class="site-name" href="/">{{ site.name }}</a>
+  {% if site.tagline %}<p class="site-tagline">{{ site.tagline }}</p>{% endif %}
+</header>
+<main class="site-main">
+{% block main %}{% endblock %}
+</main>
+<footer class="site-footer">
+  <nav class="footer-nav" aria-label="サイト情報">
+    <a href="/about/">運営者情報</a>
+    <a href="/privacy/">プライバシーポリシー</a>
+  </nav>
+  {% if site.monetized %}<p class="footer-disclosure">{{ site.amazon_disclosure }}</p>{% endif %}
+  <p class="footer-ai">このサイトの記事の文章は生成AIを使って作成・整形し、運営者が確認して公開しています。</p>
+  <p class="footer-copy">&copy; {{ site.year }} {{ site.operator }}</p>
+</footer>
+</body>
+</html>

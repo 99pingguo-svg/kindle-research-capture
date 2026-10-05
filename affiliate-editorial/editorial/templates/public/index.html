@@ -1,0 +1,25 @@
+{% extends "public/base.html" %}
+{% block meta %}
+<meta name="description" content="{{ site.tagline or site.name }}">
+{% if canonical %}<link rel="canonical" href="{{ canonical }}">{% endif %}
+{% endblock %}
+{% block main %}
+<section class="intro">
+  <h1>{{ site.name }}</h1>
+  {% if site.rating_concept %}<p class="concept">{{ site.rating_concept }}</p>{% endif %}
+  {% if site.monetized %}<p class="index-disclosure">当サイトの記事にはアフィリエイト広告（Amazonアソシエイト）を含みます。</p>{% endif %}
+</section>
+<ul class="article-list">
+  {% for item in items %}
+  <li>
+    <a href="{{ item.path }}">
+      <span class="item-title">{{ item.title }}</span>
+      <span class="item-summary">{{ item.description }}</span>
+      <span class="item-date">更新日：{{ item.modified_at | jst_date }}</span>
+    </a>
+  </li>
+  {% else %}
+  <li class="empty">公開中の記事はまだありません。</li>
+  {% endfor %}
+</ul>
+{% endblock %}

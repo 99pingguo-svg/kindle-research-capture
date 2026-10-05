@@ -1,0 +1,18 @@
+{% extends "admin/base.html" %}
+{% block title %}変更履歴{% endblock %}
+{% block content %}
+<h1>変更履歴</h1>
+<p class="small">誰が・いつ・何を変えたかの記録です（最新300件）。</p>
+<div class="table-wrap">
+<table class="table small">
+  <thead><tr><th>日時（日本時間）</th><th>実行者</th><th>対象</th><th>操作</th><th>内容</th></tr></thead>
+  <tbody>
+  {% for e in rows %}
+  <tr><td>{{ e.ts | jst(false) }}</td><td>{{ e.actor_kind }}:{{ e.actor }}</td>
+    <td>{% if e.entity_type == "article" %}<a href="/articles/{{ e.entity_id }}">記事#{{ e.entity_id }}</a>{% elif e.entity_type == "asset" %}<a href="/assets/{{ e.entity_id }}">素材#{{ e.entity_id }}</a>{% elif e.entity_type == "product" %}<a href="/products/{{ e.entity_id }}">商品#{{ e.entity_id }}</a>{% else %}{{ e.entity_type }} {{ e.entity_id or "" }}{% endif %}</td>
+    <td>{{ e.action }}</td><td class="mono small break">{{ e.data_json[:300] }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

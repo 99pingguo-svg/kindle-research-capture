@@ -1,0 +1,36 @@
+{
+  "data_dir": "var",
+  "source_roots": {
+    "O": "/Users/<name>/path/to/O（引継ぎフォルダ）",
+    "OP": "/Users/<name>/path/to/Oの親フォルダ",
+    "R": "/Users/<name>/path/to/R（正式画像の台帳があるフォルダ）",
+    "S": "/Users/<name>/path/to/S（画像制作の共有フォルダ）"
+  },
+  "access_guide": "/Users/<name>/path/to/アクセス案内.md",
+  "admin": {
+    "host": "127.0.0.1",
+    "port": 8710,
+    "secure_cookies": false,
+    "run_scheduler": false
+  },
+  "amazon": {
+    "enabled": false,
+    "credential_id": "",
+    "version": "3.3",
+    "marketplace": "www.amazon.co.jp"
+  },
+  "polish": {
+    "command": [
+      "agy",
+      "-p",
+      "{prompt}"
+    ],
+    "input_mode": "arg",
+    "timeout_sec": 600,
+    "require_for_publish": true
+  },
+  "publish": {
+    "target": "local_dir",
+    "keep_builds": 5
+  }
+}

@@ -1,0 +1,17 @@
+{% for card in page.cards %}
+<aside class="product-card" aria-label="商品情報">
+  {% if card.image %}
+  <a class="product-card-image" href="{{ card.url }}" rel="{{ card.rel }}" target="_blank" data-amzn-expires="{{ card.image.expires }}">
+    <img src="{{ card.image.src }}" alt="{{ card.name }}（Amazon.co.jpの商品画像）"{% if card.image.width %} width="{{ card.image.width }}" height="{{ card.image.height }}"{% endif %} loading="lazy" decoding="async">
+  </a>
+  {% endif %}
+  <div class="product-card-body">
+    <p class="product-card-name">{{ card.name }}</p>
+    {% if card.rating %}
+    <p class="product-card-rating" data-amzn-expires="{{ card.rating.expires }}">Amazon.co.jpでの評価：5点中 {{ card.rating.value }}{% if card.rating.count %}（{{ "{:,}".format(card.rating.count) }}件）{% endif %}<span class="as-of">{{ card.rating.as_of }}時点</span></p>
+    {% endif %}
+    <p class="product-card-note">価格・在庫・最新の情報はAmazonの商品ページでご確認ください。</p>
+    <a class="product-card-button" href="{{ card.url }}" rel="{{ card.rel }}" target="_blank">Amazonで詳細を見る</a>
+  </div>
+</aside>
+{% endfor %}

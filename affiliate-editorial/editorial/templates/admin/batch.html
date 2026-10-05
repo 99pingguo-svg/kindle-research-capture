@@ -1,0 +1,48 @@
+{% extends "admin/base.html" %}
+{% from "admin/_macros.html" import hidden %}
+{% block title %}一括承認{% endblock %}
+{% block content %}
+<h1>一括承認</h1>
+<p>確認待ちの記事のうち、必須の判定を満たすものをまとめて承認できます。承認されるのは、下に表示している<strong>版とハッシュ</strong>そのものです。表示後に記事が変わった場合は、何も承認されません。</p>
+
+<section class="panel">
+  <h2>承認できる記事（{{ c.eligible | length }}件）</h2>
+  {% if c.eligible %}
+  <form method="post" action="/approve-batch" data-batch>
+    {{ hidden(csrf, nonce) }}
+    <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>選ぶ</th><th>記事</th><th>商品</th><th>版</th><th>注意事項</th></tr></thead>
+      <tbody>
+      {% for e in c.eligible %}
+      <tr>
+        <td><input type="checkbox" name="item" value="{{ e.article_id }}:{{ e.version_id }}:{{ e.content_hash }}" checked aria-label="{{ e.title }}を選ぶ"></td>
+        <td><a href="/articles/{{ e.article_id }}">{{ e.title }}</a></td>
+        <td>{% for p in e.products %}{{ p.name }} <span class="mono small">{{ p.asin }}</span>{% if not loop.last %}、{% endif %}{% endfor %}</td>
+        <td>版{{ e.version_no }} <span class="mono small">{{ e.content_hash[:10] }}</span></td>
+        <td>{% if e.warnings %}<ul class="small">{% for w in e.warnings %}<li>{{ w.message }}</li>{% endfor %}</ul>{% else %}<span class="muted">なし</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p>除外：{{ c.excluded | length }}件（うち素材の権利保留 {{ c.excluded_rights_count }}件）</p>
+    <label class="check"><input type="checkbox" name="ack_all" value="1" required> 上に表示された注意事項をすべて確認しました</label>
+    <label>承認する件数を入力してください（確認のため）<input name="confirm_count" inputmode="numeric" class="short" required data-batch-count></label>
+    <button type="submit" class="primary wide" data-confirm="選んだ記事をまとめて承認しますか？">選んだ記事を承認する</button>
+  </form>
+  {% else %}<p class="muted">ありません。</p>{% endif %}
+</section>
+
+{% if c.excluded %}
+<section class="panel notice">
+  <h2>除外した記事（{{ c.excluded | length }}件）</h2>
+  <ul class="rows">
+    {% for e in c.excluded %}
+    <li><a href="/articles/{{ e.article_id }}">{{ e.title }}</a>（版{{ e.version_no }}）{% if e.rights_hold %}<span class="badge warn">権利保留</span>{% endif %}
+      <ul class="small">{% for b in e.blocks[:4] %}<li>{{ b.message }}</li>{% endfor %}{% if e.blocks|length > 4 %}<li>ほか{{ e.blocks|length - 4 }}件</li>{% endif %}</ul></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}

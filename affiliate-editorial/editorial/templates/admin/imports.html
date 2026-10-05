@@ -1,0 +1,30 @@
+{% extends "admin/base.html" %}
+{% block title %}取り込み{% endblock %}
+{% block content %}
+<h1>取り込み</h1>
+<section class="panel">
+  <h2>取り込み元（読み取り専用）</h2>
+  {% if roots %}
+  <ul class="rows">{% for alias, ok in roots.items() %}<li>{{ alias }}：{% if ok %}<span class="badge ok">接続中</span>{% else %}<span class="badge danger">未接続</span>（Macの接続やフォルダを確認してください）{% endif %}</li>{% endfor %}</ul>
+  {% else %}<p class="muted">設定ファイルに取り込み元がありません。</p>{% endif %}
+  <p class="small">取り込みはMac上のコマンドで行います（例: <code>python3 -m editorial survey</code> で形式を確認 → <code>python3 -m editorial import --asins …</code>）。</p>
+</section>
+<section class="panel">
+  <h2>取り込みの記録</h2>
+  <ul class="rows">
+    {% for r in runs %}
+    <li>#{{ r.id }} {{ r.mode }} {{ r.status }} — {{ r.started_at | jst }}
+      <span class="small muted">素材追加 {{ r.summary.get("assets_added", 0) }}・保留 {{ r.summary.get("holds", 0) }}・変更なし {{ r.summary.get("unchanged_files", 0) }}{% if r.summary.get("error") %}・{{ r.summary.error }}{% endif %}</span></li>
+    {% else %}<li class="muted">ありません。</li>{% endfor %}
+  </ul>
+</section>
+<section class="panel">
+  <h2>ファイルの記録（相対パス・サイズ・ハッシュ）</h2>
+  <div class="table-wrap">
+  <table class="table small">
+    <thead><tr><th>場所</th><th>サイズ</th><th>ハッシュ</th><th>結果</th><th>更新</th></tr></thead>
+    <tbody>{% for f in files %}<tr><td class="mono">{{ f.root_alias }}/{{ f.relpath }}</td><td>{{ f.size }}</td><td class="mono">{{ (f.sha256 or "")[:12] }}</td><td>{{ f.last_result }}</td><td>{{ f.updated_at | jst(false) }}</td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}

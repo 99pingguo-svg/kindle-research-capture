@@ -1,0 +1,31 @@
+{% macro state_badge(state) -%}
+<span class="badge state-{{ state }}">{{ STATE_LABELS.get(state, state) }}</span>
+{%- endmacro %}
+
+{% macro pub_badge(status) -%}
+{% if status != "unpublished" %}<span class="badge pub-{{ status }}">{{ PUBLICATION_LABELS.get(status, status) }}</span>{% endif %}
+{%- endmacro %}
+
+{% macro rights_badge(status) -%}
+<span class="badge rights-{{ status }}">{{ RIGHTS_LABELS.get(status, status) }}</span>
+{%- endmacro %}
+
+{% macro quality_badge(verdict) -%}
+<span class="badge quality-{{ verdict }}">{{ QUALITY_LABELS.get(verdict, verdict) }}</span>
+{%- endmacro %}
+
+{% macro hidden(csrf, nonce) -%}
+<input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="_nonce" value="{{ nonce }}">
+{%- endmacro %}
+
+{% macro yesno(value) -%}
+{% if value == 1 %}<span class="yes">可</span>{% elif value == 0 %}<span class="no">不可</span>{% else %}<span class="unknown">未確認</span>{% endif %}
+{%- endmacro %}
+
+{% macro tristate_select(name, value) -%}
+<select name="{{ name }}">
+  <option value="" {% if value is none %}selected{% endif %}>未確認</option>
+  <option value="1" {% if value == 1 %}selected{% endif %}>可</option>
+  <option value="0" {% if value == 0 %}selected{% endif %}>不可</option>
+</select>
+{%- endmacro %}

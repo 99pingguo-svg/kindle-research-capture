@@ -1,0 +1,24 @@
+{% extends "admin/base.html" %}
+{% from "admin/_macros.html" import hidden %}
+{% block title %}保留一覧{% endblock %}
+{% block content %}
+<h1>保留一覧</h1>
+<p class="small">由来・商品との対応・ファイル形式が確認できなかったものです。推測で取り込まず、ここに残しています。</p>
+<p><a href="/holds?all=1">解決済みも表示</a></p>
+<div class="table-wrap">
+<table class="table">
+  <thead><tr><th>対象</th><th>理由</th><th>詳細</th><th>日時</th><th></th></tr></thead>
+  <tbody>
+  {% for h in rows %}
+  <tr>
+    <td><span class="badge">{{ {"product":"商品","asset":"素材","file":"ファイル"}.get(h.entity_type, h.entity_type) }}</span> <span class="mono small">{{ h.entity_key }}</span></td>
+    <td>{{ h.reason }}</td>
+    <td class="small">{{ h.detail or "" }}</td>
+    <td class="small">{{ h.created_at | jst }}</td>
+    <td>{% if not h.resolved_at %}<form method="post" action="/holds/{{ h.id }}/resolve" class="inline">{{ hidden(csrf, nonce) }}<input name="note" placeholder="対応メモ" class="short"><button type="submit" class="small">解決済み</button></form>{% else %}<span class="muted small">解決済み</span>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="5" class="muted">保留はありません。</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

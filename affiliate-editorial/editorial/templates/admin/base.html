@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>{% block title %}編集管理{% endblock %}｜編集管理</title>
+<link rel="stylesheet" href="/static/admin.css">
+<script src="/static/admin.js" defer></script>
+</head>
+<body class="{% block body_class %}{% endblock %}">
+<header class="topbar">
+  <a class="brand" href="/">編集管理</a>
+  <nav class="mainnav" aria-label="メニュー">
+    <a href="/" {% if path == "/" %}aria-current="page"{% endif %}>ホーム</a>
+    <a href="/queue" {% if path.startswith("/queue") or path.startswith("/articles") %}aria-current="page"{% endif %}>記事{% if counts.review %}<span class="count">{{ counts.review }}</span>{% endif %}</a>
+    <a href="/products" {% if path.startswith("/products") or path.startswith("/assets") %}aria-current="page"{% endif %}>商品・素材</a>
+    <a href="/approve-batch" {% if path.startswith("/approve-batch") %}aria-current="page"{% endif %}>一括承認</a>
+    <a href="/jobs" {% if path.startswith("/jobs") %}aria-current="page"{% endif %}>公開ジョブ{% if counts.failed %}<span class="count warn">{{ counts.failed }}</span>{% endif %}</a>
+    <a href="/holds" {% if path.startswith("/holds") %}aria-current="page"{% endif %}>保留{% if counts.holds %}<span class="count">{{ counts.holds }}</span>{% endif %}</a>
+    <a href="/imports" {% if path.startswith("/imports") %}aria-current="page"{% endif %}>取り込み</a>
+    <a href="/policy" {% if path.startswith("/policy") %}aria-current="page"{% endif %}>規約確認</a>
+    <a href="/settings" {% if path.startswith("/settings") %}aria-current="page"{% endif %}>設定</a>
+    <a href="/events" {% if path.startswith("/events") %}aria-current="page"{% endif %}>履歴</a>
+  </nav>
+  <form method="post" action="/logout" class="logout">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <button type="submit" class="link">ログアウト（{{ user }}）</button>
+  </form>
+</header>
+{% if flash %}<div class="flash {% if flash.startswith('⚠') %}flash-error{% endif %}" role="status">{{ flash }}</div>{% endif %}
+<main class="{% block main_class %}page{% endblock %}">
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

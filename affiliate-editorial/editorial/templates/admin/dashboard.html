@@ -1,0 +1,68 @@
+{% extends "admin/base.html" %}
+{% from "admin/_macros.html" import state_badge, pub_badge %}
+{% block title %}ホーム{% endblock %}
+{% block content %}
+<h1>ホーム</h1>
+
+{% if setup %}
+<section class="panel notice">
+  <h2>準備が必要なこと</h2>
+  <ul>{% for s in setup %}<li>{{ s }}</li>{% endfor %}</ul>
+  <p><a href="/settings">設定へ</a>・<a href="/policy">規約確認へ</a></p>
+</section>
+{% endif %}
+
+<section class="stats">
+  {% for st in ["draft","review","changes","approved","scheduled","published","error"] %}
+  <a class="stat" href="/queue#{{ st }}"><span class="stat-num">{{ by_state.get(st, 0) }}</span><span class="stat-label">{{ STATE_LABELS[st] }}</span></a>
+  {% endfor %}
+  <div class="stat"><span class="stat-num">{{ live }}</span><span class="stat-label">公開中</span></div>
+</section>
+
+<section class="panel">
+  <h2>確認が必要な記事</h2>
+  {% if queue %}
+  <ul class="rows">
+    {% for a in queue %}
+    <li><a href="/articles/{{ a.id }}">{{ a.title }}</a> {{ state_badge(a.state) }} {{ pub_badge(a.publication_status) }}
+      <span class="muted small">版{{ a.head_no }}・{{ a.updated_at | jst }}</span></li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="muted">ありません。</p>{% endif %}
+</section>
+
+<section class="panel">
+  <h2>予約中の公開</h2>
+  {% if scheduled %}
+  <ul class="rows">{% for j in scheduled %}<li><a href="/articles/{{ j.article_id }}">{{ j.slug }}</a> — {{ j.run_at | jst }}（ジョブ#{{ j.id }}）</li>{% endfor %}</ul>
+  {% else %}<p class="muted">ありません。</p>{% endif %}
+</section>
+
+{% if failed %}
+<section class="panel danger">
+  <h2>失敗した公開ジョブ</h2>
+  <ul class="rows">{% for j in failed %}<li>#{{ j.id }} {{ JOB_ACTIONS[j.action] }} — {{ j.last_error }} <a href="/jobs">確認する</a></li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if expiring %}
+<section class="panel notice">
+  <h2>30日以内に許諾期限が来る素材</h2>
+  <ul class="rows">{% for a in expiring %}<li><a href="/assets/{{ a.id }}">#{{ a.id }} {{ a.title or "" }}</a> — {{ a.license_expires_at | jst }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>Amazonデータ（24時間ルール）</h2>
+  <p>記事で使っているASIN：{{ live_asins | length }}件、24時間以内のデータがないもの：{{ stale | length }}件</p>
+  {% if stale %}<p class="muted small">データがない商品は、画像・星評価なしのテキストリンクで表示されます。<a href="/jobs">公開ジョブ</a>から定期更新を実行できます。</p>{% endif %}
+</section>
+
+{% if policy_due %}
+<section class="panel notice">
+  <h2>確認が必要な規約・ガイドライン</h2>
+  <ul class="rows">{% for p in policy_due %}<li>{{ p.key }} {{ p.title }} — {{ p.status }}</li>{% endfor %}</ul>
+  <p><a href="/policy">規約確認の記録へ</a></p>
+</section>
+{% endif %}
+{% endblock %}

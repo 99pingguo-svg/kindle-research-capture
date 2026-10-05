@@ -1,0 +1,31 @@
+{% extends "admin/base.html" %}
+{% from "admin/_macros.html" import state_badge, pub_badge, hidden %}
+{% block title %}記事{% endblock %}
+{% block content %}
+<div class="title-row">
+  <h1>記事</h1>
+  <a class="button" href="/articles/new">記事を作る</a>
+</div>
+{% for label, rows in groups %}
+<section class="panel" id="{{ label }}">
+  <h2>{{ label }}（{{ rows | length }}）</h2>
+  {% if rows %}
+  <ul class="rows">
+    {% for a in rows %}
+    <li>
+      <a href="/articles/{{ a.id }}">{{ a.title }}</a>
+      {{ state_badge(a.state) }} {{ pub_badge(a.publication_status) }}
+      <span class="muted small">{{ KIND_LABELS[a.kind] }}・版{{ a.head_no }}（{{ AUTHOR_LABELS.get(a.head_author, a.head_author) }}）・{{ a.updated_at | jst }}
+      {% for p in a.products %}・<span class="mono">{{ p.asin or p.name }}</span>{% endfor %}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="muted">ありません。</p>{% endif %}
+</section>
+{% endfor %}
+<details class="panel">
+  <summary>Claude への依頼ファイルを書き出す</summary>
+  <p class="small">下書き・修正待ちの記事について、修正指示と「AI入力可」の調査メモだけを書き出します。収集済みレビューやAmazonのデータは含めません。</p>
+  <form method="post" action="/bridge/export">{{ hidden(csrf, nonce) }}<button type="submit">書き出す</button></form>
+</details>
+{% endblock %}

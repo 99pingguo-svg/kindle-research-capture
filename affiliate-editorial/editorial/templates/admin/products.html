@@ -1,0 +1,58 @@
+{% extends "admin/base.html" %}
+{% from "admin/_macros.html" import state_badge, pub_badge, hidden %}
+{% block title %}商品・素材{% endblock %}
+{% block content %}
+<h1>商品・素材</h1>
+<form class="filters" method="get" action="/products">
+  <input name="q" value="{{ f.q }}" placeholder="商品名・ASIN・既存ID" aria-label="検索">
+  <select name="state" aria-label="記事の状態">
+    <option value="">記事の状態（すべて）</option>
+    <option value="none" {% if f.state == "none" %}selected{% endif %}>記事なし</option>
+    {% for k, v in STATE_LABELS.items() %}<option value="{{ k }}" {% if f.state == k %}selected{% endif %}>{{ v }}</option>{% endfor %}
+  </select>
+  <select name="rights" aria-label="素材の権利">
+    <option value="">素材の権利（すべて）</option>
+    <option value="unverified" {% if f.rights == "unverified" %}selected{% endif %}>未確認の素材あり</option>
+    <option value="blocked" {% if f.rights == "blocked" %}selected{% endif %}>公開不可・期限切れあり</option>
+    <option value="verified" {% if f.rights == "verified" %}selected{% endif %}>すべて確認済み</option>
+  </select>
+  <select name="status" aria-label="商品の状態">
+    <option value="">商品の状態（すべて）</option>
+    <option value="active" {% if f.status == "active" %}selected{% endif %}>通常</option>
+    <option value="held" {% if f.status == "held" %}selected{% endif %}>保留</option>
+    <option value="archived" {% if f.status == "archived" %}selected{% endif %}>保管</option>
+  </select>
+  <button type="submit">絞り込む</button>
+</form>
+
+<div class="table-wrap">
+<table class="table">
+  <thead><tr><th>商品</th><th>ASIN</th><th>既存ID</th><th>記事</th><th>素材の権利</th><th>状態</th></tr></thead>
+  <tbody>
+  {% for p in rows %}
+  <tr>
+    <td><a href="/products/{{ p.id }}">{{ p.name }}</a></td>
+    <td class="mono">{{ p.asin or "—" }}{% if p.asin and not p.asin_verified_at %} <span class="badge warn">未確認</span>{% endif %}</td>
+    <td class="mono">{{ p.legacy_id or "—" }}</td>
+    <td>{% if p.article_state %}<a href="/articles/{{ p.article_id }}">{{ state_badge(p.article_state) }}</a> {{ pub_badge(p.publication_status) }}{% else %}<span class="muted">なし</span>{% endif %}</td>
+    <td>{{ p.assets_verified }}/{{ p.asset_count }} 確認済み{% if p.assets_blocked %} <span class="badge danger">不可{{ p.assets_blocked }}</span>{% endif %}</td>
+    <td>{% if p.status == "held" %}<span class="badge warn">保留</span> <span class="small">{{ p.hold_reason }}</span>{% elif p.status == "archived" %}<span class="badge">保管</span>{% else %}通常{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="muted">該当する商品はありません。</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<details class="panel">
+  <summary>商品を手動で登録する</summary>
+  <form method="post" action="/products/new" class="stack">
+    {{ hidden(csrf, nonce) }}
+    <label>商品名<input name="name" required></label>
+    <label>ASIN（分かる場合）<input name="asin" class="mono" pattern="[A-Za-z0-9]{10}" autocapitalize="characters"></label>
+    <label>既存ID<input name="legacy_id"></label>
+    <button type="submit" class="primary">登録する</button>
+  </form>
+</details>
+{% endblock %}
