@@ -2,6 +2,7 @@
 # ログイン時に商品台帳サーバー（scripts/start-lan.sh）を自動起動し、落ちたら自動で再起動する（ユーザー単位の LaunchAgent）。
 # 使い方: scripts/install-launchd.sh             登録して今すぐ起動（再実行すると設定を作り直す）
 #         scripts/install-launchd.sh --uninstall 停止して登録を外す
+#         SHOHIN_HOST=127.0.0.1 scripts/install-launchd.sh   Wi-Fi に公開せず Tailscale 経由だけにする（start-lan.sh 参照）
 # ログ: ~/Library/Logs/shohin-daicho.log
 set -eu
 
@@ -37,7 +38,7 @@ cat > "$PLIST" <<EOF
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>PATH</key>
-		<string>$(dirname "$NODE"):/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<string>$(dirname "$NODE"):/usr/bin:/bin:/usr/sbin:/sbin</string>$([ -n "${SHOHIN_HOST:-}" ] && printf '\n\t\t<key>SHOHIN_HOST</key>\n\t\t<string>%s</string>' "$SHOHIN_HOST")
 	</dict>
 	<key>WorkingDirectory</key>
 	<string>$APP</string>

@@ -44,6 +44,15 @@ tailscale serve --bg https+insecure://localhost:8443   # tailnet 内のみ（Fun
 
 iPhone では `https://<mac名>.<tailnet>.ts.net/?token=<~/.shohin-daicho/token>` を一度開きます（ts.net の証明書は本物なので、自前 CA の信頼設定は不要）。初回は Tailscale 管理画面で Serve/HTTPS の有効化を求められます。解除は `tailscale serve --https=443 off`。
 
+Tailscale だけで使う（Wi-Fi 内には公開しない）場合は、HTTPS 入口も Mac 内に閉じます:
+
+```bash
+SHOHIN_HOST=127.0.0.1 scripts/install-launchd.sh
+tailscale serve --bg https+insecure://127.0.0.1:8443
+```
+
+Wi-Fi 公開に戻すときは `scripts/install-launchd.sh`（SHOHIN_HOST なし）で再登録します。
+
 ### Tailscale を使わない場合（同じ Wi-Fi 内・HTTPS・外部サービスなし）
 
 Mac 標準の openssl で自分専用の証明書を作り、アプリ内カメラが使える HTTPS で開きます。

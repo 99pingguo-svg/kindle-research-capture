@@ -10,7 +10,8 @@ for f in server.crt server.key token; do
   [ -f "$D/$f" ] || { echo "$D/$f がありません。先に scripts/make-lan-cert.sh を実行してください" >&2; exit 1; }
 done
 
-export HOST=:: TLS_CERT="$D/server.crt" TLS_KEY="$D/server.key"
+# SHOHIN_HOST=127.0.0.1 にすると Wi-Fi への公開をやめ、この Mac の中（＝Tailscale serve 経由）からだけ受け付ける。
+export HOST="${SHOHIN_HOST:-::}" TLS_CERT="$D/server.crt" TLS_KEY="$D/server.key"
 INVENTORY_TOKEN="$(cat "$D/token")"
 export INVENTORY_TOKEN
 exec node server/index.js
