@@ -40,6 +40,7 @@ function newProduct(id, at, settings) {
     color: '',
     conditionNote: '',
     notes: '',
+    itemDate: '',
     purchaseDate: '',
     purchasePrice: null,
     plannedPrice: null,
