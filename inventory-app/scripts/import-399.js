@@ -322,7 +322,31 @@ function saveState(state) {
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 1));
 }
 
+/** One run at a time (a manual run and the scheduled morning/evening run may overlap). */
+function acquireLock() {
+  const lock = path.join(IMPORT_DIR, '.sync.lock');
+  fs.mkdirSync(IMPORT_DIR, { recursive: true });
+  try {
+    const pid = Number(fs.readFileSync(lock, 'utf8'));
+    if (pid && pid !== process.pid) {
+      try {
+        process.kill(pid, 0);
+        console.log(`別の同期（pid ${pid}）が実行中のため終了します`);
+        process.exit(0);
+      } catch {
+        /* stale lock from a crashed run */
+      }
+    }
+  } catch {
+    /* no lock */
+  }
+  fs.writeFileSync(lock, String(process.pid));
+  process.on('exit', () => fs.rmSync(lock, { force: true }));
+}
+
 async function main() {
+  if (!DRY) acquireLock();
+  console.log(`[${new Date().toLocaleString('ja-JP')}] 同期開始`);
   const rows = parseCsv(fs.readFileSync(SRC.assignment, 'utf8'));
   const audit = new Map(readJson(SRC.audit).map((a) => [a.asin, a]));
   const ledger = new Map(readJson(SRC.ledger).records.map((r) => [r.asin, r]));

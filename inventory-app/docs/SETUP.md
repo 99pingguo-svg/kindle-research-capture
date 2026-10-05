@@ -136,3 +136,5 @@ node scripts/import-399.js --dry-run  # 件数だけ確認（何も書かない�
 - 再実行で、差し替わった採用画像（指紋 sha256 で判定）は新版に置き換え（旧版は残す）、原稿の変更は取り込み時のままの項目だけ更新。あなたが確定（🔒）した項目は「提案」になる。
 - 変化はアプリの「⋯ → 📒 更新台帳」と `data/imports/update-ledger.csv` に記録。メルカリに入れた版が変わった商品は、商品画面にも「メルカリ側の更新が必要」と出る。
 - メルカリの状況（出品中・取引中・売却済み）は「メルカリの状況を確認して」と頼んだときだけ Claude が確認して反映する（手順は `.claude/skills/mercari-adapter/SKILL.md`）。
+
+自動同期（任意）: `scripts/install-sync-schedule.sh` で毎日 7:00・14:20・18:00 に上の同期を実行（ローカル実行のみ・Claude は使わない。時刻は `SYNC_TIMES="7:00 18:00"` で変更、解除は `--uninstall`、今すぐ1回は `--run-now`）。初回は macOS が node の「書類」フォルダへのアクセス許可を求めるので「許可」する。ログは `~/Library/Logs/shohin-daicho-sync.log`。
