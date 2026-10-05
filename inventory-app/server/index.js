@@ -411,6 +411,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const dataDir = path.resolve(process.env.INVENTORY_DATA || path.join(ROOT, 'data'));
   const port = Number(process.env.PORT || 8787);
   const host = process.env.HOST || '127.0.0.1';
+  const anyHost = host === '0.0.0.0' || host === '::'; // '::' listens on IPv6 and IPv4 at once
   const token = process.env.INVENTORY_TOKEN || '';
   const { handler, trustedHandler } = createApp({ dataDir, token });
   const tls = process.env.TLS_CERT && process.env.TLS_KEY ? { cert: fs.readFileSync(process.env.TLS_CERT), key: fs.readFileSync(process.env.TLS_KEY) } : null;
@@ -419,11 +420,21 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     // and plain HTTP on 127.0.0.1 for Claude / MCP on this Mac, so .mcp.json and ai-worker.sh keep working unchanged.
     if (host !== '127.0.0.1' && !token) throw new Error('HTTPS を LAN に公開するときは INVENTORY_TOKEN が必要です');
     const tlsPort = Number(process.env.TLS_PORT || 8443);
-    https.createServer(tls, handler).listen(tlsPort, host, () => {
-      console.log(`商品台帳 起動（HTTPS・iPhone用）: https://${host === '0.0.0.0' ? 'localhost' : host}:${tlsPort}`);
+    // ACCESS_LOG=1 prints each LAN request's start and end (token masked), to see what a phone actually asked for.
+    const lanHandler = process.env.ACCESS_LOG ? (req, res) => {
+      const t0 = Date.now();
+      const what = `${req.socket.remoteAddress} ${req.method} ${req.url.replace(/token=[^&]+/, 'token=…')}`;
+      console.log(`→ ${what}`);
+      res.on('close', () => console.log(`← ${what} ${res.writableFinished ? res.statusCode : '中断'} ${Date.now() - t0}ms`));
+      return handler(req, res);
+    } : handler;
+    const lanServer = https.createServer(tls, lanHandler);
+    lanServer.on('tlsClientError', (err, socket) => console.log(`TLS エラー ${socket.remoteAddress || '?'}: ${err.code || ''} ${err.message}`));
+    lanServer.listen(tlsPort, host, () => {
+      console.log(`商品台帳 起動（HTTPS・iPhone用）: https://${anyHost ? 'localhost' : host}:${tlsPort}`);
       // Show the names the certificate is valid for; opening by IP would fail the iPhone's certificate check.
       const names = (new X509Certificate(tls.cert).subjectAltName || '').split(', ').filter((s) => s.startsWith('DNS:')).map((s) => s.slice(4));
-      if (host === '0.0.0.0') for (const n of names.length ? names : lanAddresses()) console.log(`  LAN:   https://${n}:${tlsPort}${token ? '/?token=…' : ''}`);
+      if (anyHost) for (const n of names.length ? names : lanAddresses()) console.log(`  LAN:   https://${n}:${tlsPort}${token ? '/?token=…' : ''}`);
     });
     http.createServer(trustedHandler).listen(port, '127.0.0.1', () => {
       console.log(`  Mac内:  http://127.0.0.1:${port}（このMacからのみ・トークン不要）`);
@@ -432,10 +443,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     });
   } else {
     http.createServer(handler).listen(port, host, () => {
-      console.log(`商品台帳 起動: http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`);
+      console.log(`商品台帳 起動: http://${anyHost ? 'localhost' : host}:${port}`);
       console.log(`  データ: ${dataDir}`);
       console.log(`  MCP:   http://localhost:${port}/mcp   （claude mcp add --transport http shohin-daicho http://localhost:${port}/mcp）`);
-      if (host === '0.0.0.0') for (const a of lanAddresses()) console.log(`  LAN:   http://${a}:${port}${token ? '/?token=…' : ''}`);
+      if (anyHost) for (const a of lanAddresses()) console.log(`  LAN:   http://${a}:${port}${token ? '/?token=…' : ''}`);
       else console.log('  iPhoneから使うには: tailscale serve --bg ' + port + '  （HTTPSになりカメラも使えます。docs/SETUP.md 参照）');
     });
   }
