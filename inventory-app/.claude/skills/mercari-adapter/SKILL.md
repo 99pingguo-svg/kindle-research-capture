@@ -11,7 +11,9 @@ description: 商品台帳の「出品待ち」商品をメルカリWeb（Claude 
 ## 前提
 
 - MCP `shohin-daicho` が接続済み。Claude in Chrome でユーザーがメルカリにログイン済み。
-- 対象はユーザーが「出品待ち」にした商品だけ: `mercari_queue`。
+- 対象はユーザーが「出品待ち」にした商品: `mercari_queue`。ユーザーが会話で「準備完了のものもメルカリに入れて」等と
+  明示したときだけ `mercari_queue(include_ready=true)`（判断が出品/下書きで出品準備完了の商品も含む）。自分の判断で広げない。
+- 判断が「下書き」の商品は下書き保存と転記QCまで。公開しない。
 
 ## 1商品の流れ
 

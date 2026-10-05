@@ -9,6 +9,7 @@ import path from 'node:path';
 import { AppError, nowIso, norm, writeJson, writeFileAtomic } from '../util.js';
 import { readiness, listingPhotos } from '../rules.js';
 import { listingText, isUser } from '../store.js';
+import { PREPARE_DECISIONS } from '../schema.js';
 
 export const CHANNEL = 'mercari';
 export const SELL_URL = 'https://jp.mercari.com/sell/create';
@@ -228,6 +229,12 @@ export function markStopped(store, id, actor) {
 }
 
 /** Products waiting for transfer to Mercari (user put them in 出品待ち). */
-export function queue(store) {
-  return store.list({ includeTrash: false }).filter((p) => !p.archived && p.stage === 'queued');
+/**
+ * Products to enter into Mercari: those the user moved to 出品待ち, and — only when the user's own
+ * instruction says so (includeReady) — 出品準備完了 products whose decision is 出品 or 下書き.
+ */
+export function queue(store, { includeReady = false } = {}) {
+  return store
+    .list({ includeTrash: false })
+    .filter((p) => !p.archived && (p.stage === 'queued' || (includeReady && p.stage === 'ready' && PREPARE_DECISIONS.includes(p.decision))));
 }

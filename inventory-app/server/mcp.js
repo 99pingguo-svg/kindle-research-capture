@@ -368,8 +368,10 @@ result: pass=問題なし / needs_review=ユーザー確認が必要 / fail=修�
     ({ id, limit = 30 }) => json(store.history(id, { limit })), { readOnlyHint: true });
 
   // ---- Mercari Adapter ----
-  tool('mercari_queue', 'ユーザーが「出品待ち」にした、メルカリへ転記すべき商品の一覧。', {}, [], () =>
-    json(mercari.queue(store).map((p) => ({ id: p.id, name: p.name, title: p.listing.title, price: p.listing.price, photos: listingPhotos(p).length }))), { readOnlyHint: true });
+  tool('mercari_queue', 'メルカリへ転記すべき商品の一覧。既定はユーザーが「出品待ち」にした商品。ユーザーが会話で「準備完了のものもメルカリに入れて」等と明示したときだけ include_ready=true（判断が出品/下書きで出品準備完了の商品も含める）。', {
+    include_ready: s.bool('ユーザーの明示的な指示があるときだけ true'),
+  }, [], ({ include_ready = false }) =>
+    json(mercari.queue(store, { includeReady: include_ready }).map((p) => ({ id: p.id, name: p.name, decision: p.decision, stage: p.stage, title: p.listing.title, price: p.listing.price, photos: listingPhotos(p).length }))), { readOnlyHint: true });
 
   tool('mercari_prepare', 'メルカリ転記用パッケージを作る。出品用写真を outbox に 01.jpg… として書き出し、フォームの意味的な項目一覧（form）と入力値（fields）を返す。準備未完了ならエラー。', { id: s.id }, ['id'],
     ({ id }) => json(mercari.buildPackage(store, id)));

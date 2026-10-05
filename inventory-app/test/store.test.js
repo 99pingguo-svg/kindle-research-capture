@@ -340,3 +340,15 @@ test('status check: platform lists sync into the app; cross-platform conflict is
   assert.equal(store.get(id).soldPrice, 2800);
   assert.equal(store.meta.channelChecks.mercari.seen, 1);
 });
+
+test('mercari queue: 出品待ち by default; ready 出品/下書き only when explicitly included', () => {
+  const store = new Store(tmp());
+  const id = preparedProduct(store);
+  store.setDecision(id, 'user', 'draft');
+  passQc(store, id);
+  assert.equal(store.get(id).stage, 'ready');
+  assert.deepEqual(mercari.queue(store).map((p) => p.id), []);
+  assert.deepEqual(mercari.queue(store, { includeReady: true }).map((p) => p.id), [id]);
+  store.setDecision(id, 'user', 'hold');
+  assert.deepEqual(mercari.queue(store, { includeReady: true }).map((p) => p.id), []);
+});
