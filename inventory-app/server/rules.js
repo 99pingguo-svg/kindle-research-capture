@@ -171,6 +171,7 @@ export function summary(p, settings) {
     title: p.listing.title,
     updatedAt: p.updatedAt,
     createdAt: p.createdAt,
+    itemDate: p.itemDate || null,
   };
 }
 

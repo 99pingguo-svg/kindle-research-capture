@@ -4,6 +4,7 @@ import { h, clear, toast, showError, choose, sheet } from './ui.js';
 import { api } from './api.js';
 import { state, setPref, on, applyProduct, emit } from './state.js';
 import { captureFrame, makeVariants } from './images.js';
+import { fmtDay } from './calendar.js';
 import * as uploads from './uploads.js';
 
 let open = null;
@@ -184,7 +185,7 @@ class CameraSession {
       h('div', { class: 'ref', style: { backgroundImage: sm.thumb ? `url("${sm.thumb}")` : '' } }),
       h('div', { style: { minWidth: 0 } },
         h('div', { class: 'nm' }, h('span', { style: { opacity: '.6', fontSize: '14px', marginRight: '6px' } }, this.id), sm.name || '名称未設定（AIが写真から特定）'),
-        h('div', { class: 'sub' }, [sm.brand, sm.model].filter(Boolean).join(' · ') || ' ')));
+        h('div', { class: 'sub' }, [sm.itemDate && `📅 ${fmtDay(sm.itemDate)}`, sm.brand, sm.model].filter(Boolean).join(' · ') || ' ')));
 
     const reqs = full ? full.photoRequests.filter((r) => !r.doneAt && !r.cancelledAt) : sm.openPhotoRequests || [];
     clear(this.tags).append(

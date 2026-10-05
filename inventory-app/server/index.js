@@ -16,6 +16,7 @@ import { exportEntries, productsCsv } from './export.js';
 import { createMcpHandler, matchesFilter } from './mcp.js';
 import * as mercari from './adapters/mercari.js';
 import * as schema from './schema.js';
+import { parseLine, importDates } from './dates.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -88,12 +89,16 @@ export function createApp({ dataDir, token = '' } = {}) {
     preview.forEach((it, i) => {
       if (skip.has(i)) return;
       const fields = { name: it.name };
+      if (it.itemDate) fields.itemDate = it.itemDate;
       if (body?.decision) fields.decision = body.decision;
       if (body?.shootPlan) fields.shootPlan = true;
       created.push(store.create(fields, actor, { links: it.links }).product.id);
     });
     return { created };
   });
+  // 日付の一括反映 (existing products only; unmatched rows are ignored)
+  route('POST', '/api/dates/import', ({ body, actor }) =>
+    importDates(store, actor, { text: body?.text || '', dryRun: body?.dryRun !== false, include: body?.include || [] }));
   route('GET', '/api/products/:id', ({ params }) => full(store.get(params.id)));
   route('PATCH', '/api/products/:id', ({ params, body, actor }) => {
     const { set, confirm, unlock } = body || {};
@@ -369,11 +374,9 @@ function stamp() {
 export function parseImport(text) {
   const items = [];
   for (const raw of String(text).split(/\r?\n/)) {
-    const line = raw.replace(/^\s*(?:[-*・]|\d+[.)])\s*/, '').trim();
-    if (!line || line.startsWith('#')) continue;
-    const links = line.match(/https?:\/\/[^\s,|\t]+/g) || [];
-    const name = line.replace(/https?:\/\/[^\s,|\t]+/g, ' ').replace(/[\t|,]+/g, ' ').replace(/\s+/g, ' ').trim();
-    items.push({ name, links });
+    if (!raw.trim() || raw.trim().startsWith('#')) continue;
+    const { name, urls, date } = parseLine(raw);
+    items.push(date ? { name, links: urls, itemDate: date } : { name, links: urls });
   }
   return items;
 }

@@ -11,6 +11,7 @@ import {
 import { summary, readiness, lint, listingPhotos, livePhotos, openPhotoRequests } from './rules.js';
 import { IMAGE_QC_CHECK_IDS } from './schema.js';
 import * as mercari from './adapters/mercari.js';
+import { importDates } from './dates.js';
 
 const SERVER_INFO = { name: 'shohin-daicho', title: '商品台帳', version: '0.1.0' };
 const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -105,6 +106,20 @@ export function productForAi(store, p) {
   };
 }
 
+/** Date sorts put products without a date last; ties fall back to ID. */
+export function sortSummaries(sort) {
+  return (a, b) => {
+    if (sort === 'date_desc' || sort === 'date_asc') {
+      if (!a.itemDate !== !b.itemDate) return a.itemDate ? -1 : 1;
+      const c = (a.itemDate || '').localeCompare(b.itemDate || '');
+      if (c) return sort === 'date_desc' ? -c : c;
+      return sort === 'date_desc' ? b.id.localeCompare(a.id) : a.id.localeCompare(b.id);
+    }
+    if (sort === 'updated') return b.updatedAt.localeCompare(a.updatedAt);
+    return a.id.localeCompare(b.id);
+  };
+}
+
 const json = (v) => ({ content: [{ type: 'text', text: JSON.stringify(v, null, 1) }] });
 
 /**
@@ -144,12 +159,18 @@ function buildTools(store, actor) {
     filter: s.enumOf(LIST_FILTERS, '絞り込み（既定 all = アーカイブ・ゴミ箱以外）'),
     query: s.str('商品名・型番・ブランド・JAN・メモの部分一致'),
     updated_since: s.str('ISO日時。これ以降に更新された商品のみ'),
+    date_from: s.str('日付（注文・購入・到着）がこの日以降（YYYY-MM-DD）'),
+    date_to: s.str('日付（注文・購入・到着）がこの日以前（YYYY-MM-DD）'),
+    sort: s.enumOf(['date_desc', 'date_asc', 'id', 'updated'], '並び順（既定 date_desc。日付なしは末尾）'),
     limit: s.int('最大件数（既定100）'),
-  }, [], ({ filter = 'all', query, updated_since, limit = 100 }) => {
+  }, [], ({ filter = 'all', query, updated_since, date_from, date_to, sort = 'date_desc', limit = 100 }) => {
     const q = (query || '').toLowerCase();
     let items = store.list().map((p) => summary(p, store.settings)).filter((sm) => matchesFilter(sm, filter));
     if (q) items = items.filter((sm) => [sm.id, sm.name, sm.brand, sm.model, sm.jan, sm.notes, sm.title].join(' ').toLowerCase().includes(q));
     if (updated_since) items = items.filter((sm) => sm.updatedAt >= updated_since);
+    if (date_from) items = items.filter((sm) => sm.itemDate && sm.itemDate >= date_from);
+    if (date_to) items = items.filter((sm) => sm.itemDate && sm.itemDate <= date_to);
+    items.sort(sortSummaries(sort));
     return json(items.slice(0, limit).map(({ thumb, thumbIsReference, ...rest }) => rest));
   }, { readOnlyHint: true });
 
@@ -358,6 +379,16 @@ result: pass=問題なし / needs_review=ユーザー確認が必要 / fail=修�
     }
     return json(store.duplicatesFor({ name, model, jan, links: urls }));
   }, { readOnlyHint: true });
+
+  tool('apply_dates', '日付（注文・購入・到着を区別しない1つの日付）を既存商品へ一括反映する。text は「商品名<TAB>URL<TAB>日付…」の行。Amazon ASIN → URL完全一致 → 商品名完全一致(双方で一意の場合のみ) の順で照合し、該当しない行は無視（新規登録しない）。まず dry_run=true で結果を確認してから dry_run=false で反映すること。', {
+    text: s.str('貼り付けられた一覧（TSV等）'),
+    dry_run: s.bool('true=確認のみ（既定）'),
+    include_lines: { type: 'array', items: { type: 'integer' }, description: '要確認(ambiguous/conflict)の行のうち、ユーザーが反映を了承した行番号' },
+  }, ['text'], ({ text, dry_run = true, include_lines = [] }) => {
+    const r = importDates(store, actor, { text, dryRun: dry_run, include: include_lines });
+    const brief = r.rows.filter((x) => x.status !== 'same').map(({ line, name, date, status, matchedBy, candidates }) => ({ line, name: name.slice(0, 40), date, status, matchedBy, ids: candidates.map((c) => c.id) }));
+    return json({ total: r.total, counts: r.counts, applied: r.applied.length, proposed: r.applied.filter((a) => a.proposed).length, errors: r.errors, rows: brief });
+  });
 
   tool('get_history', '商品の変更履歴（誰が何を変えたか）。', { id: s.id, limit: s.int('既定30') }, ['id'],
     ({ id, limit = 30 }) => json(store.history(id, { limit })), { readOnlyHint: true });

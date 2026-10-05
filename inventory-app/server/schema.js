@@ -128,6 +128,7 @@ export const IMAGE_QC_CHECK_IDS = QC_CHECKS.filter((c) => c.group === 'image').m
  */
 export const FIELDS = [
   { path: 'name', label: '商品名', type: 'text', group: 'basic' },
+  { path: 'itemDate', label: '日付（注文・購入・到着）', type: 'date', group: 'basic', hint: '注文日・購入日・到着日のどれか（区別しない）' },
   { path: 'brand', label: 'メーカー／ブランド', type: 'text', group: 'basic' },
   { path: 'model', label: '型番', type: 'text', group: 'basic' },
   { path: 'jan', label: 'JAN等', type: 'text', group: 'basic' },
@@ -135,7 +136,7 @@ export const FIELDS = [
   { path: 'color', label: '色', type: 'text', group: 'basic' },
   { path: 'conditionNote', label: '商品状態メモ', type: 'textarea', group: 'basic' },
   { path: 'notes', label: 'メモ', type: 'textarea', group: 'basic' },
-  { path: 'purchaseDate', label: '購入時期', type: 'text', group: 'basic' },
+  { path: 'purchaseDate', label: '購入時期（メモ）', type: 'text', group: 'basic' },
   { path: 'purchasePrice', label: '購入価格', type: 'int', group: 'basic' },
   { path: 'plannedPrice', label: '出品予定価格', type: 'int', group: 'basic' },
   { path: 'soldPrice', label: '実際の販売価格', type: 'int', group: 'basic' },
@@ -170,6 +171,20 @@ export const DEFAULT_SETTINGS = {
   imageQcModels: ['claude-opus-5-5'],
 };
 
+/**
+ * Normalise a calendar date to YYYY-MM-DD. Accepts 2026-09-23, 2026/9/23, 2026.09.23,
+ * 2026年9月23日. Returns null for anything that is not a real date.
+ */
+export function normalizeDate(raw) {
+  const s = String(raw ?? '').normalize('NFKC').trim();
+  const m = /^(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?$/.exec(s);
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
 export function coerceField(def, raw) {
   if (raw === undefined) throw new Error('値がありません');
   if (raw === null || raw === '') return def.type === 'int' ? null : '';
@@ -179,6 +194,11 @@ export function coerceField(def, raw) {
     return Math.round(n);
   }
   const s = String(raw);
+  if (def.type === 'date') {
+    const d = normalizeDate(s);
+    if (!d) throw new Error(`${def.label}は 2026-09-23 の形式で入力してください: ${s}`);
+    return d;
+  }
   if (def.type === 'select' && s && !def.options.includes(s)) {
     throw new Error(`${def.label}の値が不正です: ${s}（候補: ${def.options.join(' / ')}）`);
   }

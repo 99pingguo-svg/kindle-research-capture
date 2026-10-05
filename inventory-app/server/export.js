@@ -17,6 +17,7 @@ const CSV_COLUMNS = [
   ['ステータス', (p) => statusOf(p).label],
   ['出品判断', (p) => ({ undecided: '未定', sell: '出品する', hold: '保留', no_sell: '出品しない' })[p.decision]],
   ['保管場所', (p) => p.location],
+  ['日付（注文・購入・到着）', (p) => p.itemDate],
   ['購入時期', (p) => p.purchaseDate],
   ['購入価格', (p) => p.purchasePrice],
   ['出品予定価格', (p) => p.plannedPrice],

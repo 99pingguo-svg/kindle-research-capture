@@ -2,6 +2,7 @@
 import { h, clear, toast, showError, choose, fmtDate, isAiActor, actorLabel, copyText } from './ui.js';
 import { api } from './api.js';
 import { state, loadAll } from './state.js';
+import { fmtDay } from './calendar.js';
 
 const pane = () => document.getElementById('detail-pane');
 
@@ -82,7 +83,7 @@ export function showImport() {
       parsed.items.map((it, i) => h('label', { class: 'preview-row' },
         h('input', { type: 'checkbox', checked: !skip.has(i), onchange: (e) => (e.target.checked ? skip.delete(i) : skip.add(i)) }),
         h('div', null,
-          h('div', null, it.name || h('span', { class: 'muted' }, '（名称なし・AIがURLから特定）')),
+          h('div', null, it.itemDate && h('strong', null, `${fmtDay(it.itemDate)} `), it.name || h('span', { class: 'muted' }, '（名称なし・AIがURLから特定）')),
           it.links.map((l) => h('div', { class: 'small muted', style: { wordBreak: 'break-all' } }, l)),
           it.duplicates.map((d) => h('div', { class: 'small', style: { color: 'var(--warn)' } }, `⚠ #${d.id} ${d.name} と重複の可能性（${d.reasons.join('・')}）`))))),
       h('div', { class: 'row-actions' },
@@ -159,4 +160,82 @@ export function showSettings() {
       h('h2', null, 'この端末'),
       h('p', { class: 'small muted' }, 'iPhone では Safari の共有ボタン →「ホーム画面に追加」でアプリとして使えます。'),
       h('button', { class: 'btn small', onclick: () => location.reload() }, 'アプリを再読み込み')));
+}
+
+const DATE_STATUS = {
+  set: { label: '日付を設定', cls: 'ok' },
+  change: { label: '日付を変更', cls: 'warn' },
+  same: { label: '変更なし', cls: '' },
+  ambiguous: { label: '要確認（複数の商品に一致）', cls: 'danger' },
+  conflict: { label: '要確認（同じ商品に別の日付）', cls: 'danger' },
+  nodate: { label: '日付なし（スキップ）', cls: '' },
+  nomatch: { label: '該当商品なし（無視）', cls: '' },
+};
+
+/** 日付の一括反映: paste "商品名 / URL / 日付…" lines; only existing products are updated. */
+export function showDateImport() {
+  const ta = h('textarea', { class: 'import', placeholder: '商品名<TAB>URL<TAB>日付 … の一覧をそのまま貼り付け\n（注文・購入・到着のどの列の日付でも OK。1行の最初の日付を使います）' });
+  const preview = h('div');
+  let plan = null;
+  const include = new Set();
+  const run = async (dryRun) => {
+    try {
+      const r = await api.post('/api/dates/import', { text: ta.value, dryRun, include: [...include] });
+      if (dryRun) {
+        plan = r;
+        include.clear();
+        render();
+      } else {
+        toast(`${r.applied.length}商品に日付を反映しました${r.errors.length ? `（失敗 ${r.errors.length}件）` : ''}`);
+        await loadAll();
+        location.hash = '#/';
+      }
+    } catch (e) {
+      showError(e);
+    }
+  };
+  const render = () => {
+    clear(preview);
+    if (!plan) return;
+    const c = plan.counts;
+    const willApply = (c.set || 0) + (c.change || 0);
+    const group = (status, { open = false, pick = false } = {}) => {
+      const rows = plan.rows.filter((r) => r.status === status);
+      if (!rows.length) return null;
+      return h('details', { class: 'card', open },
+        h('summary', { style: { fontWeight: 700, cursor: 'pointer' } }, h('span', { class: `badge ${DATE_STATUS[status].cls}` }, `${rows.length}件`), ' ', DATE_STATUS[status].label),
+        rows.slice(0, 400).map((r) => h('label', { class: 'preview-row' },
+          pick && h('input', { type: 'checkbox', onchange: (e) => (e.target.checked ? include.add(r.line) : include.delete(r.line)) }),
+          h('div', { style: { minWidth: 0 } },
+            h('div', null, r.date ? h('strong', null, fmtDay(r.date), ' ') : null, r.name || h('span', { class: 'muted' }, '（名前なし）')),
+            r.candidates.length > 0 && h('div', { class: 'small muted' },
+              r.candidates.map((p) => `#${p.id}${p.itemDate && p.itemDate !== r.date ? `（現在 ${fmtDay(p.itemDate)}）` : ''}`).join(' / '),
+              r.matchedBy && ` ・ ${r.matchedBy}で照合`),
+            pick && h('div', { class: 'small', style: { color: 'var(--danger)' } }, 'チェックすると表示中の全候補に反映します')))));
+    };
+    preview.append(
+      h('div', { class: 'card' },
+        h('h2', null, `${plan.total}行を確認しました`),
+        h('ul', { class: 'missing' },
+          h('li', null, `日付を反映: ${willApply}商品（新規 ${c.set || 0} / 変更 ${c.change || 0}）`),
+          h('li', { class: 'w' }, `変更なし: ${c.same || 0}`),
+          h('li', { class: 'w' }, `該当する既存商品なし（無視）: ${c.nomatch || 0}`),
+          (c.nodate || 0) > 0 && h('li', { class: 'w' }, `日付が書かれていない行: ${c.nodate}`),
+          ((c.ambiguous || 0) + (c.conflict || 0)) > 0 && h('li', null, `要確認: ${(c.ambiguous || 0) + (c.conflict || 0)}（チェックしたものだけ反映）`)),
+        h('p', { class: 'small muted' }, '照合は Amazon の商品コード（ASIN）→ URL → 商品名（完全一致・重複なしの場合のみ）の順。似ているだけの商品には反映しません。'),
+        h('button', { class: 'btn primary', style: { width: '100%' }, onclick: () => run(false) }, `${willApply}商品に日付を反映`)),
+      group('change', { open: true }),
+      group('ambiguous', { open: true, pick: true }),
+      group('conflict', { open: true, pick: true }),
+      group('set'),
+      group('nomatch'),
+      group('nodate'),
+      group('same'));
+  };
+  frame('日付を一括反映',
+    h('div', { class: 'card' },
+      h('p', { class: 'small', style: { marginTop: 0 } }, '既存の商品にだけ日付（注文・購入・到着のいずれか）を付けます。一覧にあっても台帳に無い商品は無視され、新しく登録されることはありません。'),
+      ta,
+      h('button', { class: 'btn primary', style: { marginTop: '10px' }, onclick: () => run(true) }, '確認する（まだ反映しません）')),
+    preview);
 }

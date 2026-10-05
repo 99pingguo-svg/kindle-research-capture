@@ -2,7 +2,8 @@
 // available per row so most work never needs the detail page.
 import { h, clear, toast, showError, choose, sheet, yen } from './ui.js';
 import { api } from './api.js';
-import { state, setPref, on, FILTERS, matchesFilter, visibleProducts, applyProduct, loadAll } from './state.js';
+import { state, setPref, on, FILTERS, matchesFilter, visibleProducts, applyProduct, loadAll, inDateRange, isDateSort, productsForCalendar } from './state.js';
+import { pickDateRange, rangeLabel, fmtDay } from './calendar.js';
 import { openCamera } from './camera.js';
 import * as uploads from './uploads.js';
 
@@ -63,7 +64,7 @@ function renderUploadIndicator(st = uploads.status()) {
 }
 
 function renderChips() {
-  const all = [...state.products.values()];
+  const all = [...state.products.values()].filter(inDateRange);
   const counts = Object.fromEntries(FILTERS.map((f) => [f.id, all.filter((p) => matchesFilter(p, f.id)).length]));
   clear(els.chips).append(
     ...FILTERS.filter((f) => counts[f.id] > 0 || ['all', 'shoot_plan', 'needs_photos', 'ready', state.prefs.filter].includes(f.id)).map((f) =>
@@ -80,13 +81,36 @@ function renderChips() {
 
 function renderToolbar() {
   const n = visibleProducts().length;
+  const ranged = !!(state.prefs.dateFrom || state.prefs.dateTo || state.prefs.dateNone);
+  const sort = state.prefs.sort;
   clear(els.toolbar).append(
-    h('span', null, `${n}件`),
-    h('select', { onchange: (e) => { setPref('sort', e.target.value); renderItems(); }, 'aria-label': '並び順' },
-      [['id', 'ID順'], ['updated', '更新順'], ['name', '名前順'], ['stage', '状態順'], ['photos', '写真が少ない順']].map(([v, l]) =>
-        h('option', { value: v, selected: state.prefs.sort === v }, l))),
+    h('span', { class: 'count' }, `${n}件`),
+    h('button', { class: `btn small date-range ${ranged ? 'on' : ''}`, onclick: openRange, 'aria-label': '日付で絞り込み' }, '📅 ', rangeLabel(state.prefs)),
+    ranged ? h('button', { class: 'btn small ghost', 'aria-label': '期間を解除', onclick: () => setRange({ dateFrom: '', dateTo: '', dateNone: false }) }, '✕') : '',
     h('span', { class: 'spacer' }),
+    // One tap: newest ⇄ oldest. From any other order it jumps back to newest first.
+    h('button', {
+      class: `btn small ${isDateSort(sort) ? 'sort-on' : ''}`,
+      onclick: () => { setPref('sort', sort === 'date_desc' ? 'date_asc' : 'date_desc'); renderAll(); },
+    }, sort === 'date_asc' ? '古い順 ↑' : sort === 'date_desc' ? '新しい順 ↓' : '日付順にする'),
+    h('select', { class: 'sort-more', onchange: (e) => { setPref('sort', e.target.value); renderAll(); }, 'aria-label': 'その他の並び順' },
+      [['date_desc', '日付 新しい順'], ['date_asc', '日付 古い順'], ['id', 'ID順'], ['updated', '更新順'], ['name', '名前順'], ['stage', '状態順'], ['photos', '写真が少ない順']].map(([v, l]) =>
+        h('option', { value: v, selected: sort === v }, l))),
     h('button', { class: 'btn small', onclick: toggleSelect }, state.selectMode ? '選択終了' : '選択'));
+}
+
+function setRange(r) {
+  setPref('dateFrom', r.dateFrom);
+  setPref('dateTo', r.dateTo);
+  setPref('dateNone', r.dateNone);
+  state.selected.clear();
+  renderAll();
+  els.list.scrollIntoView({ block: 'start' });
+}
+
+async function openRange() {
+  const r = await pickDateRange(state.prefs, productsForCalendar());
+  if (r) setRange(r);
 }
 
 function toggleSelect() {
@@ -150,7 +174,19 @@ function renderItems() {
   }
   const frag = document.createDocumentFragment();
   const ids = items.map((p) => p.id);
+  const groups = isDateSort() ? new Map() : null;
+  if (groups) for (const p of items) groups.set(p.itemDate || '', (groups.get(p.itemDate || '') || 0) + 1);
+  let lastDate = null;
   items.forEach((p, idx) => {
+    if (groups && (p.itemDate || '') !== lastDate) {
+      lastDate = p.itemDate || '';
+      const d = lastDate;
+      frag.append(h('button', {
+        class: 'date-head',
+        title: d ? 'タップでこの日だけ表示' : '日付のない商品だけ表示',
+        onclick: () => setRange(d ? { dateFrom: d, dateTo: d, dateNone: false } : { dateFrom: '', dateTo: '', dateNone: true }),
+      }, d ? fmtDay(d) : '日付なし', h('span', { class: 'n' }, `${groups.get(d)}件`)));
+    }
     const selected = state.selected.has(p.id);
     const open = () => {
       if (state.selectMode) {
@@ -165,7 +201,10 @@ function renderItems() {
         p.thumbIsReference && !state.selectMode && h('div', { class: 'ref-badge' }, '参考画像')),
       h('div', { class: 'item-main', onclick: open },
         h('div', { class: 'item-title' }, h('span', { class: 'pid' }, p.id), p.name || h('span', { class: 'muted' }, '名称未設定')),
-        h('div', { class: 'item-sub' }, [p.brand, p.model, p.location && `📍${p.location}`].filter(Boolean).join(' · ') || ' '),
+        h('div', { class: 'item-sub' },
+          // the date is in the group header when sorted by date; otherwise show it on the row
+          !isDateSort() && (p.itemDate ? h('span', { class: 'item-date' }, fmtDay(p.itemDate)) : h('span', { class: 'item-date none' }, '日付なし')),
+          [p.brand, p.model, p.location && `📍${p.location}`].filter(Boolean).join(' · ')),
         h('div', { class: 'badges' }, badgesFor(p)),
         issuesFor(p),
         !state.selectMode && !p.trashedAt && decisionSeg(p)),
@@ -299,6 +338,7 @@ async function mainMenu() {
   const v = await choose(null, [
     { label: '🕘 共同作業の履歴', value: '#/activity' },
     { label: '📋 商品リストを一括登録', value: '#/import' },
+    { label: '📅 日付を一括反映（既存商品）', value: '#/dates' },
     { label: '⚙️ 設定・AI接続・書き出し', value: '#/settings' },
     { label: '↻ 再読み込み', value: 'reload' },
   ]);

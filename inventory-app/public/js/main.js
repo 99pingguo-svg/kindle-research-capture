@@ -3,7 +3,7 @@ import { state, loadAll, refreshSummaries, emit } from './state.js';
 import { showError } from './ui.js';
 import { mountList } from './list.js';
 import { mountDetail, showDetail, reload as reloadDetail } from './detail.js';
-import { showActivity, showImport, showSettings } from './pages.js';
+import { showActivity, showImport, showSettings, showDateImport } from './pages.js';
 import * as uploads from './uploads.js';
 
 const app = document.getElementById('app');
@@ -14,11 +14,11 @@ function route() {
   if (m) {
     app.classList.add('show-detail');
     showDetail(m[1]);
-  } else if (hash === '/activity' || hash === '/import' || hash === '/settings') {
+  } else if (hash === '/activity' || hash === '/import' || hash === '/settings' || hash === '/dates') {
     app.classList.add('show-detail');
     state.detailId = null;
     state.detail = null;
-    ({ '/activity': showActivity, '/import': showImport, '/settings': showSettings })[hash]();
+    ({ '/activity': showActivity, '/import': showImport, '/settings': showSettings, '/dates': showDateImport })[hash]();
   } else {
     app.classList.remove('show-detail');
     showDetail(null);

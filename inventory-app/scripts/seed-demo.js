@@ -38,7 +38,8 @@ const demo = [
 ];
 
 for (const d of demo) {
-  const { product } = store.create({ name: d.name, brand: d.brand || '', model: d.model || '', shootPlan: !!d.shootPlan, decision: d.decision }, 'user', { links: d.link ? [d.link] : [] });
+  const itemDate = ['2026-10-04', '2026-10-02', '2026-09-23', '2026-09-23', '2026-08-11', ''][demo.indexOf(d)];
+  const { product } = store.create({ name: d.name, brand: d.brand || '', model: d.model || '', shootPlan: !!d.shootPlan, decision: d.decision, ...(itemDate ? { itemDate } : {}) }, 'user', { links: d.link ? [d.link] : [] });
   for (const tag of d.photos) store.addPhoto(product.id, 'user', { kind: 'actual', tag }, { original: { buffer: solidPng(d.color), mime: 'image/png' } });
 }
 store.addPhotoRequests('0002', 'claude', [{ label: '背面', reason: 'イヤーパッドの状態を確認するため' }, { label: '付属品', reason: 'ケース・ケーブルの有無' }]);

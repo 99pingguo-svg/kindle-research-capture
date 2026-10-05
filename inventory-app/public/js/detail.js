@@ -129,6 +129,8 @@ function topControls(p) {
         }, l))),
       h('button', { class: 'icon-btn cam', 'aria-label': '撮影', onclick: () => openCamera({ ids: [p.id] }) }, '📷')),
     h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginTop: '10px', flexWrap: 'wrap' } },
+      h('label', { class: 'quick-date', title: '日付（注文・購入・到着）' }, '📅',
+        h('input', { type: 'date', value: p.itemDate || '', 'aria-label': '日付（注文・購入・到着）', onchange: (e) => act(api.patch(url(), { set: { itemDate: e.target.value || '' } }), e.target.value ? '日付を保存しました' : '日付を消しました') })),
       h('span', { class: 'badge accent' }, p.summary.status.label),
       p.summary.ai.label && h('span', { class: 'badge ai' }, p.summary.ai.label),
       h('span', { class: 'spacer' }),
@@ -362,6 +364,8 @@ function fieldEl(p, def, { copy = false } = {}) {
   if (def.type === 'textarea') input = h('textarea', { ...common, rows: def.path === 'listing.description' ? 10 : 3 }, value ?? '');
   else if (def.type === 'select') {
     input = h('select', common, h('option', { value: '' }, '—'), def.options.map((o) => h('option', { value: o, selected: value === o }, o)));
+  } else if (def.type === 'date') {
+    input = h('input', { ...common, type: 'date', value: value || '' });
   } else input = h('input', { ...common, type: def.type === 'int' ? 'text' : 'text', inputmode: def.type === 'int' ? 'numeric' : undefined, value: value ?? '', placeholder: def.hint || '' });
 
   const counter = def.max ? h('span', { class: 'counter' }) : null;

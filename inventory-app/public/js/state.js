@@ -2,9 +2,14 @@
 import { api } from './api.js';
 
 const PREFS_KEY = 'daicho.prefs';
+const PREFS_VERSION = 2;
 const defaults = {
+  v: PREFS_VERSION,
   filter: 'all',
-  sort: 'id',
+  sort: 'date_desc',
+  dateFrom: '',
+  dateTo: '',
+  dateNone: false,
   camAutoNext: true,
   camRequestAi: true,
   camKeepTag: false,
@@ -12,7 +17,10 @@ const defaults = {
 
 function loadPrefs() {
   try {
-    return { ...defaults, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') };
+    const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
+    // v2: the list is ordered by date (newest first) by default.
+    if ((saved.v || 1) < 2) Object.assign(saved, { v: PREFS_VERSION, sort: 'date_desc' });
+    return { ...defaults, ...saved };
   } catch {
     return { ...defaults };
   }
@@ -127,9 +135,25 @@ export function matchesFilter(sm, filter) {
 
 const STAGE_RANK = ['needs_review', 'needs_photos', 'shooting', 'unsorted', 'ai_pending', 'ai_processing', 'ready', 'queued', 'mercari_entered', 'final_check', 'listed', 'sold'];
 
+/** 日付（注文・購入・到着）の期間絞り込み。 */
+export function inDateRange(p) {
+  const { dateFrom, dateTo, dateNone } = state.prefs;
+  if (dateNone) return !p.itemDate;
+  if (!dateFrom && !dateTo) return true;
+  if (!p.itemDate) return false;
+  return (!dateFrom || p.itemDate >= dateFrom) && (!dateTo || p.itemDate <= dateTo);
+}
+
+export const isDateSort = (s = state.prefs.sort) => s === 'date_desc' || s === 'date_asc';
+
+/** Products matching the status chip and search (before the date range), for calendar counts. */
+export function productsForCalendar() {
+  return [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter));
+}
+
 export function visibleProducts() {
   const q = state.query.trim().toLowerCase().normalize('NFKC');
-  let items = [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter));
+  let items = [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && inDateRange(p));
   if (q) {
     const terms = q.split(/\s+/);
     items = items.filter((p) => {
@@ -139,6 +163,12 @@ export function visibleProducts() {
   }
   const sort = state.prefs.sort;
   items.sort((a, b) => {
+    if (isDateSort(sort)) {
+      if (!a.itemDate !== !b.itemDate) return a.itemDate ? -1 : 1; // undated last
+      const c = (a.itemDate || '').localeCompare(b.itemDate || '');
+      if (c) return sort === 'date_desc' ? -c : c;
+      return sort === 'date_desc' ? b.id.localeCompare(a.id) : a.id.localeCompare(b.id);
+    }
     if (sort === 'updated') return b.updatedAt.localeCompare(a.updatedAt);
     if (sort === 'name') return (a.name || '￿').localeCompare(b.name || '￿', 'ja');
     if (sort === 'stage') return STAGE_RANK.indexOf(a.stage) - STAGE_RANK.indexOf(b.stage) || a.id.localeCompare(b.id);
