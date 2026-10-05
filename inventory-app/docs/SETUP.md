@@ -36,6 +36,14 @@ iPhone のブラウザでカメラ（アプリ内ファインダー）を使う�
 
 サーバーは既定で 127.0.0.1 のみで待ち受けるため、Tailscale 経由以外からはアクセスできません。
 
+**`scripts/start-lan.sh`（常駐）と併用する場合:** 8787 は「この Mac からのみ・合言葉不要」の入口なので、Tailscale はそちらではなく合言葉つきの HTTPS 入口へ向けます。
+
+```bash
+tailscale serve --bg https+insecure://localhost:8443   # tailnet 内のみ（Funnel ではない）
+```
+
+iPhone では `https://<mac名>.<tailnet>.ts.net/?token=<~/.shohin-daicho/token>` を一度開きます（ts.net の証明書は本物なので、自前 CA の信頼設定は不要）。初回は Tailscale 管理画面で Serve/HTTPS の有効化を求められます。解除は `tailscale serve --https=443 off`。
+
 ### Tailscale を使わない場合（同じ Wi-Fi 内・HTTPS・外部サービスなし）
 
 Mac 標準の openssl で自分専用の証明書を作り、アプリ内カメラが使える HTTPS で開きます。
