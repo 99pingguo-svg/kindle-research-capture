@@ -24,6 +24,7 @@ __pycache__/
 
 # affiliate-editorial: private data, settings, builds and exports
 affiliate-editorial/var/
+affiliate-editorial/var-*/
 *.db
 *.db-wal
 *.db-shm

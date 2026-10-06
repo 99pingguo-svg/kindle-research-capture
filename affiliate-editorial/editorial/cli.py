@@ -103,6 +103,16 @@ def cmd_set_password(args) -> None:
     print("パスワードを変更し、ログイン中のセッションを終了しました")
 
 
+def cmd_demo(args) -> None:
+    from . import demo
+    target = Path(args.dir) if args.dir else APP_ROOT / "var-demo"
+    info = demo.create(target)
+    print("デモ用データを作りました（実データとは別のフォルダ・架空の商品です）: %s" % info["dir"])
+    print("起動: EDITORIAL_CONFIG=%s python3 -m editorial serve" % info["config"])
+    print("ログイン: http://127.0.0.1:%d/  ユーザー %s / パスワード %s" % (info["port"], info["user"], info["password"]))
+    print("文章整形は「デモ用（整形なし）」で代用しています。実データでは Antigravity CLI を使います。")
+
+
 def cmd_create_ai_token(args) -> None:
     ctx = _ctx(args)
     token = auth.create_ai_token(ctx, args.name)
@@ -297,6 +307,9 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("set-password", help="パスワードを変更する")
     s.add_argument("username")
     s.set_defaults(fn=cmd_set_password)
+    s = sub.add_parser("demo", help="架空の商品で試せるデモ用データを別フォルダ（既定 var-demo）に作る")
+    s.add_argument("--dir")
+    s.set_defaults(fn=cmd_demo)
     s = sub.add_parser("create-ai-token", help="Claude の MCP 接続用トークンを作る（値は一度だけ表示）")
     s.add_argument("name")
     s.set_defaults(fn=cmd_create_ai_token)

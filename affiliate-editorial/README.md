@@ -35,6 +35,19 @@ python3 -m editorial create-user owner    # 本人用の管理者（1名のみ�
 python3 -m editorial serve                # http://127.0.0.1:8710/
 ```
 
+### まず試してみる（デモ）
+
+実データを入れる前に、架空の商品で画面と流れを試せます（実データとは別のフォルダに作ります）。
+
+```bash
+python3 -m editorial demo                                      # var-demo/ を作る
+EDITORIAL_CONFIG=var-demo/config.json python3 -m editorial serve
+# http://127.0.0.1:8711/  ユーザー demo / パスワード demo-password-1234
+EDITORIAL_CONFIG=var-demo/config.json python3 -m editorial serve-public   # 公開側の見え方
+```
+
+デモでは文章整形を「デモ用（整形なし）」で代用しています。不要になったら `var-demo/` を削除してください。
+
 ### Antigravity CLI（文章整形）
 
 `var/config.json` の `polish.command` で呼び出し方を指定します（既定は `["agy", "-p", "{prompt}"]`）。
