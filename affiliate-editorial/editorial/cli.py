@@ -21,7 +21,8 @@ from .config import APP_ROOT, ConfigError, load_config
 from .core import Actor, EditorialError
 
 CONFIG_TEMPLATE = {
-    "data_dir": "var",
+    # Relative paths are resolved from the folder that holds this file (var/).
+    "data_dir": ".",
     "source_roots": {
         "O": "/Users/<name>/path/to/O",
         "OP": "/Users/<name>/path/to/O_parent",

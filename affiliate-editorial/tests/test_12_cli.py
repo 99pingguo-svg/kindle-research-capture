@@ -47,5 +47,26 @@ class CliTest(unittest.TestCase):
         self.run_cli("policy-review", "--all")
 
 
+class ConfigPathTest(unittest.TestCase):
+    def test_relative_paths_resolve_from_the_config_folder(self):
+        sys.path.insert(0, str(APP))
+        from editorial.cli import CONFIG_TEMPLATE
+        from editorial.config import load_config
+        tmp = Path(tempfile.mkdtemp(prefix="editorial-cfg-"))
+        try:
+            (tmp / "var").mkdir()
+            cfg = dict(CONFIG_TEMPLATE, source_roots={})
+            (tmp / "var" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+            loaded = load_config(str(tmp / "var" / "config.json"))
+            self.assertEqual(loaded.data_dir.resolve(), (tmp / "var").resolve())
+            example = json.loads((APP / "config.example.json").read_text(encoding="utf-8"))
+            example["source_roots"] = {}
+            example.pop("access_guide", None)
+            (tmp / "var" / "config.json").write_text(json.dumps(example, ensure_ascii=False), encoding="utf-8")
+            self.assertEqual(load_config(str(tmp / "var" / "config.json")).data_dir.resolve(), (tmp / "var").resolve())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -136,7 +136,7 @@ asin: B0XXXXXXXX
 - 公開用のデータは許可項目だけで作り、ローカルパス・注文情報・内部メモ・認証情報・画像のEXIFが出ないことを公開前に検査します。
 - 取り込み元のフォルダは読み取り専用で開き、ハッシュが合わないもの・由来が分からないものは保留一覧に送ります。
 
-詳しくは [docs/DESIGN.md](docs/DESIGN.md)（設計）、[docs/OPERATIONS.md](docs/OPERATIONS.md)（運用）、
+Mac 上の Claude への引き継ぎは [docs/HANDOFF.md](docs/HANDOFF.md)。詳しくは [docs/DESIGN.md](docs/DESIGN.md)（設計）、[docs/OPERATIONS.md](docs/OPERATIONS.md)（運用）、
 [docs/COMPLIANCE.md](docs/COMPLIANCE.md)（規約の確認結果と未確認事項）、[docs/ACCEPTANCE.md](docs/ACCEPTANCE.md)（受入テスト）を見てください。
 
 ## テスト

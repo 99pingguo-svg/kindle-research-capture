@@ -1,5 +1,6 @@
 {
-  "data_dir": "var",
+  "_comment": "affiliate-editorial/var/config.json に置く。相対パスはこのファイルのあるフォルダ（var/）からの位置。",
+  "data_dir": ".",
   "source_roots": {
     "O": "/Users/<name>/path/to/O（引継ぎフォルダ）",
     "OP": "/Users/<name>/path/to/Oの親フォルダ",

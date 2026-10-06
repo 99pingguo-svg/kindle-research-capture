@@ -170,6 +170,7 @@ def load_config(path: Optional[str] = None, overrides: Optional[dict] = None) ->
     if cfg_path:
         with open(cfg_path, "r", encoding="utf-8") as fh:
             raw = json.load(fh)
+        raw.pop("_comment", None)
     if overrides:
         raw = _deep_merge(raw, overrides)
 
