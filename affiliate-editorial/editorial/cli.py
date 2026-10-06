@@ -103,6 +103,25 @@ def cmd_set_password(args) -> None:
     print("パスワードを変更し、ログイン中のセッションを終了しました")
 
 
+def cmd_create_ai_token(args) -> None:
+    ctx = _ctx(args)
+    token = auth.create_ai_token(ctx, args.name)
+    print("Claude 用のトークン「%s」を作りました。この値は二度と表示されません:" % args.name)
+    print(token)
+    print("Claude Code では環境変数 EDITORIAL_MCP_TOKEN に設定してから、このフォルダで claude を起動してください。")
+
+
+def cmd_revoke_ai_token(args) -> None:
+    ctx = _ctx(args)
+    auth.revoke_ai_token(ctx, args.name)
+    print("トークン「%s」を取り消しました" % args.name)
+
+
+def cmd_list_ai_tokens(args) -> None:
+    ctx = _ctx(args)
+    _print([dict(r) for r in auth.list_ai_tokens(ctx)])
+
+
 def _scheduler_loop(cfg, interval: int, stop: threading.Event) -> None:
     ctx = core.open_ctx(cfg)  # separate connection for the background thread
     while not stop.is_set():
@@ -133,6 +152,7 @@ def cmd_serve(args) -> None:
                              daemon=True)
         t.start()
         print("予約公開・定期更新のスケジューラを起動しました（%d秒ごと）" % ctx.config.admin.scheduler_interval_sec)
+    print("Claude 用 MCP: http://%s:%d/mcp （トークンは create-ai-token で作成）" % (host, port))
     try:
         serve(app, host, port)
     except KeyboardInterrupt:
@@ -277,6 +297,14 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("set-password", help="パスワードを変更する")
     s.add_argument("username")
     s.set_defaults(fn=cmd_set_password)
+    s = sub.add_parser("create-ai-token", help="Claude の MCP 接続用トークンを作る（値は一度だけ表示）")
+    s.add_argument("name")
+    s.set_defaults(fn=cmd_create_ai_token)
+    s = sub.add_parser("revoke-ai-token", help="Claude の MCP 接続用トークンを取り消す")
+    s.add_argument("name")
+    s.set_defaults(fn=cmd_revoke_ai_token)
+    sub.add_parser("list-ai-tokens", help="Claude の MCP 接続用トークンの一覧（値は表示しない）").set_defaults(
+        fn=cmd_list_ai_tokens)
     s = sub.add_parser("serve", help="管理画面を起動する")
     s.add_argument("--host")
     s.add_argument("--port", type=int)

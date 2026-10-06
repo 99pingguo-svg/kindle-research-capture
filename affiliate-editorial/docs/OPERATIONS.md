@@ -39,10 +39,11 @@
 
 ## Claude との分担
 
-- Claude に修正を頼むときは、記事に修正指示を残して「Claude への依頼ファイルを書き出す」（または `export-claude`）。
-  依頼ファイルには、記事の文章・修正指示・本人が「AI入力可」にした調査メモと原稿だけが入ります。
-- Claude の提案は `import-claude <file>` で取り込み、編集画面の「履歴」タブで差分を見て採用・見送りを選びます。
+- 基本は MCP: 記事に修正指示を残し、`affiliate-editorial/` で起動した Claude Code に「修正指示を処理して」と頼みます
+  （手順書 `.claude/skills/editorial-ai/SKILL.md`）。Claude の提案は編集画面の「履歴」タブで差分を見て採用・見送りを選びます。
   提案は本人の文章を上書きせず、状態も変えません。
+- MCP を使わない場合は「Claude への依頼ファイルを書き出す」（`export-claude`）→ 提案ファイルを `import-claude <file>` で取り込み。
+  どちらも、Claude に渡るのは記事の文章・修正指示・本人が「AI入力可」にした調査メモと原稿だけです。
 - `python3 -m editorial events --since <番号>` で承認・公開などの変更を時系列で読めます。
 
 ## バックアップ

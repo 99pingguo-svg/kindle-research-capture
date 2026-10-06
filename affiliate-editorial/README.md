@@ -42,11 +42,32 @@ python3 -m editorial serve                # http://127.0.0.1:8710/
 返ってきた JSON の項目・空欄・長さを検査してから新しい版として保存します。整形後に文章を直した場合は再整形が必要です
 （公開前の判定で止まります）。数値が増えた場合などは承認時の確認事項として表示されます。
 
-### iPhone から使う
+### iPhone から使う（商品台帳と同じく Tailscale 推奨）
 
-管理画面は既定で `127.0.0.1`（Mac の中だけ）で待ち受けます。iPhone から使う場合は、
-Tailscale などの暗号化された経路か HTTPS のリバースプロキシを用意し、`admin.host` と
-`admin.secure_cookies: true` を設定してください。ログインは本人1名、セッションは12時間で切れます。
+管理画面は既定で `127.0.0.1`（Mac の中だけ）で待ち受けます。iPhone からは Tailscale Serve で HTTPS にして使います。
+
+1. Mac と iPhone に Tailscale を入れ、同じアカウントでログインする。
+2. Mac で `tailscale serve --bg 8710` を実行し、表示された `https://<mac名>.<tailnet>.ts.net` を iPhone の Safari で開く。
+3. `var/config.json` の `admin.secure_cookies` を `true` にする（HTTPS 前提の Cookie になります）。
+
+商品台帳（8787番）と同時に使う場合は、`tailscale serve --bg --https=8443 8710` のように別のポートを割り当ててください。
+ログインは本人1名、セッションは12時間で切れます。
+
+### Claude と共同で管理する（MCP）
+
+商品台帳と同じく、Claude はアプリの MCP（`/mcp`）から直接作業できます。
+
+```bash
+python3 -m editorial create-ai-token claude-mac   # 表示された値を控える（再表示されません）
+export EDITORIAL_MCP_TOKEN=ed_xxxxxxxx              # Claude を起動するシェルで設定
+python3 -m editorial serve                         # 管理画面と /mcp を起動
+claude                                             # affiliate-editorial/ で起動すると .mcp.json と手順書が読み込まれます
+```
+
+Claude ができるのは、記事・修正指示・公開前判定・AIに使ってよいメモを読み、下書きや修正案を「提案」として保存し、
+コメントやメーカー公開情報のメモを残すところまでです。承認・公開・予約・整形・素材の権利・設定は本人だけが行います。
+収集済みレビュー・Amazon のデータ・選定メモは Claude に渡りません。頼み方の例: 「修正指示を処理して」「確認待ちの記事で公開を止めている理由をまとめて」。
+不要になったトークンは `revoke-ai-token claude-mac` で取り消せます。
 
 ## 日々の使い方
 
@@ -60,7 +81,7 @@ Tailscale などの暗号化された経路か HTTPS のリバースプロキシ
 | 素材の権利・品質を記録する | 商品・素材 → 素材 → 「権利の記録」「品質判定」 |
 | 承認・予約・公開・取り下げ・復元 | 編集画面の「確認・承認」タブ |
 | まとめて承認する | 「一括承認」（件数・商品名・版・除外件数を確認して承認） |
-| Claude に修正を頼む | 記事 → 「Claude への依頼ファイルを書き出す」→ Claude の提案を `import-claude` で取り込み → 差分を見て採用 |
+| Claude に修正を頼む | 記事に修正指示を残し、Claude に「修正指示を処理して」と頼む（MCP）→ 履歴タブで提案の差分を見て採用。MCP を使わない場合は依頼ファイルの書き出し／`import-claude` |
 | 規約の確認を記録する | 「規約確認」（公開に必要な資料の確認が古いと公開が止まります） |
 | ダミー公開先を見る | `python3 -m editorial serve-public` → http://127.0.0.1:8720/ |
 
@@ -113,4 +134,4 @@ python3 -m unittest discover -s tests -t tests
 
 合成データだけで、企画書8章の受入テスト（未承認と改訂、素材の権利、ASINとリンク、Amazonデータ期限、予約と二重実行、
 失敗と復元、スマートフォン操作、同期と同時編集、情報漏えいと不正入力、表示と検索設定）と文章整形・CLIを確認します。
-Python 3.9 / 3.11 / 3.13 で確認済みです。
+Claude 用 MCP の権限境界（`test_13_mcp.py`）も確認します。Python 3.9 / 3.11 / 3.13 で確認済みです。

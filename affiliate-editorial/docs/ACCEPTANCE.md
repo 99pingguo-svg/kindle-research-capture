@@ -16,6 +16,7 @@
 | 表示と検索設定 | 読めるHTML、広告表示、sponsored、canonical、サイトマップ、alt、構造化データの整合 | `test_10_display_seo.py` |
 | （追加）文章整形 | 公開文章はすべて整形を通す。整形後の文章変更は再整形が必要。出力の検査 | `test_11_polish.py` |
 | （追加）コマンド | 初期化・管理者作成・調査・判定がコマンドで動く | `test_12_cli.py` |
+| （追加）Claude の MCP | トークン認証・Origin 確認。読めるのは AI 可の情報だけ、書けるのは提案・コメント・メーカー情報メモだけ | `test_13_mcp.py` |
 
 実機の iPhone での操作感と、実際の Antigravity CLI・Creators API との接続は、この環境では確認できていません
 （Antigravity CLI はコマンドの代わりに同じ呼び出し方の偽スクリプトで、Creators API は公式SDKと同じ要求形式の偽応答で検証しています）。

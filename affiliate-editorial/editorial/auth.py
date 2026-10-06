@@ -158,3 +158,46 @@ def store_nonce_result(ctx: Ctx, nonce: str, result: dict) -> None:
 def release_nonce(ctx: Ctx, nonce: str) -> None:
     """Let the owner resubmit after a validation error."""
     ctx.conn.execute("DELETE FROM action_nonces WHERE nonce = ? AND result_json IS NULL", (nonce,))
+
+
+# ---------------------------------------------------------------- AI tokens
+
+def create_ai_token(ctx: Ctx, name: str) -> str:
+    """Create a bearer token for Claude's MCP access; returns it once."""
+    name = (name or "").strip()
+    if not name or len(name) > 40:
+        raise AuthError("トークン名が不正です")
+    token = "ed_" + secrets.token_urlsafe(32)
+    with db.tx(ctx.conn):
+        if db.one(ctx.conn, "SELECT 1 FROM api_tokens WHERE name = ?", (name,)):
+            raise AuthError("同じ名前のトークンがあります。先に取り消してください。")
+        db.insert(ctx.conn, "api_tokens", {"name": name, "token_hash": _token_hash(token),
+                                           "created_at": timeutil.now_iso()})
+        record_event(ctx, Actor("system", "cli"), "api_token", name, "created", {})
+    return token
+
+
+def revoke_ai_token(ctx: Ctx, name: str) -> None:
+    row = db.one(ctx.conn, "SELECT * FROM api_tokens WHERE name = ? AND revoked_at IS NULL", (name,))
+    if row is None:
+        raise AuthError("有効なトークンが見つかりません")
+    with db.tx(ctx.conn):
+        # Renaming keeps the name free for a replacement token.
+        db.update(ctx.conn, "api_tokens", "id", row["id"], {
+            "revoked_at": timeutil.now_iso(), "name": "%s (取消 %s)" % (name, row["id"])})
+        record_event(ctx, Actor("system", "cli"), "api_token", name, "revoked", {})
+
+
+def check_ai_token(ctx: Ctx, token: Optional[str]):
+    if not token or not token.startswith("ed_"):
+        return None
+    row = db.one(ctx.conn, "SELECT * FROM api_tokens WHERE token_hash = ? AND revoked_at IS NULL",
+                 (_token_hash(token),))
+    if row is not None:
+        ctx.conn.execute("UPDATE api_tokens SET last_used_at = ? WHERE id = ?", (timeutil.now_iso(), row["id"]))
+    return row
+
+
+def list_ai_tokens(ctx: Ctx):
+    return db.all_rows(ctx.conn, "SELECT id, name, created_at, last_used_at, revoked_at FROM api_tokens ORDER BY id DESC")
+

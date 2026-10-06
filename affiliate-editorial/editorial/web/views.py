@@ -180,6 +180,8 @@ def parse_editor_form(req: Request, kind: str) -> dict:
 
 def register(app: App) -> None:
     ctx = app.ctx
+    from . import mcp
+    mcp.register(app, ctx)
 
     # ---------------- auth
     @app.route("GET", "/login", public=True)
@@ -720,6 +722,7 @@ def register(app: App) -> None:
         return page(ctx, req, "settings.html", s=settings.get_all(ctx), roots={k: v.is_dir() for k, v in
                                                                              ctx.config.source_roots.items()},
                     api=ctx.amazon.configured, polish_cfg=ctx.config.polish,
+                    ai_tokens=auth.list_ai_tokens(ctx),
                     polish_available=getattr(ctx.polisher, "available", lambda: True)())
 
     @app.route("POST", "/settings")

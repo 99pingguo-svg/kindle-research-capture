@@ -49,4 +49,13 @@
     <li>文章整形：{{ polish_cfg.tool_name }}（<code>{{ polish_cfg.command[0] }}</code>）{% if polish_available %}利用可能{% else %}見つかりません{% endif %}・公開に必須: {{ "はい" if polish_cfg.require_for_publish else "いいえ" }}</li>
   </ul>
 </section>
+
+<section class="panel">
+  <h2>Claude の接続（MCP）</h2>
+  <p class="small">Claude は <code>/mcp</code> から記事を読み、下書きを「提案」として保存し、コメントやメーカー情報のメモを残せます。承認・公開・整形・権利・設定はできません。収集済みレビューと Amazon のデータは Claude に渡しません。</p>
+  <ul class="rows small">
+    {% for t in ai_tokens %}<li>{{ t.name }} — 作成 {{ t.created_at | jst }}{% if t.last_used_at %}・最終利用 {{ t.last_used_at | jst }}{% endif %}{% if t.revoked_at %} <span class="badge">取消済み</span>{% endif %}</li>
+    {% else %}<li class="muted">トークンはありません。<code>python3 -m editorial create-ai-token claude-mac</code> で作成します。</li>{% endfor %}
+  </ul>
+</section>
 {% endblock %}

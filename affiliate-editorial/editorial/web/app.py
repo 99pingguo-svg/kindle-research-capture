@@ -52,6 +52,7 @@ class Request:
         self.files: Dict[str, List[Tuple[str, bytes, str]]] = {}
         self.session = None
         self.user = None
+        self.raw_body = b""
         if self.method == "POST":
             self._parse_body()
 
@@ -63,6 +64,7 @@ class Request:
         if length > MAX_BODY:
             raise ValueError("送信データが大きすぎます")
         body = self.environ["wsgi.input"].read(length) if length else b""
+        self.raw_body = body
         ctype = self.environ.get("CONTENT_TYPE", "")
         if ctype.startswith("application/x-www-form-urlencoded"):
             self.form = parse_qs(body.decode("utf-8", "replace"), keep_blank_values=True)

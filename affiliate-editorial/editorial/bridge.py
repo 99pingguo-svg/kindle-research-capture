@@ -36,6 +36,11 @@ RULES = [
 PROPOSAL_FIELDS = ("title", "summary", "sections", "evidence", "content_basis", "info_checked_on", "images",
                    "relationship", "relationship_note")
 
+EXCLUDED = ["収集済みカスタマーレビュー", "Amazon商品データ（タイトル・説明・画像・評価）",
+            "Amazonページ由来の原資料（source_original）", "AI入力が許可されていないメモ・素材", "本人の選定メモ"]
+
+CLAUDE = Actor("claude", "claude")
+
 
 def _articles_needing_work(ctx: Ctx) -> List[int]:
     ids = []
@@ -45,53 +50,101 @@ def _articles_needing_work(ctx: Ctx) -> List[int]:
     return ids
 
 
+def article_context(ctx: Ctx, aid: int) -> dict:
+    """Everything Claude may see about one article (and nothing else).
+
+    Collected reviews, Amazon product data, Amazon-origin source files,
+    private selection notes and notes/assets not cleared for AI are left out.
+    """
+    art = articles.get(ctx, aid)
+    hv = articles.head(ctx, aid)
+    content = articles.version_content(hv)
+    entry = {
+        "article_id": aid, "slug": art["slug"], "kind": art["kind"], "state": art["state"],
+        "publication_status": art["publication_status"],
+        "base_version_id": hv["id"], "base_version_no": hv["version_no"],
+        "current": {k: content[k] for k in ("title", "summary", "sections", "evidence", "content_basis",
+                                            "info_checked_on", "relationship", "relationship_note")},
+        "current_images": [{"asset_id": i["asset_id"], "alt": i["alt"], "caption": i["caption"]}
+                           for i in content["images"]],
+        "change_requests": [{"id": r["id"], "body": r["body"], "created_at": r["created_at"]}
+                            for r in articles.open_change_requests(ctx, aid)],
+        "products": [], "notes": [], "manuscripts": [], "selectable_assets": [],
+    }
+    for p in products.products_for_article(ctx, aid):
+        entry["products"].append({"product_id": p["id"], "name": p["name"], "asin": p["asin"]})
+        entry["notes"] += notes_for_ai(ctx, p["id"])
+        if p["manuscript_cleared_for_ai"]:
+            rec = db.one(ctx.conn, "SELECT * FROM source_records WHERE product_id = ? AND kind = 'manuscript' "
+                         "AND current = 1", (p["id"],))
+            if rec:
+                data = db.loads(rec["data_json"], {})
+                entry["manuscripts"].append({"product_id": p["id"], "description": data.get("description"),
+                                             "purchase_reason": data.get("purchase_reason")})
+        for a in assets_mod.for_product(ctx, p["id"]):
+            if not assets_mod.selection_problems(ctx, a) and not assets_mod.ai_input_problems(ctx, a):
+                entry["selectable_assets"].append({"asset_id": a["id"], "kind": a["kind"], "title": a["title"],
+                                                   "fictional": bool(a["is_fictional_scene"])})
+    return entry
+
+
+def notes_for_ai(ctx: Ctx, product_id: int) -> List[dict]:
+    return [{"note_id": n["id"], "product_id": product_id, "kind": n["kind"], "origin": n["origin"],
+             "body": n["body"], "source_url": n["source_url"], "checked_on": n["checked_on"],
+             "by": n["created_by"]}
+            for n in products.notes(ctx, product_id) if n["ai_input_ok"] and n["origin"] in ("own", "maker")]
+
+
 def export_tasks(ctx: Ctx, actor: Actor, article_ids: Optional[List[int]] = None,
                  out_path: Optional[str] = None) -> Path:
     ids = article_ids or _articles_needing_work(ctx)
     bundle = {"format": BUNDLE_FORMAT, "generated_at": timeutil.now_iso(), "rules": RULES,
-              "excluded_on_purpose": ["収集済みカスタマーレビュー", "Amazon商品データ（タイトル・説明・画像・評価）",
-                                      "Amazonページ由来の原資料（source_original）", "AI入力が許可されていないメモ・素材"],
-              "articles": []}
-    for aid in ids:
-        art = articles.get(ctx, aid)
-        hv = articles.head(ctx, aid)
-        content = articles.version_content(hv)
-        entry = {
-            "article_id": aid, "slug": art["slug"], "kind": art["kind"], "state": art["state"],
-            "base_version_id": hv["id"], "base_version_no": hv["version_no"],
-            "current": {k: content[k] for k in ("title", "summary", "sections", "evidence", "content_basis",
-                                                "info_checked_on", "relationship", "relationship_note")},
-            "current_images": [{"asset_id": i["asset_id"], "alt": i["alt"], "caption": i["caption"]}
-                               for i in content["images"]],
-            "change_requests": [{"id": r["id"], "body": r["body"], "created_at": r["created_at"]}
-                                for r in articles.open_change_requests(ctx, aid)],
-            "products": [], "notes": [], "manuscripts": [], "selectable_assets": [],
-        }
-        for p in products.products_for_article(ctx, aid):
-            entry["products"].append({"product_id": p["id"], "name": p["name"], "asin": p["asin"]})
-            for n in products.notes(ctx, p["id"]):
-                if n["ai_input_ok"] and n["origin"] in ("own", "maker"):
-                    entry["notes"].append({"product_id": p["id"], "kind": n["kind"], "origin": n["origin"],
-                                           "body": n["body"], "source_url": n["source_url"],
-                                           "checked_on": n["checked_on"]})
-            if p["manuscript_cleared_for_ai"]:
-                rec = db.one(ctx.conn, "SELECT * FROM source_records WHERE product_id = ? AND kind = 'manuscript' "
-                             "AND current = 1", (p["id"],))
-                if rec:
-                    data = db.loads(rec["data_json"], {})
-                    entry["manuscripts"].append({"product_id": p["id"], "description": data.get("description"),
-                                                 "purchase_reason": data.get("purchase_reason")})
-            for a in assets_mod.for_product(ctx, p["id"]):
-                if not assets_mod.selection_problems(ctx, a) and not assets_mod.ai_input_problems(ctx, a):
-                    entry["selectable_assets"].append({"asset_id": a["id"], "kind": a["kind"], "title": a["title"],
-                                                       "fictional": bool(a["is_fictional_scene"])})
-        bundle["articles"].append(entry)
+              "excluded_on_purpose": EXCLUDED,
+              "articles": [article_context(ctx, aid) for aid in ids]}
     out = Path(out_path) if out_path else ctx.config.exports_dir / ("claude-tasks-%s.json" %
                                                                     timeutil.now().strftime("%Y%m%d-%H%M%S"))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(bundle, ensure_ascii=False, indent=2), encoding="utf-8")
     record_event(ctx, actor, "bridge", None, "exported", {"articles": ids, "file": out.name})
     return out
+
+
+def store_proposal(ctx: Ctx, aid: int, base_id: int, changes: dict, note: Optional[str] = None) -> dict:
+    """Validate Claude's changes and keep them as a proposal (never the main text)."""
+    base = articles.version(ctx, base_id)
+    if base["article_id"] != aid or base["track"] != "main":
+        raise EditorialError("base_version_id がこの記事の版ではありません")
+    content = articles.version_content(base)
+    changes = dict(changes or {})
+    unknown = set(changes) - set(PROPOSAL_FIELDS)
+    if unknown:
+        raise EditorialError("変更できない項目が含まれています: %s" % ", ".join(sorted(unknown)))
+    if "images" in changes:
+        # Claude may rewrite alt/caption of chosen images, not choose new ones.
+        current = {img["asset_id"]: img for img in content["images"]}
+        merged = []
+        for img in changes["images"] or []:
+            cur = current.get(int(img.get("asset_id", 0)))
+            if cur is None:
+                raise EditorialError("提案で新しい画像は選べません（本人が選びます）")
+            merged.append(dict(cur, alt=img.get("alt", cur["alt"]), caption=img.get("caption", cur["caption"])))
+        changes["images"] = merged
+    content.update(changes)
+    normalized = content_mod.normalize(content, articles.get(ctx, aid)["kind"])
+    text = content_mod.all_text(normalized)
+    pids = products.product_ids_for_article(ctx, aid)
+    names = [x["name"] for x in products.products_for_article(ctx, aid)]
+    if review_refs.overlaps(ctx, pids, text, ignore=names):
+        raise EditorialError("収集済みレビューと同じ文が含まれているため受け付けません")
+    findings = [f for f in lint.check_fields(content_mod.text_fields(normalized),
+                                             normalized["content_basis"] == "hands_on")
+                if f.severity == lint.BLOCK]
+    note = (str(note or "").strip() or "Claudeの下書き")[:300]
+    if findings:
+        note += "（要修正の表現 %d 件）" % len(findings)
+    vid = articles.add_proposal(ctx, CLAUDE, aid, base_id, normalized, "claude", note)
+    return {"article_id": aid, "proposal_id": vid, "stale": base_id != articles.get(ctx, aid)["head_version_id"],
+            "flags": [{"code": f.code, "message": f.message, "excerpt": f.excerpt} for f in findings]}
 
 
 def import_proposals(ctx: Ctx, actor: Actor, path: str) -> dict:
@@ -102,45 +155,13 @@ def import_proposals(ctx: Ctx, actor: Actor, path: str) -> dict:
         raise EditorialError("提案ファイルを読めません: %s" % exc)
     if not isinstance(doc, dict) or doc.get("format") != PROPOSAL_FORMAT:
         raise EditorialError("提案ファイルの format が %s ではありません" % PROPOSAL_FORMAT)
-    claude = Actor("claude", "claude")
     summary = {"stored": [], "rejected": []}
     for i, prop in enumerate(doc.get("proposals") or []):
         try:
-            aid = int(prop["article_id"])
-            base_id = int(prop["base_version_id"])
-            base = articles.version(ctx, base_id)
-            if base["article_id"] != aid or base["track"] != "main":
-                raise EditorialError("base_version_id がこの記事の版ではありません")
-            content = articles.version_content(base)
-            changes = prop.get("content") or {}
-            unknown = set(changes) - set(PROPOSAL_FIELDS)
-            if unknown:
-                raise EditorialError("変更できない項目が含まれています: %s" % ", ".join(sorted(unknown)))
-            if "images" in changes:
-                # Claude may rewrite alt/caption of chosen images, not choose new ones.
-                current = {img["asset_id"]: img for img in content["images"]}
-                merged = []
-                for img in changes["images"]:
-                    cur = current.get(int(img.get("asset_id", 0)))
-                    if cur is None:
-                        raise EditorialError("提案で新しい画像は選べません（本人が選びます）")
-                    merged.append(dict(cur, alt=img.get("alt", cur["alt"]), caption=img.get("caption", cur["caption"])))
-                changes = dict(changes, images=merged)
-            content.update(changes)
-            normalized = content_mod.normalize(content, articles.get(ctx, aid)["kind"])
-            text = content_mod.all_text(normalized)
-            pids = products.product_ids_for_article(ctx, aid)
-            names = [x["name"] for x in products.products_for_article(ctx, aid)]
-            if review_refs.overlaps(ctx, pids, text, ignore=names):
-                raise EditorialError("収集済みレビューと同じ文が含まれているため受け付けません")
-            findings = [f for f in lint.check_fields(content_mod.text_fields(normalized),
-                                                     normalized["content_basis"] == "hands_on")
-                        if f.severity == lint.BLOCK]
-            note = (str(prop.get("note") or "").strip() or "Claudeの下書き")[:300]
-            if findings:
-                note += "（要修正の表現 %d 件）" % len(findings)
-            vid = articles.add_proposal(ctx, claude, aid, base_id, normalized, "claude", note)
-            summary["stored"].append({"article_id": aid, "proposal_id": vid, "flags": len(findings)})
+            result = store_proposal(ctx, int(prop["article_id"]), int(prop["base_version_id"]),
+                                    prop.get("content") or {}, prop.get("note"))
+            summary["stored"].append({"article_id": result["article_id"], "proposal_id": result["proposal_id"],
+                                      "flags": len(result["flags"])})
         except (EditorialError, KeyError, TypeError, ValueError) as exc:
             summary["rejected"].append({"index": i, "error": str(exc)})
     record_event(ctx, actor, "bridge", None, "proposals_imported",

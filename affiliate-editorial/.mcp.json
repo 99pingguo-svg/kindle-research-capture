@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "editorial": {
+      "type": "http",
+      "url": "http://127.0.0.1:8710/mcp",
+      "headers": {
+        "Authorization": "Bearer ${EDITORIAL_MCP_TOKEN}"
+      }
+    }
+  }
+}
