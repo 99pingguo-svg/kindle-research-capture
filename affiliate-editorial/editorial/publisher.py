@@ -14,6 +14,8 @@ import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from markupsafe import escape
+
 from . import amazon_api, articles, db, imagemeta, leaks, links, render, settings, timeutil
 from .config import PACKAGE_ROOT
 from .core import Ctx, EditorialError
@@ -137,17 +139,20 @@ def verify(ctx: Ctx, result: dict, expect_absent: Optional[List[str]] = None) ->
         mode = context["monetization_mode"]
         if page["content_hash"] != page["approval_content_hash"]:
             problems.append("%s: 承認した版と内容のハッシュが一致しません" % page["path"])
-        if "<title>" not in html or page["title"] not in html:
+        def shown(text) -> bool:
+            return str(escape(text)) in html
+
+        if "<title>" not in html or not shown(page["title"]):
             problems.append("%s: タイトルがありません" % page["path"])
         if context.get("base_url") and 'rel="canonical"' not in html:
             problems.append("%s: canonical がありません" % page["path"])
-        if context["ai_label_text"] not in html:
+        if not shown(context["ai_label_text"]):
             problems.append("%s: AI利用の表示がありません" % page["path"])
         if page["kind"] != "page" and page["cards"]:
             if mode == "associates":
-                if context["ad_label_text"] not in html:
+                if not shown(context["ad_label_text"]):
                     problems.append("%s: 記事冒頭の広告表示がありません" % page["path"])
-                if settings.amazon_disclosure(context) not in html:
+                if not shown(settings.amazon_disclosure(context)):
                     problems.append("%s: Amazonアソシエイトの開示文がありません" % page["path"])
             for m in _A_RE.finditer(html):
                 tag = m.group(0)

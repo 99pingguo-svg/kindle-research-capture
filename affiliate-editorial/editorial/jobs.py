@@ -82,8 +82,14 @@ def enqueue_publish(ctx: Ctx, actor: Actor, article_id: int, version_id: int,
             run_at = timeutil.iso(now)
         existing = pending_publish_job(ctx, article_id)
         if existing:
-            if existing["approval_id"] == approval["id"] and (existing["run_at"] == run_at or not scheduled):
+            same_order = existing["approval_id"] == approval["id"] and (
+                (scheduled and existing["status"] == "scheduled" and existing["run_at"] == run_at)
+                or (not scheduled and existing["status"] in ("queued", "running")))
+            if same_order:
                 return int(existing["id"])  # the same order again: do not duplicate
+            if existing["status"] == "scheduled":
+                raise EditorialError("この記事は %s に公開予約されています。今すぐ公開する場合は、先に予約を取り消してください。"
+                                     % timeutil.jst_label(existing["run_at"]))
             raise EditorialError("この記事には既に公開予定のジョブがあります（#%d）。取り消してから指定し直してください。"
                                  % existing["id"])
         if approval["purpose"] == "publish" and art["head_version_id"] != version_id:
@@ -463,6 +469,10 @@ def _run_refresh(ctx: Ctx, job) -> dict:
                 k: v for k, v in summary.items() if k != "errors"}, "notes": result["notes"][:20]})
 
     _switch_and_commit(ctx, job, result, verification, commit)
+    # Refreshes queued while this one ran (e.g. by the licence expiry above) are already covered.
+    ctx.conn.execute("UPDATE publish_jobs SET status = 'canceled', finished_at = ?, last_error = ? WHERE action = 'refresh' "
+                     "AND status = 'queued' AND id != ? AND created_at >= ?",
+                     (timeutil.now_iso(), "同じ定期更新で処理済み", job["id"], job["started_at"] or now))
     return {"build_id": result["build_id"], "amazon": summary, "withdrawn": [a for a, _ in withdrawn],
             "expired_assets": expired, "notes": result["notes"]}
 

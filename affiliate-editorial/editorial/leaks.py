@@ -10,7 +10,7 @@ from .core import Ctx
 _PATTERNS = [
     (re.compile(r"/Users/[^\s\"'<>]+"), "Macのローカルパス"),
     (re.compile(r"/home/[a-z0-9_.-]+/"), "ローカルパス"),
-    (re.compile(r"[A-Za-z]:\\\\[^\s\"'<>]+"), "Windowsのローカルパス"),
+    (re.compile(r"\b[A-Za-z]:\\{1,2}[^\s\"'<>]+"), "Windowsのローカルパス"),
     (re.compile(r"file://"), "file:// URL"),
     (re.compile(r"\b\d{3}-\d{7}-\d{7}\b"), "Amazonの注文番号らしき文字列"),
     (re.compile(r"(?:注文番号|領収書|仕入れ値|仕入値|購入価格|原価)\s*[:：]"), "注文・仕入れ情報らしき記述"),

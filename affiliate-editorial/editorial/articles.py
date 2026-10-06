@@ -25,6 +25,8 @@ PUBLICATION_LABELS = {"unpublished": "未公開", "live": "公開中", "withdraw
 AUTHOR_LABELS = {"import": "元データ", "human": "本人", "claude": "Claudeの案", "polish": "文章整形",
                  "system": "システム"}
 KIND_LABELS = {"product": "商品紹介", "comparison": "比較記事", "page": "固定ページ"}
+# Paths the static build creates itself.
+RESERVED_SLUGS = {"assets", "media", "items", "index", "404", "sitemap", "robots", "static", "admin", "mcp"}
 
 # Saving a new version from these states keeps the state.
 _KEEP_STATE_ON_SAVE = ("draft", "changes", "review")
@@ -89,6 +91,8 @@ def create(ctx: Ctx, actor: Actor, kind: str, slug: str, product_ids: List[int],
     slug = (slug or "").strip().lower()
     if not content_mod.SLUG_RE.match(slug):
         raise EditorialError("URL名（slug）は半角英小文字・数字・ハイフンで指定してください")
+    if slug in RESERVED_SLUGS:
+        raise EditorialError("「%s」はサイトの仕組みで使う名前のため、URL名にできません" % slug)
     if kind == "page" and product_ids:
         raise EditorialError("固定ページには商品を紐付けません")
     if kind == "product" and len(product_ids) != 1:
@@ -114,10 +118,14 @@ def create(ctx: Ctx, actor: Actor, kind: str, slug: str, product_ids: List[int],
 
 def _insert_main_version(ctx: Ctx, actor: Actor, article_id: int, base_version_id: Optional[int],
                          raw: dict, author_kind: str, note: Optional[str],
-                         polish_run_id: Optional[int] = None, adopted_from_id: Optional[int] = None) -> int:
-    art = get(ctx, article_id)
-    base = version_content(version(ctx, base_version_id)) if base_version_id else None
-    content = prepare_content(ctx, art, raw, base)
+                         polish_run_id: Optional[int] = None, adopted_from_id: Optional[int] = None,
+                         prepared: bool = False) -> int:
+    if prepared:
+        content = raw
+    else:
+        art = get(ctx, article_id)
+        base = version_content(version(ctx, base_version_id)) if base_version_id else None
+        content = prepare_content(ctx, art, raw, base)
     next_no = (db.scalar(ctx.conn, "SELECT MAX(version_no) FROM article_versions WHERE article_id = ? "
                          "AND track = 'main'", (article_id,)) or 0) + 1
     vid = db.insert(ctx.conn, "article_versions", {
@@ -184,7 +192,7 @@ def save(ctx: Ctx, actor: Actor, article_id: int, base_version_id: int, raw: dic
         if content_mod.content_hash(new_content) == current["content_hash"]:
             return base_version_id
         vid = _insert_main_version(ctx, actor, article_id, base_version_id, new_content, author_kind, note,
-                                   polish_run_id=polish_run_id, adopted_from_id=adopted_from_id)
+                                   polish_run_id=polish_run_id, adopted_from_id=adopted_from_id, prepared=True)
         state = art["state"]
         if state in _REAPPROVE_ON_SAVE:
             from . import approvals

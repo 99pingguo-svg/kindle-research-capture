@@ -8,7 +8,7 @@ ids seen at approval time.  Publishing re-checks all of them.
 from __future__ import annotations
 
 import uuid
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from . import articles, db, settings, timeutil
 from .core import Actor, Ctx, EditorialError, GateError, record_event
@@ -103,13 +103,13 @@ def bulk_candidates(ctx: Ctx) -> dict:
 
 
 def bulk_approve(ctx: Ctx, actor: Actor, items: Sequence[Tuple[int, int, str]],
-                 acknowledge_listed_warnings: bool) -> List[int]:
+                 acknowledged: Dict[int, Sequence[str]]) -> List[int]:
     """Approve exactly the (article, version, hash) tuples the owner saw.
 
-    The batch is all-or-nothing: if any article changed since the owner
-    looked at the list, nothing is approved.
+    ``acknowledged`` maps article id to the warning keys that were shown on
+    the list.  The batch is all-or-nothing: if any article changed or shows a
+    warning the owner did not see, nothing is approved.
     """
-    from . import checks
     if not items:
         raise EditorialError("承認する記事が選ばれていません")
     batch_id = "batch-" + uuid.uuid4().hex[:12]
@@ -122,9 +122,7 @@ def bulk_approve(ctx: Ctx, actor: Actor, items: Sequence[Tuple[int, int, str]],
                     or ver["content_hash"] != content_hash):
                 raise EditorialError("一覧を表示した後に「%s」が変更されました。もう一度一覧を確認してください。"
                                      % articles.version_content(ver)["title"])
-            report = checks.evaluate(ctx, article_id, version_id, purpose="approve")
-            acknowledged = [w.key for w in report.warnings] if acknowledge_listed_warnings else []
-            ids.append(_create(ctx, actor, art, ver, acknowledged, "publish", batch_id))
+            ids.append(_create(ctx, actor, art, ver, list(acknowledged.get(article_id, [])), "publish", batch_id))
             articles.set_state(ctx, actor, article_id, "approved", "一括承認 (版%d)" % ver["version_no"])
         record_event(ctx, actor, "batch", batch_id, "bulk_approved",
                      {"count": len(ids), "articles": [i[0] for i in items]})

@@ -109,6 +109,24 @@ class RightsTest(EditorialTestCase):
         self.assertIn(b"/Users/someone", png)
         self.assertNotIn(b"/Users/someone", imagemeta.strip_metadata(png))
 
+    def test_blocking_a_parent_also_invalidates_articles_using_derived_images(self):
+        parent = self.make_asset(self.pid)
+        child = assets.create(self.ctx, OWNER, self.pid, "manga", png_bytes(color=b"\x31\x32\x33"))
+        assets.update_rights(self.ctx, OWNER, child, {
+            "rights_status": "verified", "source": "本人制作", "rights_holder": "本人", "license_basis": "自作",
+            "commercial_ok": "1", "modification_ok": "1", "ai_input_ok": "0", "parent_asset_id": str(parent),
+            "provenance_note": "本人の写真から本人が描いた", "is_fictional_scene": "1"})
+        assets.update_quality(self.ctx, OWNER, child, "good")
+        aid = articles.create(self.ctx, OWNER, "product", "derived-item", [self.pid])
+        vid = self.fill_content(aid, image_ids=[child])
+        from editorial import polish
+        polish.polish_article(self.ctx, OWNER, aid, vid)
+        articles.submit_for_review(self.ctx, OWNER, aid)
+        appr = self.approve(aid)
+        assets.update_rights(self.ctx, OWNER, parent, {"rights_status": "denied"})
+        self.assertEqual(approvals.get(self.ctx, appr)["status"], "invalidated")
+        self.assertEqual(articles.get(self.ctx, aid)["state"], "changes")
+
     def test_quality_rejection_after_approval_invalidates(self):
         aid, pid, imgs = self.ready_article(asin="B0TESTCCC3", slug="quality-item")
         appr = self.approve(aid)

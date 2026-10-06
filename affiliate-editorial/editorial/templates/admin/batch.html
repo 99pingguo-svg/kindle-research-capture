@@ -16,7 +16,8 @@
       <tbody>
       {% for e in c.eligible %}
       <tr>
-        <td><input type="checkbox" name="item" value="{{ e.article_id }}:{{ e.version_id }}:{{ e.content_hash }}" checked aria-label="{{ e.title }}を選ぶ"></td>
+        <td><input type="checkbox" name="item" value="{{ e.article_id }}:{{ e.version_id }}:{{ e.content_hash }}" checked aria-label="{{ e.title }}を選ぶ">
+          {% for w in e.warnings %}<input type="hidden" name="ack" value="{{ e.article_id }}:{{ w.key }}">{% endfor %}</td>
         <td><a href="/articles/{{ e.article_id }}">{{ e.title }}</a></td>
         <td>{% for p in e.products %}{{ p.name }} <span class="mono small">{{ p.asin }}</span>{% if not loop.last %}、{% endif %}{% endfor %}</td>
         <td>版{{ e.version_no }} <span class="mono small">{{ e.content_hash[:10] }}</span></td>

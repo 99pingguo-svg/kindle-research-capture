@@ -276,13 +276,17 @@
     <details class="panel">
       <summary>過去の承認版を復元する</summary>
       <p class="small">権利が今も有効かを再検査してから公開します。</p>
-      {% for v in restorable %}
-      <form method="post" action="/articles/{{ art.id }}/restore" class="inline">
+      {% for r in restorable %}{% set v = r.v %}
+      <form method="post" action="/articles/{{ art.id }}/restore" class="stack restore-row">
         {{ hidden(csrf, nonce) }}<input type="hidden" name="version_id" value="{{ v.id }}">
-        <span>版{{ v.version_no }}（承認 {{ v.last_approved_at | jst }}）</span>
-        <a class="small" href="/articles/{{ art.id }}/preview?version={{ v.id }}" target="_blank" rel="noopener">見る</a>
-        <label class="check small"><input type="checkbox" name="ack_all" value="1"> 表示された注意事項を確認済み</label>
-        <button type="submit" data-confirm="版{{ v.version_no }}を復元して公開しますか？">復元して公開</button>
+        <p>版{{ v.version_no }}（承認 {{ v.last_approved_at | jst }}）
+          <a class="small" href="/articles/{{ art.id }}/preview?version={{ v.id }}" target="_blank" rel="noopener">見る</a></p>
+        {% if r.report.blocks %}
+          <ul class="small danger-text">{% for b in r.report.blocks %}<li>{{ b.message }}</li>{% endfor %}</ul>
+        {% else %}
+          {% for w in r.report.warnings %}<label class="check small"><input type="checkbox" name="ack" value="{{ w.key }}" required> 確認しました: {{ w.message }}</label>{% endfor %}
+          <button type="submit" data-confirm="版{{ v.version_no }}を復元して公開しますか？">復元して公開</button>
+        {% endif %}
       </form>
       {% endfor %}
     </details>

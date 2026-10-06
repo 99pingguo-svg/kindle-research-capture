@@ -80,6 +80,8 @@ class PrivacySecurityTest(EditorialTestCase):
         report = checks.evaluate(self.ctx, aid, articles.get(self.ctx, aid)["head_version_id"])
         self.assertTrue(any(p.code == "leak" for p in report.blocks))
         self.assertTrue(leaks.scan_text(self.ctx, "注文番号: 123"))
+        self.assertTrue(leaks.scan_text(self.ctx, r"写真は C:\Users\owner\a.jpg にあります"))
+        self.assertFalse(leaks.scan_text(self.ctx, "受付は 10:30 からです"))
 
     def test_text_is_escaped_and_instructions_are_inert(self):
         self.publish_about()

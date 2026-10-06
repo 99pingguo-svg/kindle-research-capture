@@ -120,14 +120,42 @@ class ApprovalAndRevisionTest(EditorialTestCase):
         content = articles.version_content(articles.head(self.ctx, a2))
         content["summary"] += "（変更）"
         articles.save(self.ctx, OWNER, a2, art["head_version_id"], content)
+        shown = {e["article_id"]: [w.key for w in e["warnings"]] for e in cands["eligible"]}
         with self.assertRaises(EditorialError):
-            approvals.bulk_approve(self.ctx, OWNER, items, True)
+            approvals.bulk_approve(self.ctx, OWNER, items, shown)
         self.assertEqual(articles.get(self.ctx, a1)["state"], "review")
         # Fresh list, fresh approval.
         cands = approvals.bulk_candidates(self.ctx)
         items = [(e["article_id"], e["version_id"], e["content_hash"]) for e in cands["eligible"]]
-        approvals.bulk_approve(self.ctx, OWNER, items, True)
+        shown = {e["article_id"]: [w.key for w in e["warnings"]] for e in cands["eligible"]}
+        approvals.bulk_approve(self.ctx, OWNER, items, shown)
         self.assertEqual(articles.get(self.ctx, a1)["state"], "approved")
+
+    def test_bulk_approval_refuses_warnings_the_owner_did_not_see(self):
+        a1, _, _ = self.ready_article(slug="warn-one")
+        cands = approvals.bulk_candidates(self.ctx)
+        items = [(e["article_id"], e["version_id"], e["content_hash"]) for e in cands["eligible"]]
+        shown = {e["article_id"]: [w.key for w in e["warnings"]] for e in cands["eligible"]}
+        # A new warning appears after the list was shown (privacy page check is already there;
+        # simulate another one by removing a known key from what was shown).
+        shown[a1] = shown[a1][:-1]
+        with self.assertRaises(GateError):
+            approvals.bulk_approve(self.ctx, OWNER, items, shown)
+        self.assertEqual(articles.get(self.ctx, a1)["state"], "review")
+
+    def test_publish_now_does_not_return_a_future_schedule(self):
+        aid, _, _ = self.ready_article(slug="sched-item")
+        self.approve(aid)
+        vid = articles.get(self.ctx, aid)["head_version_id"]
+        jobs.enqueue_publish(self.ctx, OWNER, aid, vid, run_at=timeutil.iso(timeutil.now() + timedelta(days=1)))
+        with self.assertRaises(EditorialError) as cm:
+            jobs.enqueue_publish(self.ctx, OWNER, aid, vid)
+        self.assertIn("予約", str(cm.exception))
+
+    def test_reserved_slugs_are_refused(self):
+        for slug in ("assets", "media", "items"):
+            with self.assertRaises(EditorialError):
+                articles.create(self.ctx, OWNER, "page", slug, [])
 
     def test_bulk_candidates_count_rights_holds(self):
         aid, pid, imgs = self.ready_article()

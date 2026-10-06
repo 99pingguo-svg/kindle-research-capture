@@ -73,6 +73,16 @@ class DisplaySeoTest(EditorialTestCase):
         self.assertNotIn("円", re.sub(r"<[^>]+>", "", self.html).replace("価格・在庫", ""))
         self.assertNotIn("5点中", self.html)
 
+    def test_names_with_html_special_characters_still_publish(self):
+        from editorial import articles, settings
+        settings.set_many(self.ctx, OWNER, {"operator_name": "A&B合同会社", "site_name": "道具の\"選び方\"ノート"})
+        aid, _, _ = self.ready_article(slug="special-chars", asin="B0TESTSPC1",
+                                       title="「A&B」の<収納>の選び方")
+        self.approve_and_publish(aid)
+        html = (self.out / "items/special-chars/index.html").read_text(encoding="utf-8")
+        self.assertIn("A&amp;B合同会社は適格販売により収入を得ています", html)
+        self.assertEqual(articles.get(self.ctx, aid)["publication_status"], "live")
+
     def test_about_page_has_operator_information(self):
         about = (self.out / "about/index.html").read_text(encoding="utf-8")
         for text in ("運営者", "編集 花子", "https://example.com/contact"):

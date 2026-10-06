@@ -328,16 +328,31 @@ def add_processing_step(ctx: Ctx, actor: Actor, asset_id: int, step: str) -> Non
         record_event(ctx, actor, "asset", asset_id, "processing_recorded", {"step": step})
 
 
+def descendants(ctx: Ctx, asset_id: int) -> List[int]:
+    """Assets derived (directly or indirectly) from this one."""
+    found: List[int] = []
+    frontier = [asset_id]
+    while frontier and len(found) < 1000:
+        rows = db.all_rows(ctx.conn, "SELECT id FROM assets WHERE parent_asset_id IN (%s)"
+                           % ",".join("?" for _ in frontier), frontier)
+        frontier = [r["id"] for r in rows if r["id"] not in found and r["id"] != asset_id]
+        found += frontier
+    return found
+
+
 def on_asset_blocked(ctx: Ctx, actor: Actor, asset_id: int, reason: str) -> None:
-    """Invalidate approvals that use the asset and hide it from live pages."""
+    """Invalidate approvals that use the asset (or anything derived from it)
+    and hide it from live pages."""
     from . import approvals, articles, jobs
     affected_live = False
-    for art_id, where in articles.articles_using_asset(ctx, asset_id):
-        if "head" in where or "approved" in where:
-            approvals.invalidate_for_article(ctx, actor, art_id, reason, to_state="changes")
-        if "live" in where:
-            affected_live = True
-            articles.add_system_comment(ctx, art_id, reason + "。公開中のページから該当画像を外しました。再確認してください。")
+    for aid in [asset_id] + descendants(ctx, asset_id):
+        why = reason if aid == asset_id else "%s（素材#%d はその素材から作られています）" % (reason, aid)
+        for art_id, where in articles.articles_using_asset(ctx, aid):
+            if "head" in where or "approved" in where:
+                approvals.invalidate_for_article(ctx, actor, art_id, why, to_state="changes")
+            if "live" in where:
+                affected_live = True
+                articles.add_system_comment(ctx, art_id, why + "。公開中のページから該当画像を外しました。再確認してください。")
     if affected_live:
         jobs.enqueue_refresh(ctx, actor, reason="素材#%d の公開停止" % asset_id)
 

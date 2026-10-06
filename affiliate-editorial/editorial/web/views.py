@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+import traceback
 from datetime import timedelta
 from typing import Callable, Optional
 
@@ -54,7 +55,7 @@ def page(ctx: Ctx, req: Request, template: str, status: int = 200, **kw) -> Resp
         "failed": db.scalar(ctx.conn, "SELECT COUNT(*) FROM publish_jobs WHERE status = 'failed'"),
     }
     body = admin_env().get_template("admin/" + template).render(
-        user=req.user, csrf=req.session["csrf_token"] if req.session else "", nonce=auth.new_nonce(),
+        user=req.user, csrf=req.session["csrf_token"] if req.session else "", nonce=FreshNonce(),
         flash=flash, counts=counts, path=req.path, now=timeutil.now_iso(), **kw)
     return Response(body, status)
 
@@ -83,6 +84,10 @@ def act(ctx: Ctx, req: Request, name: str, fn: Callable[[], Optional[str]], back
         return redirect(previous.get("redirect") or back)
     try:
         target = fn() or back
+    except _Pending as exc:
+        auth.store_nonce_result(ctx, nonce, {"redirect": back})
+        flash(ctx, req, str(exc))
+        return redirect(back)
     except GateError as exc:
         auth.release_nonce(ctx, nonce)
         flash(ctx, req, "⚠ %s\n%s" % (exc, "\n".join("・" + p.message for p in exc.problems)))
@@ -91,10 +96,30 @@ def act(ctx: Ctx, req: Request, name: str, fn: Callable[[], Optional[str]], back
         auth.release_nonce(ctx, nonce)
         flash(ctx, req, "⚠ " + str(exc))
         return redirect(back)
+    except Exception:
+        # Unexpected failure: the action may not have run, so let the owner retry.
+        traceback.print_exc()
+        auth.release_nonce(ctx, nonce)
+        flash(ctx, req, "⚠ 予期しないエラーで操作が完了しませんでした。状態を確認してからやり直してください。")
+        return redirect(back)
     auth.store_nonce_result(ctx, nonce, {"redirect": target})
     if success:
         flash(ctx, req, success)
     return redirect(target)
+
+
+class _Pending(Exception):
+    """The action was accepted but its job has not run yet."""
+
+
+class FreshNonce:
+    """Renders a new one-time form token wherever it is printed (one per form)."""
+
+    def __str__(self) -> str:
+        return auth.new_nonce()
+
+    def __html__(self) -> str:
+        return str(self)
 
 
 def _int(value, default=None):
@@ -478,7 +503,10 @@ def register(app: App) -> None:
                     polish_runs=polish.runs(ctx, aid), polished=polish.is_polished(ctx, aid, hv),
                     polish_available=getattr(ctx.polisher, "available", lambda: True)(),
                     polish_tool=ctx.config.polish.tool_name,
-                    restorable=approvals.restorable_versions(ctx, aid), pending_job=pending_job,
+                    restorable=[{"v": v, "report": checks.evaluate(ctx, aid, v["id"], purpose="restore")}
+                                for v in approvals.restorable_versions(ctx, aid)
+                                if v["id"] != art["live_version_id"]],
+                    pending_job=pending_job,
                     queue_list=articles.list_articles(ctx, states=["review", "changes", "draft", "error", "approved",
                                                                    "scheduled"]),
                     show_reviews=show_reviews, review_refs=refs,
@@ -518,8 +546,12 @@ def register(app: App) -> None:
                 posted = raw
             return editor(req, aid, posted=posted, conflict={"message": str(exc), "diff": diff, "base_id": base_id},
                           status=409)
-        except EditorialError as exc:
+        except Exception as exc:
             auth.release_nonce(ctx, nonce)
+            if not isinstance(exc, EditorialError):
+                traceback.print_exc()
+                flash(ctx, req, "⚠ 予期しないエラーで保存できませんでした。もう一度お試しください。")
+                return redirect("/articles/%d" % aid)
             try:
                 posted = content_mod.normalize(raw, art["kind"]) if "raw" in locals() else None
             except EditorialError:
@@ -539,11 +571,15 @@ def register(app: App) -> None:
             return act(ctx, req, name, lambda: fn(req, aid), "/articles/%d%s" % (aid, anchor), success)
         return handler
 
-    def _run_jobs_now(aid: int) -> Optional[str]:
+    def _run_job_now(job_id: int) -> Optional[str]:
+        """Run due jobs and report on this job only (others are listed on the jobs page)."""
         results = jobs.run_due(ctx)
-        mine = [r for r in results if r.get("status") == "failed"]
-        if mine:
-            raise EditorialError("公開処理に失敗しました: %s" % mine[0].get("error", ""))
+        mine = next((r for r in results if r.get("job_id") == job_id), None)
+        if mine is None or mine.get("status") == "busy":
+            raise _Pending("別の公開処理が実行中のため、この処理は待機しています（ジョブ#%d）。「公開ジョブ」で結果を確認してください。"
+                           % job_id)
+        if mine["status"] == "failed":
+            raise EditorialError("公開処理に失敗しました: %s" % mine.get("error", ""))
         return None
 
     def do_polish(req, aid):
@@ -562,17 +598,14 @@ def register(app: App) -> None:
         jobs.enqueue_publish(ctx, actor(req), aid, _int(req.get("version_id")), run_at=timeutil.iso(when))
 
     def do_publish_now(req, aid):
-        jobs.enqueue_publish(ctx, actor(req), aid, _int(req.get("version_id")))
-        return _run_jobs_now(aid)
+        return _run_job_now(jobs.enqueue_publish(ctx, actor(req), aid, _int(req.get("version_id"))))
 
     def do_takedown(req, aid):
-        jobs.enqueue_unpublish(ctx, actor(req), aid, req.get("reason"))
-        return _run_jobs_now(aid)
+        return _run_job_now(jobs.enqueue_unpublish(ctx, actor(req), aid, req.get("reason")))
 
     def do_restore(req, aid):
-        jobs.enqueue_restore(ctx, actor(req), aid, _int(req.get("version_id")),
-                             acknowledge_all=req.get("ack_all") == "1")
-        return _run_jobs_now(aid)
+        return _run_job_now(jobs.enqueue_restore(ctx, actor(req), aid, _int(req.get("version_id")),
+                                                 req.getlist("ack")))
 
     def do_paste_draft(req, aid):
         draft = drafts.parse_markdown(req.get("draft"))
@@ -651,12 +684,21 @@ def register(app: App) -> None:
     def batch_post(req: Request):
         def run():
             items = []
-            for raw in req.getlist("item"):
-                aid, vid, h = raw.split(":", 2)
-                items.append((int(aid), int(vid), h))
+            try:
+                for raw in req.getlist("item"):
+                    aid, vid, h = raw.split(":", 2)
+                    items.append((int(aid), int(vid), h))
+                shown = {}
+                for raw in req.getlist("ack"):
+                    aid, key = raw.split(":", 1)
+                    shown.setdefault(int(aid), []).append(key)
+            except ValueError:
+                raise EditorialError("フォームの内容が正しくありません。一覧を開き直してください。")
             if req.get("confirm_count") != str(len(items)):
                 raise EditorialError("確認した件数と選択件数が一致しません。もう一度確認してください。")
-            approvals.bulk_approve(ctx, actor(req), items, req.get("ack_all") == "1")
+            if req.get("ack_all") != "1":
+                raise EditorialError("注意事項を確認したことにチェックしてください")
+            approvals.bulk_approve(ctx, actor(req), items, shown)
             return "/queue"
         return act(ctx, req, "bulk_approve", run, "/approve-batch", "まとめて承認しました")
 

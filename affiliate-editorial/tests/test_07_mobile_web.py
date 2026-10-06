@@ -141,9 +141,10 @@ class MobileWebTest(EditorialTestCase):
         a1, _, _ = self.ready_article(slug="bulk-one")
         page, csrf, nonce = self.tokens("/approve-batch")
         items = re.findall(r'name="item" value="([^"]+)"', page.text)
+        acks = re.findall(r'name="ack" value="([^"]+)"', page.text)
         self.assertEqual(len(items), 1)
-        r = self.client.post("/approve-batch", {"_csrf": csrf, "_nonce": nonce, "item": items, "ack_all": "1",
-                                                "confirm_count": "1"})
+        r = self.client.post("/approve-batch", {"_csrf": csrf, "_nonce": nonce, "item": items, "ack": acks,
+                                                "ack_all": "1", "confirm_count": "1"})
         self.assertEqual(r.status, 303)
         self.assertEqual(articles.get(self.ctx, a1)["state"], "approved")
 
@@ -162,6 +163,28 @@ class MobileWebTest(EditorialTestCase):
         row = db.one(self.ctx.conn, "SELECT * FROM assets WHERE id = ?", (asset_id,))
         self.assertEqual(row["rights_status"], "verified")
         self.assertEqual(row["ai_input_ok"], 0)
+
+    def test_unexpected_error_lets_the_owner_retry_with_the_same_form(self):
+        from unittest import mock
+        aid, _, _ = self.ready_article()
+        articles.request_changes(self.ctx, OWNER, aid, "直してください")
+        content = articles.version_content(articles.head(self.ctx, aid))
+        content["summary"] += "（修正）"
+        articles.save(self.ctx, OWNER, aid, articles.get(self.ctx, aid)["head_version_id"], content)
+        _, csrf, nonce = self.tokens("/articles/%d" % aid)
+        with mock.patch.object(articles, "submit_for_review", side_effect=RuntimeError("boom")):
+            r = self.client.post("/articles/%d/submit" % aid, {"_csrf": csrf, "_nonce": nonce})
+        self.assertEqual(r.status, 303)
+        self.assertIn("予期しないエラー", self.client.get("/articles/%d" % aid).text)
+        self.client.post("/articles/%d/submit" % aid, {"_csrf": csrf, "_nonce": nonce})
+        self.assertEqual(articles.get(self.ctx, aid)["state"], "review")
+
+    def test_each_form_gets_its_own_token(self):
+        aid, _, _ = self.ready_article()
+        page = self.client.get("/articles/%d" % aid)
+        nonces = re.findall(r'name="_nonce" value="([^"]+)"', page.text)
+        self.assertGreater(len(nonces), 3)
+        self.assertEqual(len(nonces), len(set(nonces)))
 
     def test_csrf_is_required(self):
         aid, _, _ = self.ready_article()
