@@ -473,3 +473,18 @@ test('autosave: periodic snapshot only when something changed; save points are k
   assert.equal(all.filter((s) => s.kind === 'auto').length, 48);
   assert.ok(all.some((s) => s.id === sp.id));
 });
+
+test('AI snapshots live in their own bucket and are rate-limited: they cannot evict the user\'s undo points', () => {
+  const store = new Store(tmp());
+  store.create({ name: 'X' }, 'user');
+  const sp = store.saveSnapshot('user', { label: 'セーブポイント' });
+  const before = store.saveSnapshot('user', { label: 'ロールバック前', kind: 'before' });
+  const auto = store.saveSnapshot('system', { label: '自動保存', kind: 'auto' });
+  const first = store.saveAiSnapshot('claude', '一括原稿の前');
+  assert.equal(first.kind, 'ai');
+  assert.equal(store.saveAiSnapshot('claude', 'もう一度').id, first.id); // within 5 minutes: reused, not a new one
+  for (let i = 0; i < 40; i++) store.saveSnapshot('claude', { label: `AI${i}`, kind: 'ai' }); // even if forced past the limit
+  const ids = new Set(store.listSnapshots().map((s) => s.id));
+  for (const s of [sp, before, auto]) assert.ok(ids.has(s.id));
+  assert.equal(store.listSnapshots().filter((s) => s.kind === 'ai').length, 10);
+});

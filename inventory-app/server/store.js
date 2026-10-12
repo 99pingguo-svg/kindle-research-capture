@@ -1011,7 +1011,8 @@ export class Store extends EventEmitter {
   /**
    * Save every product (and settings) as they are now. Photos are append-only, so files are not copied.
    * kind: 'manual' = a save point the user made (kept until deleted), 'auto' = periodic autosave,
-   * 'before' = taken automatically just before a bulk edit or a rollback.
+   * 'before' = taken automatically just before a bulk edit or a rollback, 'ai' = requested by the AI.
+   * Each kind is pruned separately, so one kind can never push another kind's undo points out.
    */
   saveSnapshot(actor, { label = '', kind = 'manual', auto } = {}) {
     if (auto && kind === 'manual') kind = 'before';
@@ -1028,6 +1029,16 @@ export class Store extends EventEmitter {
     this.snapshotSeq = this.changeSeq || 0;
     this.pruneSnapshots();
     return info;
+  }
+
+  /**
+   * The AI may save the state before mass edits, in its own bucket (newest 10) and at most once per 5 minutes,
+   * so it can neither push the user's undo points out nor fill the disk.
+   */
+  saveAiSnapshot(actor, label = '') {
+    const last = this.listSnapshots().find((s) => s.kind === 'ai');
+    if (last && Date.now() - Date.parse(last.at) < 5 * 60_000) return { ...last, reused: true };
+    return this.saveSnapshot(actor, { label: `${String(label || '').slice(0, 60)}（AI）`, kind: 'ai' });
   }
 
   /** Periodic autosave: only when something changed since the last snapshot of any kind. */
@@ -1051,11 +1062,12 @@ export class Store extends EventEmitter {
       .sort((a, b) => b.at.localeCompare(a.at));
   }
 
-  /** Keep every save point; keep the newest 48 periodic autosaves and 30 pre-operation ones. */
+  /** Keep every save point; keep the newest 48 periodic autosaves, 30 pre-operation ones and 10 AI-requested ones. */
   pruneSnapshots() {
     const all = this.listSnapshots();
     const kindOf = (s) => s.kind || (s.auto ? 'before' : 'manual');
-    const drop = [...all.filter((s) => kindOf(s) === 'auto').slice(48), ...all.filter((s) => kindOf(s) === 'before').slice(30)];
+    const keep = { auto: 48, before: 30, ai: 10 };
+    const drop = Object.entries(keep).flatMap(([k, n]) => all.filter((s) => kindOf(s) === k).slice(n));
     for (const s of drop) fs.rmSync(path.join(this.snapshotsDir, s.id), { recursive: true, force: true });
   }
 

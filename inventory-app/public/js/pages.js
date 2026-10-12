@@ -63,7 +63,7 @@ export async function showSnapshots() {
   };
   const kindOf = (x) => x.kind || (x.auto ? 'before' : 'manual');
   const row = (x) => h('div', { style: { padding: '8px 0', borderTop: '1px solid var(--border)' } },
-    h('div', null, h('b', null, x.label || '（名前なし）'), kindOf(x) === 'before' && h('span', { class: 'badge', style: { marginLeft: '6px' } }, '操作の前')),
+    h('div', null, h('b', null, x.label || '（名前なし）'), kindOf(x) === 'before' && h('span', { class: 'badge', style: { marginLeft: '6px' } }, '操作の前'), kindOf(x) === 'ai' && h('span', { class: 'badge ai', style: { marginLeft: '6px' } }, 'AI')),
     h('div', { class: 'small muted' }, `${fmtDate(x.at)}・${x.count}商品・${x.by === 'system' ? '自動' : actorLabel(x.by)}`),
     h('div', { style: { display: 'flex', gap: '6px', marginTop: '6px' } },
       h('button', { class: 'btn small', onclick: () => rollback(x) }, 'この状態に戻す'),
