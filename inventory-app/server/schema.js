@@ -48,6 +48,7 @@ export const DECISIONS = [
   { id: 'draft', label: '下書き' },
   { id: 'hold', label: '保留' },
   { id: 'no_sell', label: '出さない' },
+  { id: 'no_stock', label: '在庫なし' },
 ];
 export const DECISION_IDS = DECISIONS.map((d) => d.id);
 export const decisionLabel = (id) => DECISIONS.find((d) => d.id === id)?.label ?? id;

@@ -232,7 +232,7 @@ function toggleSelect() {
 
 const STATUS_CLASS = {
   unsorted: '', needs_photos: 'warn', shooting: 'info', ai_pending: 'ai', ai_processing: 'ai', needs_review: 'warn',
-  ready: 'ok', queued: 'accent', mercari_entered: 'accent', final_check: 'accent', listed: 'ok', trading: 'accent', sold: '', hold: 'warn', no_sell: '', archived: '', trash: 'danger',
+  ready: 'ok', queued: 'accent', mercari_entered: 'accent', final_check: 'accent', listed: 'ok', trading: 'accent', sold: '', hold: 'warn', no_sell: '', no_stock: '', archived: '', trash: 'danger',
 };
 
 const CHANNEL_STATUS_LABEL = { entered: '下書き', transfer_ok: '下書き', transfer_ng: '下書き要修正', listed: '出品中', stopped: '公開停止', trading: '取引中', sold: '売却済み', removed: '見つからない' };
@@ -260,7 +260,7 @@ function badgesFor(p) {
 }
 
 function issuesFor(p) {
-  if (['no_sell', 'archived', 'trash', 'sold', 'listed'].includes(p.status.id)) return null;
+  if (['no_sell', 'no_stock', 'archived', 'trash', 'sold', 'listed'].includes(p.status.id)) return null;
   const lines = [];
   for (const r of p.openPhotoRequests) lines.push(`📷 追加撮影: ${r.label}`);
   for (const i of p.issues) if (!i.startsWith('追加撮影')) lines.push(`⚠ ${i}`);
@@ -290,7 +290,7 @@ function targetSeg(p) {
 
 function decisionSeg(p) {
   const opts = state.meta.decisions.filter((d) => d.id !== 'undecided').map((d) => [d.id, d.label]);
-  return h('div', { class: 'seg', style: { marginTop: '7px' } },
+  return h('div', { class: 'seg decisions', style: { marginTop: '7px' } },
     opts.map(([v, l]) => h('button', {
       class: `${v} ${p.decision === v ? 'on' : ''}`,
       onclick: async (e) => {

@@ -161,13 +161,15 @@ a.icon-btn { text-decoration: none; }
 .seg button + button { border-left: 1px solid var(--border); }
 .seg button.on.sell { background: var(--accent); color: #fff; }
 .seg button.on.draft { background: var(--info); color: #fff; }
+.seg.decisions { display: flex; max-width: 100%; }
+.seg.decisions button { flex: 1 1 auto; white-space: nowrap; padding: 0 4px; font-size: 11.5px; }
 .seg.targets button { font-size: 13px; white-space: nowrap; padding-left: 10px; padding-right: 10px; }
 .seg.targets button.on { background: var(--info); color: #fff; }
 .seg.targets button.suggested { outline: 1.5px dashed var(--info); outline-offset: -3px; color: var(--info); }
 .seg button.on.hold { background: var(--warn); color: #fff; }
-.seg button.on.no_sell { background: var(--muted); color: #fff; }
+.seg button.on.no_sell, .seg button.on.no_stock { background: var(--muted); color: #fff; }
 .seg.wide { display: flex; }
-.seg.wide button { flex: 1; min-height: 40px; font-size: 14px; }
+.seg.wide button { flex: 1 1 auto; min-height: 40px; font-size: 14px; white-space: nowrap; padding: 0 6px; }
 .select-check { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 14px; }
 .selected .select-check { background: var(--accent); border-color: var(--accent); color: #fff; }
 

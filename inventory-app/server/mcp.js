@@ -24,7 +24,7 @@ const INSTRUCTIONS = `商品台帳（個人の商品在庫・メルカリ出品�
 - 情報には確度を付ける: confirmed(確定)/reference(参考情報)/unverified(要確認)/unknown(不明)。推測を事実として書かない。
 - 写真: kind=actual は現物写真、kind=generated は生成画像（AIで作った紹介画像。画像内に「AI生成・実物と異なる場合あり」の注記がある前提で出品用に選べる）、kind=reference は参考資料画像。参考画像は絶対に出品用にしない（サーバーも拒否する）。生成画像を現物写真として扱ったり、原稿で実物写真のように書いたりしない。
 - ユーザーが確定(🔒)した項目をAIが更新すると「提案」として保存され、ユーザーが採用するまで反映されない。
-- 出品判断（出品／下書き／保留／出さない）・公開承認・削除・「出品待ち」への移動はユーザーのみ。販売価格と商品の状態はユーザーの確定が必要。
+- 出品判断（出品／下書き／保留／出さない／在庫なし）・公開承認・削除・「出品待ち」への移動はユーザーのみ。販売価格と商品の状態はユーザーの確定が必要。
 - 判断が「下書き」の商品はメルカリへ下書き保存までで、公開はしない（サーバーも拒否する）。
 - 作業の流れ: ai_task_queue → start_ai_task → get_product/get_photos → set_facts → save_listing_draft → save_qc_result → finish_ai_task。
 - QC は get_reference_data の qcChecks を全項目評価し、足りない写真は photo_requests で依頼する。
@@ -40,7 +40,7 @@ const s = {
   enumOf: (values, description) => ({ type: 'string', enum: values, description }),
 };
 
-const LIST_FILTERS = ['all', 'sell', 'draft', 'undecided', 'hold', 'no_sell', 'needs_photos', 'shot_today', 'shoot_plan', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'trading', 'sold', 'to_mercari', 'to_jmty', 'to_flea', 'research_jmty', 'research_3000', 'research_2300', 'archived', 'trash'];
+const LIST_FILTERS = ['all', 'sell', 'draft', 'undecided', 'hold', 'no_sell', 'no_stock', 'needs_photos', 'shot_today', 'shoot_plan', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'trading', 'sold', 'to_mercari', 'to_jmty', 'to_flea', 'research_jmty', 'research_3000', 'research_2300', 'archived', 'trash'];
 
 function today() {
   const d = new Date();
@@ -61,7 +61,8 @@ export function matchesFilter(sm, filter) {
     case 'undecided': return active && sm.decision === 'undecided';
     case 'hold': return active && sm.decision === 'hold';
     case 'no_sell': return active && sm.decision === 'no_sell';
-    case 'needs_photos': return active && sm.decision !== 'no_sell' && sm.stage !== 'sold' && (sm.counts.actual + (sm.counts.generated || 0) === 0 || sm.openPhotoRequests.length > 0 || sm.stage === 'needs_photos');
+    case 'no_stock': return active && sm.decision === 'no_stock';
+    case 'needs_photos': return active && !['no_sell', 'no_stock'].includes(sm.decision) && sm.stage !== 'sold' && (sm.counts.actual + (sm.counts.generated || 0) === 0 || sm.openPhotoRequests.length > 0 || sm.stage === 'needs_photos');
     case 'shot_today': return active && isToday(sm.lastPhotoAt);
     case 'shoot_plan': return active && sm.shootPlan;
     case 'ai_queue': return active && ['pending', 'processing'].includes(sm.ai.state);

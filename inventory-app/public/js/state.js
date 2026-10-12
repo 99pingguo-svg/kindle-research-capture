@@ -109,6 +109,7 @@ export const FILTERS = [
   { id: 'sold', label: '売却済み' },
   { id: 'hold', label: '保留' },
   { id: 'no_sell', label: '出さない' },
+  { id: 'no_stock', label: '在庫なし' },
   { id: 'archived', label: 'アーカイブ' },
   { id: 'trash', label: 'ゴミ箱' },
 ];
@@ -125,7 +126,8 @@ export function matchesFilter(sm, filter) {
     case 'undecided': return active && sm.decision === 'undecided';
     case 'hold': return active && sm.decision === 'hold';
     case 'no_sell': return active && sm.decision === 'no_sell';
-    case 'needs_photos': return active && sm.decision !== 'no_sell' && sm.stage !== 'sold' && (sm.counts.actual + (sm.counts.generated || 0) === 0 || sm.openPhotoRequests.length > 0 || sm.stage === 'needs_photos');
+    case 'no_stock': return active && sm.decision === 'no_stock';
+    case 'needs_photos': return active && !['no_sell', 'no_stock'].includes(sm.decision) && sm.stage !== 'sold' && (sm.counts.actual + (sm.counts.generated || 0) === 0 || sm.openPhotoRequests.length > 0 || sm.stage === 'needs_photos');
     case 'shot_today': return active && isToday(sm.lastPhotoAt);
     case 'shoot_plan': return active && sm.shootPlan;
     case 'ai_queue': return active && ['pending', 'processing'].includes(sm.ai.state);

@@ -80,6 +80,11 @@ export function lint(p, settings = {}) {
     for (const [name, c] of chans.filter(([, c]) => OFFERED_STATUSES.includes(c.status))) {
       add('error', 'offered_elsewhere', `${committed.map(([n, x]) => `${channelLabel(n)}で${x.status === 'sold' ? '売却済み' : '取引中'}`).join('・')}です。${channelLabel(name)}の${c.status === 'listed' ? '出品' : '下書き'}を止めてください`);
     }
+  } else if (p.decision === 'no_stock') {
+    // Out of stock but still offered somewhere: a buyer could order something that no longer exists.
+    for (const [name, c] of chans.filter(([, c]) => OFFERED_STATUSES.includes(c.status))) {
+      add('error', 'offered_no_stock', `在庫なしです。${channelLabel(name)}の${c.status === 'listed' ? '出品' : '下書き'}を止めてください`);
+    }
   }
   // What is on Mercari vs what the app has now (images replaced by an update, text edited after entry).
   const ch = p.channels?.mercari;
@@ -135,6 +140,7 @@ export function statusOf(p) {
   if (p.archived) return { id: 'archived', label: 'アーカイブ' };
   if (p.decision === 'hold') return { id: 'hold', label: '保留' };
   if (p.decision === 'no_sell') return { id: 'no_sell', label: decisionLabel('no_sell') };
+  if (p.decision === 'no_stock') return { id: 'no_stock', label: decisionLabel('no_stock') };
   return { id: p.stage, label: stageLabel(p.stage) };
 }
 

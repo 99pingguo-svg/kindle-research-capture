@@ -488,3 +488,19 @@ test('AI snapshots live in their own bucket and are rate-limited: they cannot ev
   for (const s of [sp, before, auto]) assert.ok(ids.has(s.id));
   assert.equal(store.listSnapshots().filter((s) => s.kind === 'ai').length, 10);
 });
+
+test('在庫なし: user-only decision, leaves the queue, and flags anything still offered', async () => {
+  const { statusOf } = await import('../server/rules.js');
+  const store = new Store(tmp());
+  const id = preparedProduct(store);
+  store.setDecision(id, 'user', 'draft');
+  passQc(store, id);
+  mercari.recordEntry(store, id, 'claude', { savedAs: 'draft' });
+  assert.throws(() => store.setDecision(id, 'claude', 'no_stock'));
+  store.setDecision(id, 'user', 'no_stock');
+  const p = store.get(id);
+  assert.equal(p.decision, 'no_stock');
+  assert.equal(statusOf(p).label, '在庫なし');
+  assert.deepEqual(mercari.queue(store, { includeReady: true }).map((x) => x.id), []);
+  assert.ok(lint(p).some((i) => i.code === 'offered_no_stock' && i.severity === 'error'));
+});
