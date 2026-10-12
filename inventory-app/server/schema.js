@@ -21,7 +21,9 @@ export const STAGES = [
 export const CHANNELS = [
   { id: 'mercari', label: 'メルカリ' },
   { id: 'jmty', label: 'ジモティー' },
+  { id: 'flea', label: 'フリマ' },
 ];
+export const CHANNEL_IDS = CHANNELS.map((c) => c.id);
 export const channelLabel = (id) => CHANNELS.find((c) => c.id === id)?.label ?? id;
 /** Statuses observed on a platform's own pages (what the platform shows), shared by all channels. */
 export const OBSERVED_STATUSES = [
@@ -183,6 +185,15 @@ export const FIELDS = [
   { path: 'listing.shippingDays', label: '発送までの日数', type: 'select', options: SHIPPING_DAYS, group: 'listing' },
   { path: 'listing.aiNotes', label: 'AIメモ（出品には使わない）', type: 'textarea', group: 'listing' },
 ];
+// Per-destination versions of the listing text. Empty = use the common listing (listing.*).
+for (const c of CHANNELS) {
+  const lim = c.id === 'mercari' ? MERCARI_LIMITS : {};
+  FIELDS.push(
+    { path: `override.${c.id}.title`, label: `${c.label}のタイトル`, type: 'text', group: `channel:${c.id}`, channel: c.id, base: 'listing.title', ...(lim.titleMax ? { max: lim.titleMax } : {}) },
+    { path: `override.${c.id}.description`, label: `${c.label}の説明`, type: 'textarea', group: `channel:${c.id}`, channel: c.id, base: 'listing.description', ...(lim.descriptionMax ? { max: lim.descriptionMax } : {}) },
+    { path: `override.${c.id}.price`, label: `${c.label}の価格`, type: 'int', group: `channel:${c.id}`, channel: c.id, base: 'listing.price' },
+  );
+}
 export const FIELD_MAP = Object.fromEntries(FIELDS.map((f) => [f.path, f]));
 export const CONFIRM_FIELDS = FIELDS.filter((f) => f.confirm).map((f) => f.path);
 

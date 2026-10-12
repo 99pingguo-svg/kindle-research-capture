@@ -7,7 +7,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { AppError, nowIso, norm, writeJson, writeFileAtomic } from '../util.js';
-import { readiness, listingPhotos } from '../rules.js';
+import { readiness, listingPhotos, channelPackage, livePhotos } from '../rules.js';
+
+/** The Mercari version of the listing: Mercari-specific title/description/price/photos where set, else the common listing. */
+function mercariListing(p) {
+  const pkg = channelPackage(p, 'mercari');
+  return { ...p.listing, title: pkg.title, description: pkg.description, price: pkg.price };
+}
+function mercariPhotos(p) {
+  const byId = new Map(livePhotos(p).map((ph) => [ph.id, ph]));
+  return channelPackage(p, 'mercari').photos.map((x) => byId.get(x.id));
+}
 import { listingText, isUser } from '../store.js';
 import { PREPARE_DECISIONS } from '../schema.js';
 
@@ -45,13 +55,13 @@ export function buildPackage(store, id, { force = false } = {}) {
   const dir = outboxDir(store, id);
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
-  const photos = listingPhotos(p).map((ph, i) => {
+  const photos = mercariPhotos(p).map((ph, i) => {
     const name = `${String(i + 1).padStart(2, '0')}.jpg`;
     const dest = path.join(dir, name);
     fs.copyFileSync(path.join(store.dir(id), ph.files.work), dest);
     return { order: i + 1, photoId: ph.id, tag: ph.tag, path: dest, url: `/files/outbox/${CHANNEL}/${id}/${name}` };
   });
-  const L = p.listing;
+  const L = mercariListing(p);
   const pkg = {
     channel: CHANNEL,
     productId: p.id,
@@ -105,7 +115,7 @@ function categoryMatches(expected, observed) {
  * "未確認" (not a pass).
  */
 export function compare(p, observed = {}) {
-  const L = p.listing;
+  const L = mercariListing(p);
   const mismatches = [];
   const unchecked = [];
   for (const k of TEXT_KEYS) {
@@ -122,7 +132,7 @@ export function compare(p, observed = {}) {
   if (!('price' in observed)) unchecked.push('price');
   else if (Number(String(observed.price).replace(/[^\d]/g, '')) !== L.price) mismatches.push({ field: 'price', expected: L.price, observed: observed.price });
 
-  const expectedPhotos = listingPhotos(p).length;
+  const expectedPhotos = mercariPhotos(p).length;
   if (!('photoCount' in observed)) unchecked.push('photoCount');
   else if (Number(observed.photoCount) !== expectedPhotos) mismatches.push({ field: 'photoCount', expected: expectedPhotos, observed: observed.photoCount });
   for (const k of ['photoOrderOk', 'photosMatchProduct', 'productMatches']) {
@@ -137,10 +147,10 @@ export function snapshot(p) {
   return {
     at: nowIso(),
     rev: p.rev,
-    photos: listingPhotos(p).map((ph) => ({ id: ph.id, sha256: ph.sha256 || null, kind: ph.kind })),
-    title: p.listing.title,
-    description: p.listing.description,
-    price: p.listing.price,
+    photos: mercariPhotos(p).map((ph) => ({ id: ph.id, sha256: ph.sha256 || null, kind: ph.kind })),
+    title: mercariListing(p).title,
+    description: mercariListing(p).description,
+    price: mercariListing(p).price,
   };
 }
 

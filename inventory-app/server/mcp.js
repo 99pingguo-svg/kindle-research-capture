@@ -8,7 +8,7 @@ import {
   STAGES, DECISIONS, MERCARI_CONDITIONS, SHIPPING_PAYERS, SHIPPING_METHODS, SHIPPING_DAYS, PREFECTURES,
   MERCARI_LIMITS, QC_CHECKS, PHOTO_TAGS, FACT_CONFIDENCE, LINK_TYPES, FIELDS, AI_TASK_TYPES,
 } from './schema.js';
-import { summary, readiness, lint, listingPhotos, livePhotos, openPhotoRequests } from './rules.js';
+import { summary, readiness, lint, listingPhotos, livePhotos, openPhotoRequests, channelPackage } from './rules.js';
 import { IMAGE_QC_CHECK_IDS } from './schema.js';
 import * as mercari from './adapters/mercari.js';
 import * as channels from './channels.js';
@@ -40,7 +40,7 @@ const s = {
   enumOf: (values, description) => ({ type: 'string', enum: values, description }),
 };
 
-const LIST_FILTERS = ['all', 'sell', 'draft', 'undecided', 'hold', 'no_sell', 'needs_photos', 'shot_today', 'shoot_plan', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'trading', 'sold', 'archived', 'trash'];
+const LIST_FILTERS = ['all', 'sell', 'draft', 'undecided', 'hold', 'no_sell', 'needs_photos', 'shot_today', 'shoot_plan', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'trading', 'sold', 'to_mercari', 'to_jmty', 'to_flea', 'research_jmty', 'research_3000', 'research_2300', 'archived', 'trash'];
 
 function today() {
   const d = new Date();
@@ -72,6 +72,12 @@ export function matchesFilter(sm, filter) {
     case 'mercari': return active && ['mercari_entered', 'final_check'].includes(sm.stage);
     case 'listed': return active && sm.stage === 'listed';
     case 'trading': return active && sm.stage === 'trading';
+    case 'to_mercari': return active && (sm.targets || []).includes('mercari');
+    case 'to_jmty': return active && (sm.targets || []).includes('jmty');
+    case 'to_flea': return active && (sm.targets || []).includes('flea');
+    case 'research_jmty': return active && /ジモティ/.test(sm.research?.group || '');
+    case 'research_3000': return active && /3000円以上/.test(sm.research?.group || '');
+    case 'research_2300': return active && /2300〜2999円/.test(sm.research?.group || '');
     case 'sold': return !sm.trashedAt && sm.stage === 'sold';
     case 'archived': return !sm.trashedAt && sm.archived;
     case 'trash': return !!sm.trashedAt;
@@ -433,6 +439,15 @@ result: pass=問題なし / needs_review=ユーザー確認が必要 / fail=修�
 
   tool('mercari_mark_sold', 'メルカリで売れたことを記録する。', { id: s.id, price: s.int('売却価格') }, ['id'],
     ({ id, price }) => json(mercari.markSold(store, id, actor, { price }).channels.mercari));
+
+  // ---- destinations: what each platform should receive ----
+  tool('channel_package', '出品先（mercari=メルカリ / jmty=ジモティー / flea=フリマ）に出す内容の完成形を返す。出品先ごとの原稿（override.<出品先>.title/description/price と出品先ごとの写真）があればそれを、無ければ共通の原稿を使う。写真は順番どおりの絶対パス。アップロード作業はこれだけを正本として読む。targeted=false はユーザーがその出品先を選んでいない商品（出品しない）。', {
+    id: s.id,
+    channel: s.enumOf(CHANNELS.map((c) => c.id), '出品先'),
+  }, ['id', 'channel'], ({ id, channel }) => {
+    const pkg = channelPackage(store.get(id), channel);
+    return json({ ...pkg, photos: pkg.photos.map((ph) => ({ ...ph, path: path.join(store.dir(id), ph.work), originalPath: path.join(store.dir(id), ph.original) })) });
+  }, { readOnlyHint: true });
 
   // ---- status check (頼まれたときだけ): read the platform's own lists as text, send everything in one call ----
   const channelIds = CHANNELS.map((c) => c.id);

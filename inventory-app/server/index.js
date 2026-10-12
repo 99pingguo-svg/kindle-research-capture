@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { Store, isUser } from './store.js';
 import { AppError, nowIso } from './util.js';
 import { readBody, parseMultipart } from './multipart.js';
-import { summary, readiness, lint } from './rules.js';
+import { summary, readiness, lint, channelPackage, suggestedTargets } from './rules.js';
 import { writeZip } from './zip.js';
 import { exportEntries, productsCsv } from './export.js';
 import { createMcpHandler, matchesFilter } from './mcp.js';
@@ -156,6 +156,15 @@ export function createApp({ dataDir, token = '' } = {}) {
   route('PATCH', '/api/products/:id/photos/:pid', ({ params, body, actor }) => full(store.updatePhoto(params.id, actor, params.pid, body)));
   route('DELETE', '/api/products/:id/photos/:pid', ({ params, actor }) => full(store.deletePhoto(params.id, actor, params.pid)));
   route('POST', '/api/products/:id/photos/:pid/restore', ({ params, actor }) => full(store.restorePhoto(params.id, actor, params.pid)));
+  // ---- destinations (メルカリ／ジモティー／フリマ) ----
+  route('PUT', '/api/products/:id/targets', ({ params, body, actor }) => full(store.setTargets(params.id, actor, body?.targets || [])));
+  route('PUT', '/api/products/:id/channel-photos/:channel', ({ params, body, actor }) => full(store.setChannelPhotos(params.id, actor, params.channel, body?.ids ?? null)));
+  route('GET', '/api/products/:id/package/:channel', ({ params }) => {
+    const pkg = channelPackage(store.get(params.id), params.channel);
+    return { ...pkg, photos: pkg.photos.map((ph) => ({ ...ph, url: `/files/products/${params.id}/${ph.work}` })) };
+  });
+  route('PUT', '/api/products/:id/research', ({ params, body, actor }) => full(store.setResearch(params.id, actor, body?.research ?? null)));
+  route('POST', '/api/products/:id/text-candidates', ({ params, body, actor }) => full(store.upsertTextCandidates(params.id, actor, body?.items || [])));
   route('PUT', '/api/products/:id/listing-photos', ({ params, body, actor }) => {
     store.setListingPhotos(params.id, actor, body.ids || []);
     return full(store.get(params.id));
@@ -217,6 +226,9 @@ export function createApp({ dataDir, token = '' } = {}) {
           case 'decision': store.setDecision(id, actor, value); break;
           case 'ai': store.requestAiTask(id, actor, value); break;
           case 'shootPlan': store.setShootPlan(id, actor, !!value); break;
+          case 'addTarget': store.setTargets(id, actor, [...(store.get(id).targets || []), value]); break;
+          case 'removeTarget': store.setTargets(id, actor, (store.get(id).targets || []).filter((t) => t !== value)); break;
+          case 'suggestedTargets': store.setTargets(id, actor, [...new Set([...(store.get(id).targets || []), ...suggestedTargets(store.get(id))])]); break;
           case 'archive': store.setArchived(id, actor, !!value); break;
           case 'trash': store.trash(id, actor); break;
           case 'restore': store.restore(id, actor); break;

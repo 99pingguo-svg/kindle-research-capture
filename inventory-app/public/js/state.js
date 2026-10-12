@@ -92,6 +92,12 @@ export const FILTERS = [
   { id: 'undecided', label: '未判断' },
   { id: 'sell', label: '出品予定' },
   { id: 'draft', label: '下書き' },
+  { id: 'to_mercari', label: '→メルカリ' },
+  { id: 'to_jmty', label: '→ジモティー' },
+  { id: 'to_flea', label: '→フリマ' },
+  { id: 'research_jmty', label: 'ジモティ候補' },
+  { id: 'research_3000', label: '3000円以上' },
+  { id: 'research_2300', label: '2300〜2999円' },
   { id: 'ai_queue', label: 'AI処理中' },
   { id: 'review', label: '要確認' },
   { id: 'qc_issue', label: 'QC問題' },
@@ -130,6 +136,12 @@ export function matchesFilter(sm, filter) {
     case 'mercari': return active && ['mercari_entered', 'final_check'].includes(sm.stage);
     case 'listed': return active && sm.stage === 'listed';
     case 'trading': return active && sm.stage === 'trading';
+    case 'to_mercari': return active && (sm.targets || []).includes('mercari');
+    case 'to_jmty': return active && (sm.targets || []).includes('jmty');
+    case 'to_flea': return active && (sm.targets || []).includes('flea');
+    case 'research_jmty': return active && /ジモティ/.test(sm.research?.group || '');
+    case 'research_3000': return active && /3000円以上/.test(sm.research?.group || '');
+    case 'research_2300': return active && /2300〜2999円/.test(sm.research?.group || '');
     case 'sold': return !sm.trashedAt && sm.stage === 'sold';
     case 'archived': return !sm.trashedAt && sm.archived;
     case 'trash': return !!sm.trashedAt;

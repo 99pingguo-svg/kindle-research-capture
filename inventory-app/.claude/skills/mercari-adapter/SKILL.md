@@ -18,6 +18,8 @@ description: 商品台帳の「出品待ち」商品をメルカリWeb（Claude 
 ## 1商品の流れ
 
 1. `mercari_prepare(id)` → `fields`（入力値）、`photos`（outbox の `01.jpg`… 絶対パス、順番どおり）、`form`（画面上の項目名）を受け取る。
+   内容は **メルカリ用の原稿**（`override.mercari.*` と メルカリ用の写真。空欄は共通の原稿）。`channel_package(id, "mercari")` と同じ。
+   出品先（`targets`）にメルカリが無い商品は、ユーザーの明示がない限り扱わない。
    エラー（準備未完了）なら飛ばして報告。
 2. 新しいタブで `sellUrl`（https://jp.mercari.com/sell/create）を開く。
 3. `form` の順に、**ラベル文字列で項目を探して** 入力する（CSSセレクタや座標を覚えて使い回さない）:

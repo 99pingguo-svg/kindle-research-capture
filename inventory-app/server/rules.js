@@ -87,9 +87,10 @@ export function lint(p, settings = {}) {
   if (snap) {
     const where = ch.status === 'listed' ? '出品中のメルカリ' : 'メルカリの下書き';
     const fp = (ph) => ph.sha256 || ph.id;
-    if (listingPhotos(p).map(fp).join(',') !== snap.photos.map(fp).join(',')) add('warn', 'mercari_photos_changed', `${where}に入れた時点から出品用画像が変わっています（メルカリ側の更新が必要）`);
+    const now = channelPackage(p, 'mercari');
+    if (now.photos.map(fp).join(',') !== snap.photos.map(fp).join(',')) add('warn', 'mercari_photos_changed', `${where}に入れた時点から出品用画像が変わっています（メルカリ側の更新が必要）`);
     const names = { title: 'タイトル', description: '説明文', price: '価格' };
-    const changed = Object.keys(names).filter((k) => (snap[k] ?? '') !== (p.listing[k] ?? ''));
+    const changed = Object.keys(names).filter((k) => (snap[k] ?? '') !== (now[k] ?? ''));
     if (changed.length) add('warn', 'mercari_text_changed', `${where}に入れた時点から${changed.map((k) => names[k]).join('・')}が変わっています`);
   }
   return out;
@@ -155,6 +156,43 @@ export function photoUrl(p, ph, variant = 'thumb') {
 }
 
 /** Compact record used by the list screen and by list_products. */
+/**
+ * What one destination (メルカリ／ジモティー／フリマ) will receive: its own title/description/price/photos
+ * where the user set them, otherwise the common listing. This is what an uploader reads.
+ */
+export function channelPackage(p, channel) {
+  const o = p.override?.[channel] || {};
+  const byId = new Map(livePhotos(p).map((ph) => [ph.id, ph]));
+  const ids = p.channelPhotos?.[channel] ?? p.listingPhotoIds;
+  const photos = ids.map((id) => byId.get(id)).filter((ph) => ph && LISTABLE_KINDS.includes(ph.kind));
+  const L = p.listing;
+  return {
+    channel,
+    channelLabel: channelLabel(channel),
+    productId: p.id,
+    rev: p.rev,
+    targeted: (p.targets || []).includes(channel),
+    decision: p.decision,
+    title: o.title || L.title,
+    description: o.description || L.description,
+    price: o.price ?? L.price,
+    custom: { title: !!o.title, description: !!o.description, price: o.price != null, photos: p.channelPhotos?.[channel] != null },
+    category: L.category,
+    condition: L.condition,
+    shipping: { payer: L.shippingPayer, method: L.shippingMethod, from: L.shippingFrom, days: L.shippingDays },
+    photos: photos.map((ph, i) => ({ order: i + 1, id: ph.id, kind: ph.kind, tag: ph.tag, note: ph.note, sha256: ph.sha256 || null, original: ph.files.original, work: ph.files.work })),
+    limits: channel === 'mercari' ? MERCARI_LIMITS : null,
+  };
+}
+
+/** Destinations the research suggests (the user decides). */
+export function suggestedTargets(p) {
+  const g = p.research?.group || '';
+  if (/ジモティ/.test(g)) return /優先/.test(p.research?.jimoty?.priority || '') ? ['jmty'] : ['jmty', 'mercari'];
+  if (g) return ['mercari'];
+  return [];
+}
+
 /** The product's shop page (Amazon first), for a quick open-in-new-window link from the list. */
 const sourceUrlOf = (p) => (p.links.find((l) => /amazon\./i.test(l.url)) || p.links.find((l) => l.type === 'purchase'))?.url || null;
 
@@ -178,6 +216,10 @@ export function summary(p, settings) {
     location: p.location,
     notes: p.notes,
     sourceUrl: sourceUrlOf(p),
+    targets: p.targets || [],
+    suggestedTargets: suggestedTargets(p),
+    research: p.research ? { group: p.research.group, amazonPrice: p.research.amazonPrice ?? null, priceStatus: p.research.priceStatus, priority: p.research.jimoty?.priority || '' } : null,
+    custom: Object.fromEntries(Object.entries(p.override || {}).filter(([c, o]) => o.title || o.description || o.price != null || p.channelPhotos?.[c]).map(([c]) => [c, true])),
     decision: p.decision,
     stage: p.stage,
     archived: p.archived,

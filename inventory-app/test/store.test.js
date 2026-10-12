@@ -352,3 +352,53 @@ test('mercari queue: 出品待ち by default; ready 出品/下書き only when e
   store.setDecision(id, 'user', 'hold');
   assert.deepEqual(mercari.queue(store, { includeReady: true }).map((p) => p.id), []);
 });
+
+test('destinations: per-platform text/price/photos fall back to the common listing; Mercari uses its own version', async () => {
+  const { channelPackage, suggestedTargets } = await import('../server/rules.js');
+  const store = new Store(tmp());
+  const id = preparedProduct(store);
+  assert.throws(() => store.setTargets(id, 'claude', ['jmty']), /ユーザーのみ/);
+  store.setTargets(id, 'user', ['flea', 'mercari', 'mercari']);
+  assert.deepEqual(store.get(id).targets, ['mercari', 'flea']);
+  // Nothing custom yet: every destination gets the common listing.
+  let pkg = channelPackage(store.get(id), 'jmty');
+  assert.equal(pkg.title, store.get(id).listing.title);
+  assert.equal(pkg.targeted, false);
+  assert.equal(pkg.photos.length, 3);
+  // ジモティー gets its own text, price and a subset of photos; references are refused.
+  store.updateFields(id, 'user', { 'override.jmty.description': '手渡しのみ。駅前で受け渡し可。', 'override.jmty.price': 2000 });
+  const [first, second] = store.get(id).listingPhotoIds;
+  store.setChannelPhotos(id, 'user', 'jmty', [second, first]);
+  const ref = store.addPhoto(id, 'user', { kind: 'reference' }, { original: { buffer: JPEG, mime: 'image/jpeg' } }).photo;
+  assert.throws(() => store.setChannelPhotos(id, 'user', 'jmty', [ref.id]), /参考資料画像/);
+  pkg = channelPackage(store.get(id), 'jmty');
+  assert.equal(pkg.description, '手渡しのみ。駅前で受け渡し可。');
+  assert.equal(pkg.price, 2000);
+  assert.deepEqual(pkg.photos.map((x) => x.id), [second, first]);
+  assert.deepEqual(pkg.custom, { title: false, description: true, price: true, photos: true });
+  store.setChannelPhotos(id, 'user', 'jmty', null);
+  assert.equal(channelPackage(store.get(id), 'jmty').photos.length, 3);
+  // A user-set Mercari title: AI writes become proposals; the Mercari package uses the Mercari title.
+  store.updateFields(id, 'user', { 'override.mercari.title': 'Anker モバイルバッテリー 10000mAh' });
+  store.updateFields(id, 'claude', { 'override.mercari.title': 'AIの案' });
+  assert.ok(store.get(id).proposals['override.mercari.title']);
+  store.resolveProposal(id, 'user', 'override.mercari.title', false);
+  passQc(store, id);
+  store.setStage(id, 'user', 'queued');
+  assert.equal(mercari.buildPackage(store, id).fields.title, 'Anker モバイルバッテリー 10000mAh');
+  // Research suggests destinations; the user decides.
+  store.setResearch(id, 'import', { group: '1 ジモティ候補', amazonPrice: 5480, jimoty: { priority: 'ジモティ優先' } });
+  assert.deepEqual(suggestedTargets(store.get(id)), ['jmty']);
+});
+
+test('text candidates: upsert by key, keep the previous text as 旧版', () => {
+  const store = new Store(tmp());
+  const { product } = store.create({ name: '候補テスト' });
+  store.upsertTextCandidates(product.id, 'import', [{ key: 'ms:description', field: 'description', label: '最新原稿', text: '第1版' }]);
+  store.upsertTextCandidates(product.id, 'import', [{ key: 'ms:description', field: 'description', label: '最新原稿', text: '第1版' }]);
+  assert.equal(store.get(product.id).textCandidates.length, 1);
+  store.upsertTextCandidates(product.id, 'import', [{ key: 'ms:description', field: 'description', label: '最新原稿', text: '第2版' }]);
+  const c = store.get(product.id).textCandidates;
+  assert.deepEqual(c.map((x) => [x.text, !!x.old]), [['第2版', false], ['第1版', true]]);
+  assert.match(c[1].label, /旧版/);
+});

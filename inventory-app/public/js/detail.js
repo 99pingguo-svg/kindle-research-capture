@@ -94,7 +94,7 @@ export function renderDetail(message) {
     return;
   }
   pane.append(h('div', { class: 'detail' },
-    header(p), topControls(p), readinessCard(p), photosCard(p), aiCard(p), listingCard(p), qcCard(p), basicCard(p), linksCard(p), mercariCard(p), historyCard(p)));
+    header(p), topControls(p), destinationCard(p), readinessCard(p), photosCard(p), aiCard(p), listingCard(p), channelCard(p), qcCard(p), basicCard(p), linksCard(p), mercariCard(p), historyCard(p)));
   pane.scrollTop = scroll;
   if (keep) {
     const el = pane.querySelector(`[data-path="${CSS.escape(keep.path)}"]`);
@@ -371,6 +371,11 @@ function fieldEl(p, def, { copy = false } = {}) {
   } else if (def.type === 'date') {
     input = h('input', { ...common, type: 'date', value: value || '' });
   } else input = h('input', { ...common, type: def.type === 'int' ? 'text' : 'text', inputmode: def.type === 'int' ? 'numeric' : undefined, value: value ?? '', placeholder: def.hint || '' });
+  // Per-destination fields: empty means "use the common listing" — show it faintly.
+  const baseValue = def.base ? getPath(p, def.base) : null;
+  if (def.base) input.placeholder = baseValue == null || baseValue === '' ? '（共通も未入力）' : `共通を使用中: ${def.type === 'int' ? yen(baseValue) : String(baseValue).slice(0, 200)}`;
+  const kind = def.path.endsWith('.title') ? 'title' : def.path.endsWith('.description') ? 'description' : null;
+  const cands = kind ? (p.textCandidates || []).filter((c) => c.field === kind) : [];
 
   const counter = def.max ? h('span', { class: 'counter' }) : null;
   const updateCounter = () => {
@@ -395,9 +400,127 @@ function fieldEl(p, def, { copy = false } = {}) {
   return h('div', { class: `field ${locked ? 'locked' : ''}`, style: def.type === 'textarea' ? { gridColumn: '1 / -1' } : null },
     h('div', { class: 'field-label' },
       h('span', null, def.label), counter, h('span', { class: 'spacer' }), lockBtn,
+      cands.length > 0 && h('button', { class: 'lock', onclick: () => candidateSheet(p, def, input) }, `候補 ${cands.length}`),
+      def.base && value != null && value !== '' && h('button', { class: 'lock', onclick: () => act(api.patch(url(), { set: { [def.path]: null } }), '共通に戻しました') }, '共通に戻す'),
       copy && value != null && value !== '' && h('button', { class: 'lock', onclick: () => copyText(String(value), `${def.label}をコピー`) }, 'コピー')),
     input,
     proposalBox(p, def.path));
+}
+
+/** Pick a text from the candidates (latest manuscript, 販売用原稿, earlier versions…), use it as is or edit first. */
+function candidateSheet(p, def, input) {
+  const kind = def.path.endsWith('.title') ? 'title' : 'description';
+  // 販売用原稿 → 通常原稿 → 購入理由 → others; earlier versions last.
+  const rank = (c) => (c.old ? 10 : 0) + ({ 'resale:description': 0, 'resale:title': 0, 'main:description': 1, 'main:title': 1, 'resale:reason': 2, 'main:reason': 3 }[c.key.split('@')[0]] ?? 4);
+  const list = (p.textCandidates || []).filter((c) => c.field === kind).sort((a, b) => rank(a) - rank(b));
+  const extra = def.base && getPath(p, def.base) ? [{ key: 'common', label: '共通の原稿', text: String(getPath(p, def.base)), at: null }] : [];
+  sheet((close) => h('div', null,
+    h('h2', null, `${def.label}の候補`),
+    h('p', { class: 'muted small' }, '「この文を使う」でそのまま保存。「編集して使う」は欄に入れるだけなので、直してから欄の外をタップすると保存されます。'),
+    [...extra, ...list].map((c) => h('div', { class: 'card', style: { margin: '8px 0', padding: '10px' } },
+      h('div', { class: 'small' }, h('b', null, c.label), c.at && h('span', { class: 'muted' }, `　${fmtDate(c.at)}`), c.old && h('span', { class: 'badge', style: { marginLeft: '6px' } }, '旧版')),
+      h('div', { class: 'small', style: { whiteSpace: 'pre-wrap', maxHeight: '9em', overflow: 'auto', margin: '6px 0' } }, c.text),
+      def.max && c.text.length > def.max && h('div', { class: 'small', style: { color: 'var(--danger)' } }, `${c.text.length}字（上限${def.max}字を超えています）`),
+      h('div', { style: { display: 'flex', gap: '6px' } },
+        h('button', { class: 'btn small primary', onclick: async () => { close(); await act(api.patch(url(), { set: { [def.path]: c.text } }), `${def.label}に反映しました`); } }, 'この文を使う'),
+        h('button', { class: 'btn small', onclick: () => { close(); input.value = c.text; input.dispatchEvent(new Event('input')); input.focus(); } }, '編集して使う')))),
+    h('div', { class: 'actions' }, h('button', { class: 'btn ghost', onclick: () => close() }, '閉じる'))));
+}
+
+const CHANNEL_DEFS = () => state.meta.channels || [];
+const chLabel = (id) => CHANNEL_DEFS().find((c) => c.id === id)?.label || id;
+
+/** Where to offer it (メルカリ／ジモティー／フリマ) and what the price research says. */
+function destinationCard(p) {
+  const r = p.research;
+  const targets = p.targets || [];
+  const suggested = p.summary.suggestedTargets || [];
+  const setTargets = (next) => act(api.put(url('/targets'), { targets: next }));
+  const row = (k, v) => v ? h('tr', null, h('td', { class: 'k' }, k), h('td', null, v)) : null;
+  return h('div', { class: 'card' },
+    h('h2', null, '🚚 出品先'),
+    h('div', { class: 'seg wide targets' }, CHANNEL_DEFS().map((c) => h('button', {
+      class: `${targets.includes(c.id) ? 'on' : ''} ${!targets.includes(c.id) && suggested.includes(c.id) ? 'suggested' : ''}`,
+      title: suggested.includes(c.id) ? 'おすすめ' : '',
+      onclick: () => setTargets(targets.includes(c.id) ? targets.filter((x) => x !== c.id) : [...targets, c.id]),
+    }, c.label, !targets.includes(c.id) && suggested.includes(c.id) ? '＊' : ''))),
+    suggested.some((x) => !targets.includes(x)) && h('div', { class: 'small muted', style: { marginTop: '6px' } },
+      `＊おすすめ: ${suggested.map(chLabel).join('・')}（価格・大きさの調査から）`, ' ',
+      h('button', { class: 'btn small', onclick: () => setTargets([...new Set([...targets, ...suggested])]) }, 'おすすめを選ぶ')),
+    r ? h('table', { class: 'facts', style: { marginTop: '8px' } },
+      row('分類', r.group),
+      row('Amazon価格', r.amazonPrice != null ? `${yen(r.amazonPrice)}（${r.priceKind || ''}・${r.priceStatus || ''}・${r.checkedDate || ''}）` : `未確定（${r.priceStatus || ''}）`),
+      row('見立て', r.jimoty?.priority),
+      row('寸法', r.jimoty?.dimensions),
+      row('重さ', r.jimoty?.weightKg != null ? `${r.jimoty.weightKg}kg` : r.jimoty?.weightNote),
+      row('理由', r.jimoty?.reason),
+      row('確認点', r.jimoty?.checks),
+      row('価格メモ', r.reviewNote),
+      row('現行ページ', r.liveTitle && `${r.liveTitle}${r.liveVariant ? `（${r.liveVariant}）` : ''}`))
+      : h('p', { class: 'muted small' }, '価格・分類の調査データはありません。'));
+}
+
+let channelTab = null;
+/** Per-destination text, price and photos. Empty fields use the common listing; this is what an uploader reads. */
+function channelCard(p) {
+  const targets = p.targets || [];
+  const all = CHANNEL_DEFS().map((c) => c.id);
+  const order = [...targets, ...all.filter((c) => !targets.includes(c))];
+  if (!channelTab || !all.includes(channelTab)) channelTab = order[0];
+  const c = channelTab;
+  const o = p.override?.[c] || {};
+  const defs = state.meta.fields.filter((f) => f.group === `channel:${c}`);
+  const byId = new Map(p.photos.filter((x) => !x.deletedAt).map((x) => [x.id, x]));
+  const custom = p.channelPhotos?.[c];
+  const ids = (custom ?? p.listingPhotoIds).filter((id) => byId.has(id));
+  const eff = { title: o.title || p.listing.title, description: o.description || p.listing.description, price: o.price ?? p.listing.price };
+  const text = [eff.title, '', eff.description, '', `価格: ${eff.price ?? ''}`].join('\n');
+  return h('div', { class: 'card' },
+    h('h2', null, '🧾 出品先ごとの原稿', h('span', { class: 'spacer' }), h('button', { class: 'btn small', onclick: () => copyText(text, `${chLabel(c)}用をコピー`) }, 'コピー')),
+    h('div', { class: 'tabs' }, order.map((id) => h('button', {
+      class: `chip ${c === id ? 'on' : ''}`, style: targets.includes(id) ? null : { opacity: 0.55 },
+      onclick: () => { channelTab = id; renderDetail(); },
+    }, `${chLabel(id)}${targets.includes(id) ? '' : '（未選択）'}`))),
+    h('p', { class: 'muted small', style: { margin: '0 0 8px' } },
+      `空欄の項目は共通の原稿を使います。${c === 'mercari' ? 'メルカリへの転記はこの内容を使います。' : ''}`,
+      !targets.includes(c) && `「${chLabel(c)}」は出品先に選ばれていないため、出品作業の対象外です。`),
+    defs.map((d) => fieldEl(p, d)),
+    h('div', { class: 'field', style: { gridColumn: '1 / -1' } },
+      h('div', { class: 'field-label' }, h('span', null, `${chLabel(c)}の写真 ${ids.length}枚`), h('span', { class: 'muted small' }, custom ? '（専用）' : '（共通の出品用写真）'), h('span', { class: 'spacer' }),
+        h('button', { class: 'lock', onclick: () => channelPhotoSheet(p, c, ids) }, '写真を選ぶ'),
+        custom && h('button', { class: 'lock', onclick: () => act(api.put(url(`/channel-photos/${c}`), { ids: null }), '共通の写真に戻しました') }, '共通に戻す')),
+      ids.length ? h('div', { class: 'photo-grid' }, ids.map((id, i) => h('div', { class: `ph ${byId.get(id).kind === 'generated' ? 'gen' : ''}` },
+        h('img', { src: fileUrl(p, byId.get(id)), loading: 'lazy' }), h('span', { class: 'order' }, i + 1))))
+        : h('div', { class: 'muted small' }, '写真がありません')));
+}
+
+/** Choose and order the photos for one destination (own photos and generated images; never references). */
+function channelPhotoSheet(p, channel, current) {
+  const pool = p.photos.filter((x) => !x.deletedAt && (x.kind === 'actual' || x.kind === 'generated'));
+  let picked = [...current];
+  sheet((close) => {
+    const grid = h('div', { class: 'photo-grid' });
+    const draw = () => {
+      clear(grid);
+      grid.append(...pool.map((ph) => {
+        const n = picked.indexOf(ph.id) + 1;
+        return h('button', { class: `ph ${ph.kind === 'generated' ? 'gen' : ''}`, style: n ? null : { opacity: 0.45 }, onclick: () => {
+          picked = n ? picked.filter((x) => x !== ph.id) : [...picked, ph.id];
+          draw();
+        } }, h('img', { src: fileUrl(p, ph), loading: 'lazy' }), n ? h('span', { class: 'order' }, n) : null,
+        h('span', { class: 'tag' }, [ph.kind === 'generated' ? '生成' : '現物', ph.note?.includes('旧版') ? '旧版' : '', ph.tag].filter(Boolean).join('・')));
+      }));
+    };
+    draw();
+    return h('div', null,
+      h('h2', null, `${chLabel(channel)}の写真`),
+      h('p', { class: 'muted small' }, 'タップした順に並びます。もう一度タップで外します。参考資料画像は選べません。'),
+      grid,
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn primary', onclick: async () => { close(); await act(api.put(url(`/channel-photos/${channel}`), { ids: picked }), `${chLabel(channel)}の写真を${picked.length}枚にしました`); } }, '保存'),
+        h('button', { class: 'btn', onclick: () => { picked = []; draw(); } }, '全部外す'),
+        h('button', { class: 'btn ghost', onclick: () => close() }, 'キャンセル')));
+  });
 }
 
 // ---------- AI ----------

@@ -130,6 +130,11 @@ const channelName = (id) => state.meta.channels?.find((c) => c.id === id)?.label
 function badgesFor(p) {
   const b = [h('span', { class: `badge ${STATUS_CLASS[p.status.id] || ''}` }, p.status.label)];
   b.push(h('span', { class: `badge ${p.counts.actual ? '' : 'warn'}` }, `📷 ${p.counts.actual}`));
+  if (p.research?.group) {
+    const g = p.research.group.replace(/^\d\s*/, '');
+    b.push(h('span', { class: `badge ${/ジモティ/.test(g) ? 'warn' : /3000/.test(g) ? 'ok' : ''}`, title: `Amazon価格: ${p.research.amazonPrice != null ? yen(p.research.amazonPrice) : '未確定'}` },
+      `${g}${p.research.amazonPrice != null && !/円/.test(g) ? '' : ''}${p.research.amazonPrice != null ? `・A${yen(p.research.amazonPrice)}` : ''}`));
+  }
   if (p.counts.generated) b.push(h('span', { class: 'badge' }, `生成 ${p.counts.generated}`));
   if (p.counts.listing) b.push(h('span', { class: 'badge' }, `出品用 ${p.counts.listing}`));
   for (const [ch, st] of Object.entries(p.channels || {})) {
@@ -150,6 +155,26 @@ function issuesFor(p) {
   for (const i of p.issues) if (!i.startsWith('追加撮影')) lines.push(`⚠ ${i}`);
   if (!lines.length || !['sell', 'draft'].includes(p.decision)) return null;
   return h('div', { class: 'issues' }, lines.slice(0, 2).map((l) => h('div', null, l)), lines.length > 2 && h('div', { class: 'muted' }, `ほか${lines.length - 2}件`));
+}
+
+/** Where to offer it: three small toggles (＊ = suggested by the price research). */
+function targetSeg(p) {
+  const targets = p.targets || [];
+  const suggested = p.suggestedTargets || [];
+  return h('div', { class: 'seg targets', style: { marginTop: '6px' } },
+    (state.meta.channels || []).map((c) => h('button', {
+      class: `${targets.includes(c.id) ? 'on' : ''} ${!targets.includes(c.id) && suggested.includes(c.id) ? 'suggested' : ''}`,
+      title: suggested.includes(c.id) ? 'おすすめ（価格・大きさの調査から）' : '',
+      onclick: async (e) => {
+        e.stopPropagation();
+        try {
+          const next = targets.includes(c.id) ? targets.filter((x) => x !== c.id) : [...targets, c.id];
+          applyProduct(await api.put(`/api/products/${p.id}/targets`, { targets: next }));
+        } catch (err) {
+          showError(err);
+        }
+      },
+    }, `→${c.label}${!targets.includes(c.id) && suggested.includes(c.id) ? '＊' : ''}`)));
 }
 
 function decisionSeg(p) {
@@ -215,7 +240,8 @@ function renderItems() {
           [p.brand, p.model, p.location && `📍${p.location}`].filter(Boolean).join(' · ')),
         h('div', { class: 'badges' }, badgesFor(p)),
         issuesFor(p),
-        !state.selectMode && !p.trashedAt && decisionSeg(p)),
+        !state.selectMode && !p.trashedAt && decisionSeg(p),
+        !state.selectMode && !p.trashedAt && targetSeg(p)),
       h('div', { class: 'item-side' },
         !p.trashedAt && h('button', {
           class: 'icon-btn cam', 'aria-label': `${p.name || p.id} を撮影`,
@@ -271,6 +297,8 @@ function renderBulk() {
       h('button', { class: 'btn small', onclick: () => ids.length && openCamera({ ids }) }, '📷 撮影')),
     h('div', { class: 'row' },
       ...state.meta.decisions.filter((d) => d.id !== 'undecided').map((d) => h('button', { class: 'btn small', onclick: run('decision', d.id, d.label) }, d.label)),
+      ...(state.meta.channels || []).map((c) => h('button', { class: 'btn small', onclick: run('addTarget', c.id, `出品先に${c.label}`) }, `→${c.label}`)),
+      h('button', { class: 'btn small', onclick: run('suggestedTargets', null, 'おすすめの出品先') }, '→おすすめ'),
       h('button', { class: 'btn small', onclick: run('shootPlan', true, '撮影予定に追加') }, '撮影予定+'),
       h('button', { class: 'btn small', onclick: run('shootPlan', false, '撮影予定から外す') }, '撮影予定−')),
     h('div', { class: 'row' },

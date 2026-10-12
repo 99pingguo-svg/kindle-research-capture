@@ -11,7 +11,7 @@ import {
 import {
   FIELD_MAP, DECISION_IDS, STAGE_IDS, USER_ONLY_STAGES, DEFAULT_SETTINGS, FACT_CONFIDENCE,
   LINK_TYPES, PHOTO_TAGS, AI_TASK_TYPES, MERCARI_LIMITS, IMAGE_QC_CHECK_IDS, QC_CHECKS, coerceField, stageLabel,
-  decisionLabel, PREPARE_DECISIONS, PHOTO_KINDS, PHOTO_KIND_IDS, LISTABLE_KINDS,
+  decisionLabel, PREPARE_DECISIONS, PHOTO_KINDS, PHOTO_KIND_IDS, LISTABLE_KINDS, CHANNEL_IDS, channelLabel,
 } from './schema.js';
 import { readiness, actualPhotos, listablePhotos, livePhotos, findDuplicates } from './rules.js';
 
@@ -57,6 +57,11 @@ function newProduct(id, at, settings) {
     photos: [],
     listingPhotoIds: [],
     facts: [],
+    targets: [],
+    override: Object.fromEntries(CHANNEL_IDS.map((c) => [c, { title: '', description: '', price: null }])),
+    channelPhotos: {},
+    research: null,
+    textCandidates: [],
     listing: {
       title: '',
       description: '',
@@ -144,6 +149,7 @@ export class Store extends EventEmitter {
   migrate(p) {
     const base = newProduct(p.id, p.createdAt || nowIso(), {});
     const out = { ...base, ...p, listing: { ...base.listing, ...p.listing }, channels: { ...base.channels, ...p.channels } };
+    out.override = Object.fromEntries(CHANNEL_IDS.map((c) => [c, { ...base.override[c], ...(p.override?.[c] || {}) }]));
     return out;
   }
 
@@ -894,6 +900,77 @@ export class Store extends EventEmitter {
         p.stage = stage;
       }
       ctx.note(summary || `${channel} 情報を更新`);
+    });
+  }
+
+  // ---------- destinations, per-destination photos, research, text candidates ----------
+
+  /** Where the user wants to offer the product (メルカリ／ジモティー／フリマ, any number). User-only. */
+  setTargets(id, actor, targets) {
+    forbidAi(actor, '出品先の選択');
+    const next = [...new Set(targets || [])];
+    for (const t of next) if (!CHANNEL_IDS.includes(t)) throw new AppError(400, `出品先が不正: ${t}`);
+    const ordered = CHANNEL_IDS.filter((c) => next.includes(c));
+    return this.mutate(id, actor, 'targets', (p, ctx) => {
+      if (same(ordered, p.targets || [])) return;
+      ctx.changes.push({ path: 'targets', label: '出品先', from: (p.targets || []).map(channelLabel).join('・') || 'なし', to: ordered.map(channelLabel).join('・') || 'なし' });
+      ctx.dirty = true;
+      p.targets = ordered;
+    });
+  }
+
+  /** Photos for one destination, in order. null = same as the common 出品用写真. */
+  setChannelPhotos(id, actor, channel, ids) {
+    if (!CHANNEL_IDS.includes(channel)) throw new AppError(400, `出品先が不正: ${channel}`);
+    return this.mutate(id, actor, 'channel_photos', (p, ctx) => {
+      const cur = p.channelPhotos?.[channel] ?? null;
+      if (ids == null) {
+        if (cur == null) return;
+        delete p.channelPhotos[channel];
+        ctx.note(`${channelLabel(channel)}の写真を共通に戻す`);
+        ctx.bump();
+        return;
+      }
+      const draft = clone(p);
+      this._applyListingPhotos(draft, ids, new Ctx());
+      if (cur && same(cur, draft.listingPhotoIds)) return;
+      p.channelPhotos = { ...(p.channelPhotos || {}), [channel]: draft.listingPhotoIds };
+      ctx.note(`${channelLabel(channel)}の写真を${draft.listingPhotoIds.length}枚に設定`);
+      ctx.bump();
+    });
+  }
+
+  /** Reference research (price check, size, where it suits). Not a listing field: does not invalidate QC. */
+  setResearch(id, actor, research) {
+    return this.mutate(id, actor, 'research', (p, ctx) => {
+      const a = JSON.stringify({ ...(p.research || {}), importedAt: null });
+      const b = JSON.stringify({ ...(research || {}), importedAt: null });
+      if (a === b) return;
+      p.research = research;
+      ctx.note(`価格・分類の調査を更新（${research?.group || '分類なし'}${research?.amazonPrice != null ? `・Amazon ${yen(research.amazonPrice)}` : ''}）`);
+    });
+  }
+
+  /**
+   * Alternative texts the user can pick from (latest manuscript, 販売用原稿, earlier versions…).
+   * Upsert by `key`; a changed text keeps the previous one as 旧版 so it stays selectable.
+   */
+  upsertTextCandidates(id, actor, items) {
+    return this.mutate(id, actor, 'text_candidates', (p, ctx) => {
+      const list = [...(p.textCandidates || [])];
+      const fresh = [];
+      for (const it of items) {
+        if (!it.key || !it.field || typeof it.text !== 'string' || !it.text.trim()) continue;
+        const i = list.findIndex((c) => c.key === it.key);
+        if (i >= 0 && list[i].text === it.text) continue;
+        if (i >= 0) list[i] = { ...list[i], key: `${it.key}@${list[i].at}`, label: `${list[i].label}（旧版）`, old: true };
+        fresh.push({ key: it.key, field: it.field, label: it.label || it.key, text: it.text, source: it.source || '', at: nowIso(), by: actor });
+      }
+      if (!fresh.length) return;
+      const n = fresh.length;
+      // New ones first in the order given, then the unchanged current ones, then up to 20 earlier versions.
+      p.textCandidates = [...fresh, ...list.filter((c) => !c.old), ...list.filter((c) => c.old).slice(0, 20)];
+      ctx.note(`文章の候補を${n}件更新`);
     });
   }
 
