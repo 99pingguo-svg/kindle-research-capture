@@ -402,3 +402,21 @@ test('text candidates: upsert by key, keep the previous text as 旧版', () => {
   assert.deepEqual(c.map((x) => [x.text, !!x.old]), [['第2版', false], ['第1版', true]]);
   assert.match(c[1].label, /旧版/);
 });
+
+test('per-destination fields cannot route around the user: price and locked text become proposals', () => {
+  const store = new Store(tmp());
+  const id = preparedProduct(store); // listing.price is user-confirmed
+  let r = store.updateFields(id, 'claude', { 'override.mercari.price': 300, 'override.jmty.price': 100 });
+  assert.deepEqual(r.proposed.sort(), ['override.jmty.price', 'override.mercari.price']);
+  assert.equal(store.get(id).override.mercari.price, null);
+  // Common title not locked: the AI may draft a destination title. Once the user locks the common title, it may only propose.
+  r = store.updateFields(id, 'claude', { 'override.jmty.title': 'AIのジモティー用タイトル' });
+  assert.deepEqual(r.set, ['override.jmty.title']);
+  store.confirmFields(id, 'user', ['listing.title']);
+  r = store.updateFields(id, 'claude', { 'override.mercari.title': '別のタイトル' });
+  assert.deepEqual(r.proposed, ['override.mercari.title']);
+  assert.equal(store.get(id).override.mercari.title, '');
+  // The user can set them directly.
+  r = store.updateFields(id, 'user', { 'override.mercari.price': 2500 });
+  assert.equal(store.get(id).override.mercari.price, 2500);
+});

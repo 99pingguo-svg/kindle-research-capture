@@ -21,6 +21,18 @@ const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp'
 
 export const isUser = (actor) => actor === 'user';
 
+/**
+ * A per-destination field must not let the AI route around the user's decisions on the common listing:
+ * a per-destination price needs the user like 販売価格 does, and per-destination text follows the common field's lock.
+ * Returns the reason (for the proposal note) or ''.
+ */
+function guardedOverride(p, def) {
+  if (!def.base) return '';
+  if (FIELD_MAP[def.base]?.confirm) return `${FIELD_MAP[def.base].label}はユーザーの確定が必要`;
+  if (p.locks[def.base]) return `共通の${FIELD_MAP[def.base].label}がユーザー確定済み`;
+  return '';
+}
+
 function forbidAi(actor, what) {
   if (!isUser(actor)) throw new AppError(403, `${what}はユーザーのみ実行できます（AIの権限外）`, 'forbidden');
 }
@@ -350,13 +362,13 @@ export class Store extends EventEmitter {
             delete p.proposals[field];
             ctx.dirty = true;
           }
-        } else if (p.locks[field]) {
+        } else if (p.locks[field] || guardedOverride(p, def)) {
           if (same(old, value)) {
             outcome.unchanged.push(field);
             continue;
           }
           p.proposals[field] = { value, by: actor, at: nowIso(), reason: reason || '' };
-          ctx.note(`${def.label} の変更を提案（ユーザー確定済みのため上書きせず）`);
+          ctx.note(`${def.label} の変更を提案（${p.locks[field] ? 'ユーザー確定済み' : guardedOverride(p, def)}のため上書きせず）`);
           outcome.proposed.push(field);
         } else if (!same(old, value)) {
           setPath(p, field, value);
