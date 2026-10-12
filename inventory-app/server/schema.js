@@ -21,7 +21,7 @@ export const STAGES = [
 export const CHANNELS = [
   { id: 'mercari', label: 'メルカリ' },
   { id: 'jmty', label: 'ジモティー' },
-  { id: 'flea', label: 'フリマ' },
+  { id: 'flea', label: 'フリマ', note: '会場のフリーマーケット（オンラインの出品作業はなし。値札・持ち物の準備用）' },
 ];
 export const CHANNEL_IDS = CHANNELS.map((c) => c.id);
 export const channelLabel = (id) => CHANNELS.find((c) => c.id === id)?.label ?? id;

@@ -185,6 +185,29 @@ export function channelPackage(p, channel) {
   };
 }
 
+/** Price fields the bulk price tool may set. */
+export const PRICE_FIELDS = ['listing.price', 'override.mercari.price', 'override.jmty.price', 'override.flea.price'];
+
+/**
+ * Bulk price for one product: a fixed amount, or a percentage of the recorded Amazon price (sale price included),
+ * rounded to 1/10/100 yen. Returns { price } or { skip: reason }; throws on a bad request.
+ */
+export function bulkPrice(p, { field, mode, amount, percent, round = 10, overwrite = true } = {}) {
+  if (!PRICE_FIELDS.includes(field)) throw new Error(`価格の項目が不正: ${field}`);
+  const current = field.split('.').reduce((o, k) => o?.[k], p);
+  if (!overwrite && current != null) return { skip: '設定済みのため変更せず' };
+  let price;
+  if (mode === 'fixed') price = Number(String(amount ?? '').replace(/[,円¥\s]/g, ''));
+  else if (mode === 'percent') {
+    const base = p.research?.amazonPrice;
+    if (base == null) return { skip: 'Amazon価格の記録なし' };
+    price = (base * Number(percent)) / 100;
+  } else throw new Error(`設定方法が不正: ${mode}`);
+  if (!Number.isFinite(price) || price < 0) throw new Error('価格が不正です');
+  const unit = [1, 10, 100].includes(Number(round)) ? Number(round) : 10;
+  return { price: Math.round(price / unit) * unit };
+}
+
 /** Destinations the research suggests (the user decides). */
 export function suggestedTargets(p) {
   const g = p.research?.group || '';
@@ -218,6 +241,7 @@ export function summary(p, settings) {
     sourceUrl: sourceUrlOf(p),
     targets: p.targets || [],
     suggestedTargets: suggestedTargets(p),
+    prices: { common: p.listing.price ?? null, ...Object.fromEntries(Object.entries(p.override || {}).map(([c, o]) => [c, o.price ?? null])) },
     research: p.research ? { group: p.research.group, amazonPrice: p.research.amazonPrice ?? null, priceStatus: p.research.priceStatus, priority: p.research.jimoty?.priority || '' } : null,
     custom: Object.fromEntries(Object.entries(p.override || {}).filter(([c, o]) => o.title || o.description || o.price != null || p.channelPhotos?.[c]).map(([c]) => [c, true])),
     decision: p.decision,

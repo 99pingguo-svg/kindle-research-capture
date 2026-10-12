@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../server/store.js';
-import { readiness, lint } from '../server/rules.js';
+import { readiness, lint, bulkPrice } from '../server/rules.js';
 import * as mercari from '../server/adapters/mercari.js';
 import * as channels from '../server/channels.js';
 import { IMAGE_QC_CHECK_IDS } from '../server/schema.js';
@@ -419,4 +419,57 @@ test('per-destination fields cannot route around the user: price and locked text
   // The user can set them directly.
   r = store.updateFields(id, 'user', { 'override.mercari.price': 2500 });
   assert.equal(store.get(id).override.mercari.price, 2500);
+});
+
+test('bulk price: fixed or % of the recorded Amazon price, rounding, skip already-set unless overwriting', () => {
+  const p = { listing: { price: null }, override: { mercari: { price: 1500 }, jmty: { price: null }, flea: { price: null } }, research: { amazonPrice: 3145 } };
+  assert.deepEqual(bulkPrice(p, { field: 'listing.price', mode: 'percent', percent: 60, round: 10 }), { price: 1890 });
+  assert.deepEqual(bulkPrice(p, { field: 'listing.price', mode: 'percent', percent: 60, round: 100 }), { price: 1900 });
+  assert.deepEqual(bulkPrice(p, { field: 'override.jmty.price', mode: 'fixed', amount: '1,980円', round: 1 }), { price: 1980 });
+  assert.deepEqual(bulkPrice(p, { field: 'override.mercari.price', mode: 'fixed', amount: 1200, overwrite: false }), { skip: '設定済みのため変更せず' });
+  assert.deepEqual(bulkPrice(p, { field: 'override.mercari.price', mode: 'fixed', amount: 1200, overwrite: true }), { price: 1200 });
+  assert.deepEqual(bulkPrice({ ...p, research: null }, { field: 'listing.price', mode: 'percent', percent: 50 }), { skip: 'Amazon価格の記録なし' });
+  assert.throws(() => bulkPrice(p, { field: 'name', mode: 'fixed', amount: 1 }), /価格の項目/);
+});
+
+test('snapshots: save, roll back (state before is saved; later products go to the trash), user-only', () => {
+  const store = new Store(tmp());
+  const a = store.create({ name: '商品A' }, 'user').product.id;
+  store.updateFields(a, 'user', { 'listing.price': 1000 });
+  const snap = store.saveSnapshot('user', { label: '値付け前' });
+  assert.equal(store.listSnapshots()[0].label, '値付け前');
+  store.updateFields(a, 'user', { 'listing.price': 300, name: '名前を変えた' });
+  const b = store.create({ name: '後から追加' }, 'user').product.id;
+  assert.throws(() => store.rollbackTo('claude', snap.id), /ユーザーのみ/);
+  const r = store.rollbackTo('user', snap.id);
+  assert.equal(r.restored, 1);
+  assert.equal(r.trashed, 1);
+  assert.equal(store.get(a).listing.price, 1000);
+  assert.equal(store.get(a).name, '商品A');
+  assert.ok(store.get(b).trashedAt);
+  assert.ok(store.get(a).rev > snap.count); // rev keeps increasing (QC from the old state must be redone)
+  // The rollback itself can be undone from the automatic snapshot.
+  const back = store.rollbackTo('user', r.before);
+  assert.equal(store.get(a).listing.price, 300);
+  assert.equal(store.get(b).trashedAt, null);
+  assert.ok(back.restored >= 2);
+  assert.throws(() => store.deleteSnapshot('claude', snap.id), /ユーザーのみ/);
+  store.deleteSnapshot('user', snap.id);
+  assert.ok(!store.listSnapshots().some((s) => s.id === snap.id));
+});
+
+test('autosave: periodic snapshot only when something changed; save points are kept', () => {
+  const store = new Store(tmp());
+  store.create({ name: 'X' }, 'user');
+  const first = store.autoSaveIfChanged();
+  assert.equal(first.kind, 'auto');
+  assert.equal(store.autoSaveIfChanged(), null); // nothing changed since
+  store.updateFields(store.list()[0].id, 'user', { name: 'Y' });
+  assert.ok(store.autoSaveIfChanged());
+  const sp = store.saveSnapshot('user', { label: 'セーブポイント' });
+  assert.equal(sp.kind, 'manual');
+  for (let i = 0; i < 60; i++) store.saveSnapshot('system', { label: '自動保存', kind: 'auto' });
+  const all = store.listSnapshots();
+  assert.equal(all.filter((s) => s.kind === 'auto').length, 48);
+  assert.ok(all.some((s) => s.id === sp.id));
 });

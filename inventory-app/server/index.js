@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { Store, isUser } from './store.js';
 import { AppError, nowIso } from './util.js';
 import { readBody, parseMultipart } from './multipart.js';
-import { summary, readiness, lint, channelPackage, suggestedTargets } from './rules.js';
+import { summary, readiness, lint, channelPackage, suggestedTargets, bulkPrice } from './rules.js';
 import { writeZip } from './zip.js';
 import { exportEntries, productsCsv } from './export.js';
 import { createMcpHandler, matchesFilter } from './mcp.js';
@@ -217,9 +217,21 @@ export function createApp({ dataDir, token = '' } = {}) {
   route('POST', '/api/revert-actor', ({ body, actor }) => store.revertActorSince(actor, body.actor, body.since));
 
   // bulk — one item failing never fails the others
+  // ---- whole-app snapshots (状態の保存) and rollback ----
+  route('GET', '/api/snapshots', () => ({ snapshots: store.listSnapshots() }));
+  route('POST', '/api/snapshots', ({ body, actor }) => store.saveSnapshot(actor, { label: body?.label || '' }));
+  route('POST', '/api/snapshots/:id/rollback', ({ params, actor }) => store.rollbackTo(actor, params.id));
+  route('DELETE', '/api/snapshots/:id', ({ params, actor }) => {
+    store.deleteSnapshot(actor, params.id);
+    return { ok: true };
+  });
+
+  const BULK_LABEL = { decision: '出品判断', price: '価格の一括設定', addTarget: '出品先の追加', removeTarget: '出品先の解除', suggestedTargets: 'おすすめの出品先', ai: 'AI依頼', shootPlan: '撮影予定', archive: 'アーカイブ', trash: 'ゴミ箱へ移動', restore: '復元', queue: '出品待ち', unqueue: '出品待ち解除', stage: 'ステータス変更' };
   route('POST', '/api/bulk', ({ body, actor }) => {
     const { ids = [], op, value } = body || {};
     const results = [];
+    // Large bulk edits are easy to regret: save the whole state first so they can be rolled back.
+    const snapshot = ids.length >= 10 ? store.saveSnapshot(actor, { label: `${BULK_LABEL[op] || op}（${ids.length}件）の前（自動）`, kind: 'before' }).id : null;
     for (const id of ids) {
       try {
         switch (op) {
@@ -228,6 +240,17 @@ export function createApp({ dataDir, token = '' } = {}) {
           case 'shootPlan': store.setShootPlan(id, actor, !!value); break;
           case 'addTarget': store.setTargets(id, actor, [...(store.get(id).targets || []), value]); break;
           case 'removeTarget': store.setTargets(id, actor, (store.get(id).targets || []).filter((t) => t !== value)); break;
+          case 'price': {
+            let r;
+            try {
+              r = bulkPrice(store.get(id), value || {});
+            } catch (e) {
+              throw new AppError(400, e.message);
+            }
+            if (r.skip) throw new AppError(409, r.skip, 'skipped');
+            store.updateFields(id, actor, { [value.field]: r.price });
+            break;
+          }
           case 'suggestedTargets': store.setTargets(id, actor, [...new Set([...(store.get(id).targets || []), ...suggestedTargets(store.get(id))])]); break;
           case 'archive': store.setArchived(id, actor, !!value); break;
           case 'trash': store.trash(id, actor); break;
@@ -247,10 +270,13 @@ export function createApp({ dataDir, token = '' } = {}) {
         }
         results.push({ id, ok: true });
       } catch (e) {
-        results.push({ id, ok: false, error: e.message });
+        // "Skipped" (e.g. already priced and not overwriting) is not a failure.
+        results.push(e.code === 'skipped' ? { id, ok: true, skipped: e.message } : { id, ok: false, error: e.message });
       }
     }
-    return { results, products: ids.filter((id) => store.products.has(id)).map((id) => sm(store.get(id))) };
+    const changed = results.some((r) => r.ok && !r.skipped);
+    if (snapshot && !changed) store.discardAutoSnapshot(snapshot);
+    return { results, snapshot: changed ? snapshot : null, products: ids.filter((id) => store.products.has(id)).map((id) => sm(store.get(id))) };
   });
 
   // export
@@ -436,7 +462,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const host = process.env.HOST || '127.0.0.1';
   const anyHost = host === '0.0.0.0' || host === '::'; // '::' listens on IPv6 and IPv4 at once
   const token = process.env.INVENTORY_TOKEN || '';
-  const { handler, trustedHandler } = createApp({ dataDir, token });
+  const { handler, trustedHandler, store } = createApp({ dataDir, token });
   const tls = process.env.TLS_CERT && process.env.TLS_KEY ? { cert: fs.readFileSync(process.env.TLS_CERT), key: fs.readFileSync(process.env.TLS_KEY) } : null;
   if (tls) {
     // Two doors on one store: HTTPS for the iPhone (token required when exposed beyond this Mac),
@@ -474,5 +500,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     });
   }
   backupMetadata(dataDir);
+  // 自動保存: at start and every AUTOSAVE_MINUTES (default 30), only if something changed since the last snapshot.
+  store.autoSaveIfChanged();
+  setInterval(() => {
+    try {
+      store.autoSaveIfChanged();
+    } catch (e) {
+      console.error('自動保存に失敗', e.message);
+    }
+  }, Number(process.env.AUTOSAVE_MINUTES || 30) * 60_000).unref();
   setInterval(() => backupMetadata(dataDir), 24 * 3600 * 1000).unref();
 }

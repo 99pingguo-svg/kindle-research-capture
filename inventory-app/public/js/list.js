@@ -2,7 +2,7 @@
 // available per row so most work never needs the detail page.
 import { h, clear, toast, showError, choose, sheet, yen } from './ui.js';
 import { api } from './api.js';
-import { state, setPref, on, FILTERS, matchesFilter, visibleProducts, applyProduct, loadAll, inDateRange, isDateSort, productsForCalendar } from './state.js';
+import { state, setPref, on, FILTERS, matchesFilter, visibleProducts, applyProduct, loadAll, inDateRange, isDateSort, productsForCalendar, priceRangeOn } from './state.js';
 import { pickDateRange, rangeLabel, fmtDay } from './calendar.js';
 import { openCamera } from './camera.js';
 import * as uploads from './uploads.js';
@@ -87,6 +87,8 @@ function renderToolbar() {
     h('span', { class: 'count' }, `${n}件`),
     h('button', { class: `btn small date-range ${ranged ? 'on' : ''}`, onclick: openRange, 'aria-label': '日付で絞り込み' }, '📅 ', rangeLabel(state.prefs)),
     ranged ? h('button', { class: 'btn small ghost', 'aria-label': '期間を解除', onclick: () => setRange({ dateFrom: '', dateTo: '', dateNone: false }) }, '✕') : '',
+    h('button', { class: `btn small date-range ${priceRangeOn() ? 'on' : ''}`, onclick: openPriceRange, 'aria-label': 'Amazon価格で絞り込み' }, '💴 ', priceRangeLabel()),
+    priceRangeOn() ? h('button', { class: 'btn small ghost', 'aria-label': '価格帯を解除', onclick: () => setPriceRange({ priceMin: '', priceMax: '', priceUnknown: false }) }, '✕') : '',
     h('span', { class: 'spacer' }),
     // One tap: newest ⇄ oldest. From any other order it jumps back to newest first.
     h('button', {
@@ -106,6 +108,115 @@ function setRange(r) {
   state.selected.clear();
   renderAll();
   els.list.scrollIntoView({ block: 'start' });
+}
+
+const yenOr = (v) => (v === '' || v == null ? '' : yen(Number(v)));
+function priceRangeLabel() {
+  const { priceMin, priceMax, priceUnknown } = state.prefs;
+  if (priceUnknown) return 'Amazon価格なし';
+  if (!priceRangeOn()) return '価格帯';
+  return `${yenOr(priceMin)}〜${yenOr(priceMax)}`;
+}
+function setPriceRange(r) {
+  for (const [k, v] of Object.entries(r)) setPref(k, v);
+  state.selected.clear();
+  renderAll();
+  els.list.scrollIntoView({ block: 'start' });
+}
+/** Filter by the recorded Amazon price (sale price included): presets or any range. */
+function openPriceRange() {
+  sheet((close) => {
+    const min = h('input', { type: 'text', inputmode: 'numeric', placeholder: '下限（円）', value: state.prefs.priceUnknown ? '' : state.prefs.priceMin ?? '' });
+    const max = h('input', { type: 'text', inputmode: 'numeric', placeholder: '上限（円）', value: state.prefs.priceUnknown ? '' : state.prefs.priceMax ?? '' });
+    const pick = (r) => { close(); setPriceRange({ priceUnknown: false, priceMin: '', priceMax: '', ...r }); };
+    const clean = (el) => el.value.normalize('NFKC').replace(/[^\d]/g, '');
+    return h('div', null,
+      h('h2', null, 'Amazon価格で絞り込み'),
+      h('p', { class: 'muted small' }, '価格確認の記録（セール価格を含む表示価格・新品）で絞り込みます。'),
+      h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px' } },
+        h('button', { class: 'btn small', onclick: () => pick({ priceMax: 2299 }) }, '〜¥2,299'),
+        h('button', { class: 'btn small', onclick: () => pick({ priceMin: 2300, priceMax: 2999 }) }, '¥2,300〜¥2,999'),
+        h('button', { class: 'btn small', onclick: () => pick({ priceMin: 3000 }) }, '¥3,000〜'),
+        h('button', { class: 'btn small', onclick: () => pick({ priceMin: 5000 }) }, '¥5,000〜'),
+        h('button', { class: 'btn small', onclick: () => pick({ priceUnknown: true }) }, 'Amazon価格なし')),
+      h('div', { class: 'grid2', style: { marginTop: '10px' } }, h('label', { class: 'field' }, min), h('label', { class: 'field' }, max)),
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn primary', onclick: () => pick({ priceMin: clean(min), priceMax: clean(max) }) }, 'この範囲で絞り込む'),
+        h('button', { class: 'btn', onclick: () => pick({}) }, '解除'),
+        h('button', { class: 'btn ghost', onclick: () => close() }, 'キャンセル')));
+  });
+}
+
+/** Set a price on the selected products: a fixed amount or a % of the Amazon price, into the common or a destination price. */
+function openBulkPrice(ids) {
+  if (!ids.length) return toast('商品を選択してください');
+  const products = ids.map((id) => state.products.get(id)).filter(Boolean);
+  const fields = [['listing.price', 'common', '共通の販売価格'], ...(state.meta.channels || []).map((c) => [`override.${c.id}.price`, c.id, `${c.label}の価格`])];
+  sheet((close) => {
+    const field = h('select', null, fields.map(([v, , l]) => h('option', { value: v }, l)));
+    const mode = h('select', null, h('option', { value: 'percent' }, 'Amazon価格の％'), h('option', { value: 'fixed' }, '金額を指定'));
+    const amount = h('input', { type: 'text', inputmode: 'numeric', value: '60' });
+    const unit = h('span', { class: 'muted' }, '％');
+    const round = h('select', null, [[10, '10円単位'], [100, '100円単位'], [1, '1円単位']].map(([v, l]) => h('option', { value: v }, l)));
+    const preview = h('div', { class: 'small', style: { margin: '8px 0', whiteSpace: 'pre-wrap' } });
+    const key = () => fields.find(([v]) => v === field.value)[1];
+    const calc = (p) => {
+      const n = Number(amount.value.normalize('NFKC').replace(/[^\d.]/g, ''));
+      const r = Number(round.value);
+      if (mode.value === 'fixed') return Number.isFinite(n) ? Math.round(n / r) * r : null;
+      const base = p.research?.amazonPrice;
+      return base == null || !Number.isFinite(n) ? null : Math.round((base * n) / 100 / r) * r;
+    };
+    const update = () => {
+      unit.textContent = mode.value === 'fixed' ? '円' : '％';
+      const k = key();
+      const set = products.filter((p) => p.prices?.[k] != null);
+      const none = products.filter((p) => calc(p) == null);
+      const low = (k === 'common' || k === 'mercari') ? products.filter((p) => calc(p) != null && calc(p) < 300) : [];
+      preview.textContent = [
+        `${products.length}件が対象。設定済み ${set.length}件${none.length ? `・Amazon価格なしで対象外 ${none.length}件` : ''}${low.length ? `・メルカリ下限300円未満 ${low.length}件` : ''}`,
+        ...products.slice(0, 4).map((p) => `#${p.id} ${String(p.name || '').slice(0, 14)}: ${p.prices?.[k] != null ? yen(p.prices[k]) : '未設定'} → ${calc(p) != null ? yen(calc(p)) : '対象外'}`),
+        products.length > 4 ? '…' : '',
+      ].join('\n');
+    };
+    for (const el of [field, mode, amount, round]) el.addEventListener('input', update);
+    for (const el of [field, mode, round]) el.addEventListener('change', update);
+    update();
+    const apply = async () => {
+      const k = key();
+      const already = products.filter((p) => p.prices?.[k] != null).length;
+      let overwrite = true;
+      if (already) {
+        const v = await choose(`${already}件はすでに価格が入っています。`, [{ label: '上書きする', value: 'all' }, { label: '未設定のものだけ', value: 'empty' }]);
+        if (!v) return;
+        overwrite = v === 'all';
+      }
+      close();
+      try {
+        const value = { field: field.value, mode: mode.value, round: Number(round.value), overwrite, ...(mode.value === 'fixed' ? { amount: amount.value } : { percent: amount.value.normalize('NFKC').replace(/[^\d.]/g, '') }) };
+        const r = await api.post('/api/bulk', { ids: products.map((p) => p.id), op: 'price', value });
+        for (const p of r.products) state.products.set(p.id, p);
+        const ok = r.results.filter((x) => x.ok && !x.skipped).length;
+        const skipped = r.results.filter((x) => x.skipped).length;
+        const failed = r.results.filter((x) => !x.ok);
+        toast(`価格を設定: ${ok}件${skipped ? ` / 対象外 ${skipped}件` : ''}${failed.length ? ` / 失敗 ${failed.length}件\n${failed.slice(0, 2).map((f) => `${f.id}: ${f.error}`).join('\n')}` : ''}`, failed.length ? { error: true } : undefined);
+        renderAll();
+      } catch (e) {
+        showError(e);
+      }
+    };
+    return h('div', null,
+      h('h2', null, `💴 価格を設定（${products.length}件）`),
+      h('label', { class: 'field' }, h('span', { class: 'field-label' }, '設定する価格'), field),
+      h('div', { class: 'grid2' },
+        h('label', { class: 'field' }, h('span', { class: 'field-label' }, '決め方'), mode),
+        h('label', { class: 'field' }, h('span', { class: 'field-label' }, '丸め'), round)),
+      h('label', { class: 'field' }, h('span', { class: 'field-label' }, '値'), h('div', { class: 'row', style: { alignItems: 'center', gap: '6px' } }, amount, unit)),
+      preview,
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn primary', onclick: apply }, '設定する'),
+        h('button', { class: 'btn ghost', onclick: () => close() }, 'キャンセル')));
+  });
 }
 
 async function openRange() {
@@ -275,7 +386,7 @@ function renderBulk() {
       for (const p of r.products) state.products.set(p.id, p);
       const failed = r.results.filter((x) => !x.ok);
       if (failed.length) toast(`${label}: ${ids.length - failed.length}件成功 / ${failed.length}件失敗\n${failed.slice(0, 3).map((f) => `${f.id}: ${f.error}`).join('\n')}`, { error: true });
-      else toast(`${label}: ${ids.length}件`);
+      else toast(`${label}: ${ids.length}件${r.snapshot ? '（変更前の状態を自動保存）' : ''}`);
       renderAll();
     } catch (e) {
       showError(e);
@@ -294,7 +405,8 @@ function renderBulk() {
       h('button', { class: 'btn small', onclick: run('ai', 'organize', 'AI整理を依頼') }, 'AI整理'),
       h('button', { class: 'btn small', onclick: run('ai', 'draft', '原稿作成を依頼') }, '原稿'),
       h('button', { class: 'btn small', onclick: run('ai', 'qc', 'QCを依頼') }, 'QC'),
-      h('button', { class: 'btn small', onclick: () => ids.length && openCamera({ ids }) }, '📷 撮影')),
+      h('button', { class: 'btn small', onclick: () => ids.length && openCamera({ ids }) }, '📷 撮影'),
+      h('button', { class: 'btn small', onclick: () => openBulkPrice(ids) }, '💴 価格を設定')),
     h('div', { class: 'row' },
       ...state.meta.decisions.filter((d) => d.id !== 'undecided').map((d) => h('button', { class: 'btn small', onclick: run('decision', d.id, d.label) }, d.label)),
       ...(state.meta.channels || []).map((c) => h('button', { class: 'btn small', onclick: run('addTarget', c.id, `出品先に${c.label}`) }, `→${c.label}`)),
@@ -377,6 +489,7 @@ async function mainMenu() {
   const v = await choose(null, [
     { label: '🕘 共同作業の履歴', value: '#/activity' },
     { label: '📒 更新台帳（素材の更新・出品先の確認）', value: '#/ledger' },
+    { label: '💾 状態の保存・ロールバック', value: '#/snapshots' },
     { label: '📋 商品リストを一括登録', value: '#/import' },
     { label: '📅 日付を一括反映（既存商品）', value: '#/dates' },
     { label: '⚙️ 設定・AI接続・書き出し', value: '#/settings' },

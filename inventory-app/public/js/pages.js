@@ -20,6 +20,70 @@ function frame(title, ...body) {
 
 const CHANNEL_STATUS = { entered: '下書き', transfer_ok: '下書き', transfer_ng: '下書き', listed: '出品中', stopped: '公開停止', trading: '取引中', sold: '売却済み', removed: '見つからない' };
 
+/** Save the whole app state, and roll back to a saved one (the state just before is saved automatically). */
+export async function showSnapshots() {
+  frame('状態の保存・ロールバック', h('div', { class: 'card' }, '読み込み中…'));
+  let list;
+  try {
+    list = (await api.get('/api/snapshots')).snapshots;
+  } catch (e) {
+    return showError(e);
+  }
+  const name = h('input', { type: 'text', placeholder: 'セーブポイントの名前（例: 価格を決める前）' });
+  const save = async () => {
+    try {
+      const s = await api.post('/api/snapshots', { label: name.value.trim() });
+      toast(`セーブポイントを作りました（${s.count}商品）`);
+      showSnapshots();
+    } catch (e) {
+      showError(e);
+    }
+  };
+  const rollback = async (s) => {
+    const ok = await choose(`「${s.label || fmtDate(s.at)}」の状態に戻しますか？\n全商品の内容がこの時点に戻ります（この後に登録した商品はゴミ箱へ。写真は消えません）。戻す直前の状態は自動で保存されるので、あとで元に戻せます。`, [{ label: 'この状態に戻す', value: true, danger: true }]);
+    if (!ok) return;
+    try {
+      const r = await api.post(`/api/snapshots/${encodeURIComponent(s.id)}/rollback`);
+      toast(`戻しました: 変更 ${r.restored}件・ゴミ箱へ ${r.trashed}件・そのまま ${r.unchanged}件${r.missing.length ? `・復元できない ${r.missing.length}件` : ''}`);
+      await loadAll();
+      showSnapshots();
+    } catch (e) {
+      showError(e);
+    }
+  };
+  const remove = async (s) => {
+    const ok = await choose(`保存「${s.label || fmtDate(s.at)}」を削除しますか？（商品には影響しません）`, [{ label: '削除', value: true, danger: true }]);
+    if (!ok) return;
+    try {
+      await api.del(`/api/snapshots/${encodeURIComponent(s.id)}`);
+      showSnapshots();
+    } catch (e) {
+      showError(e);
+    }
+  };
+  const kindOf = (x) => x.kind || (x.auto ? 'before' : 'manual');
+  const row = (x) => h('div', { style: { padding: '8px 0', borderTop: '1px solid var(--border)' } },
+    h('div', null, h('b', null, x.label || '（名前なし）'), kindOf(x) === 'before' && h('span', { class: 'badge', style: { marginLeft: '6px' } }, '操作の前')),
+    h('div', { class: 'small muted' }, `${fmtDate(x.at)}・${x.count}商品・${x.by === 'system' ? '自動' : actorLabel(x.by)}`),
+    h('div', { style: { display: 'flex', gap: '6px', marginTop: '6px' } },
+      h('button', { class: 'btn small', onclick: () => rollback(x) }, 'この状態に戻す'),
+      h('button', { class: 'btn small ghost', onclick: () => remove(x) }, '削除')));
+  const points = list.filter((x) => kindOf(x) === 'manual');
+  const autos = list.filter((x) => kindOf(x) !== 'manual');
+  frame('状態の保存・ロールバック',
+    h('p', { class: 'muted small' }, '全商品の内容と設定を保存し、いつでもその時点に戻せます。戻すと直前の状態が自動で保存されるので、戻したこと自体も取り消せます。写真は消えません。'),
+    h('div', { class: 'card' },
+      h('h2', null, '📌 セーブポイント', h('span', { class: 'spacer' }), h('span', { class: 'muted small' }, `${points.length}件`)),
+      h('p', { class: 'muted small', style: { margin: '0 0 6px' } }, '自分で名前を付けて作る保存点。削除するまで残ります。'),
+      h('label', { class: 'field' }, name),
+      h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: save }, 'セーブポイントを作る')),
+      points.map(row)),
+    h('div', { class: 'card' },
+      h('h2', null, '🕒 自動保存', h('span', { class: 'spacer' }), h('span', { class: 'muted small' }, `${autos.length}件`)),
+      h('p', { class: 'muted small', style: { margin: '0 0 6px' } }, '30分ごと（変更があったときだけ）と、10件以上の一括操作・ロールバックの直前に自動で保存。古いものから整理されます（定期48件・操作の前30件）。'),
+      autos.length ? autos.map(row) : h('div', { class: 'muted small' }, 'まだありません')));
+}
+
 /** What changed in the source material after import, and when each platform was last checked. */
 export async function showLedger() {
   frame('更新台帳', h('div', { class: 'card' }, '読み込み中…'));

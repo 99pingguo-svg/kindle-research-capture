@@ -33,6 +33,8 @@ function guardedOverride(p, def) {
   return '';
 }
 
+const fmtStamp = (iso) => new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
 function forbidAi(actor, what) {
   if (!isUser(actor)) throw new AppError(403, `${what}はユーザーのみ実行できます（AIの権限外）`, 'forbidden');
 }
@@ -251,6 +253,8 @@ export class Store extends EventEmitter {
     const entry = { id: newId('h'), at: draft.updatedAt, actor, action, summary: ctx.summary(), changes: ctx.changes.filter((c) => !c.silent) };
     writeJson(path.join(this.dir(id), 'versions', `${entry.id}.json`), current);
     this.persist(draft);
+    this.changedAt = draft.updatedAt;
+    this.changeSeq = (this.changeSeq || 0) + 1;
     appendJsonl(path.join(this.dir(id), 'history.jsonl'), entry);
     appendJsonl(path.join(this.dataDir, 'activity.jsonl'), {
       at: entry.at, actor, productId: id, productName: draft.name, action, summary: entry.summary, historyId: entry.id,
@@ -996,6 +1000,130 @@ export class Store extends EventEmitter {
   recordChannelCheck(channel, info) {
     this.meta.channelChecks = { ...(this.meta.channelChecks || {}), [channel]: info };
     this.saveMeta();
+  }
+
+  // ---------- whole-app snapshots (状態の保存) and rollback ----------
+
+  get snapshotsDir() {
+    return path.join(this.dataDir, 'snapshots');
+  }
+
+  /**
+   * Save every product (and settings) as they are now. Photos are append-only, so files are not copied.
+   * kind: 'manual' = a save point the user made (kept until deleted), 'auto' = periodic autosave,
+   * 'before' = taken automatically just before a bulk edit or a rollback.
+   */
+  saveSnapshot(actor, { label = '', kind = 'manual', auto } = {}) {
+    if (auto && kind === 'manual') kind = 'before';
+    const at = nowIso();
+    const id = `${at.replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')}-${newId('s').slice(-4)}`;
+    const dir = path.join(this.snapshotsDir, id);
+    fs.mkdirSync(path.join(dir, 'products'), { recursive: true });
+    const list = this.list();
+    for (const p of list) writeJson(path.join(dir, 'products', `${p.id}.json`), p);
+    writeJson(path.join(dir, 'meta.json'), this.meta);
+    const info = { id, label: String(label || '').slice(0, 80), kind, auto: kind !== 'manual', at, by: actor, count: list.length };
+    writeJson(path.join(dir, 'info.json'), info);
+    this.lastSnapshotAt = at;
+    this.snapshotSeq = this.changeSeq || 0;
+    this.pruneSnapshots();
+    return info;
+  }
+
+  /** Periodic autosave: only when something changed since the last snapshot of any kind. */
+  autoSaveIfChanged() {
+    // Within this process count changes (timestamps can tie within a millisecond); at startup compare times.
+    if (this.snapshotSeq !== undefined) {
+      if ((this.changeSeq || 0) <= this.snapshotSeq) return null;
+    } else {
+      const last = this.listSnapshots()[0]?.at ?? '';
+      const changed = this.list().reduce((m, p) => (p.updatedAt > m ? p.updatedAt : m), '');
+      if (!changed || changed <= last) return null;
+    }
+    return this.saveSnapshot('system', { label: '自動保存', kind: 'auto' });
+  }
+
+  listSnapshots() {
+    if (!fs.existsSync(this.snapshotsDir)) return [];
+    return fs.readdirSync(this.snapshotsDir)
+      .map((d) => readJson(path.join(this.snapshotsDir, d, 'info.json'), null))
+      .filter(Boolean)
+      .sort((a, b) => b.at.localeCompare(a.at));
+  }
+
+  /** Keep every save point; keep the newest 48 periodic autosaves and 30 pre-operation ones. */
+  pruneSnapshots() {
+    const all = this.listSnapshots();
+    const kindOf = (s) => s.kind || (s.auto ? 'before' : 'manual');
+    const drop = [...all.filter((s) => kindOf(s) === 'auto').slice(48), ...all.filter((s) => kindOf(s) === 'before').slice(30)];
+    for (const s of drop) fs.rmSync(path.join(this.snapshotsDir, s.id), { recursive: true, force: true });
+  }
+
+  /** Server-side cleanup of an automatic snapshot that turned out unnecessary (the operation changed nothing). */
+  discardAutoSnapshot(id) {
+    const dir = path.join(this.snapshotsDir, path.basename(id));
+    const info = readJson(path.join(dir, 'info.json'), null);
+    if (info && info.kind !== 'manual') fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  deleteSnapshot(actor, id) {
+    forbidAi(actor, '保存した状態の削除');
+    const dir = path.join(this.snapshotsDir, path.basename(id));
+    if (!fs.existsSync(path.join(dir, 'info.json'))) throw new AppError(404, '保存した状態が見つかりません');
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  /**
+   * Put every product back as it was in snapshot `id`. The state just before is saved first (so this can be undone),
+   * products added later go to the trash (not deleted), and each change is in the product's history.
+   */
+  rollbackTo(actor, id) {
+    forbidAi(actor, 'ロールバック');
+    const dir = path.join(this.snapshotsDir, path.basename(id));
+    const info = readJson(path.join(dir, 'info.json'), null);
+    if (!info) throw new AppError(404, '保存した状態が見つかりません');
+    const name = info.label || fmtStamp(info.at);
+    const before = this.saveSnapshot(actor, { label: `「${name}」に戻す前（自動）`, kind: 'before' });
+    const snap = new Map();
+    for (const f of fs.readdirSync(path.join(dir, 'products'))) {
+      const p = this.migrate(readJson(path.join(dir, 'products', f)));
+      snap.set(p.id, p);
+    }
+    const out = { before: before.id, restored: 0, unchanged: 0, trashed: 0, missing: [] };
+    const strip = (x) => JSON.stringify({ ...x, rev: 0, updatedAt: '' });
+    for (const cur of this.list()) {
+      const old = snap.get(cur.id);
+      if (!old) {
+        if (!cur.trashedAt) {
+          this.mutate(cur.id, actor, 'rollback', (p, ctx) => {
+            p.trashedAt = nowIso();
+            ctx.note(`「${name}」に戻す（この時点に無かった商品のためゴミ箱へ）`);
+          });
+          out.trashed++;
+        } else out.unchanged++;
+        continue;
+      }
+      if (strip(old) === strip(cur)) {
+        out.unchanged++;
+        continue;
+      }
+      this.mutate(cur.id, actor, 'rollback', (p, ctx) => {
+        const rev = Math.max(p.rev, old.rev);
+        for (const k of Object.keys(p)) delete p[k];
+        Object.assign(p, clone(old), { rev });
+        ctx.note(`「${name}」の状態に戻す`);
+        ctx.bump();
+      });
+      out.restored++;
+    }
+    for (const sid of snap.keys()) if (!this.products.has(sid)) out.missing.push(sid);
+    const meta = readJson(path.join(dir, 'meta.json'), null);
+    if (meta?.settings) {
+      this.meta.settings = { ...DEFAULT_SETTINGS, ...meta.settings };
+      this.saveMeta();
+    }
+    this.emit('change', { type: 'settings' });
+    return out;
   }
 
   // ---------- undo ----------

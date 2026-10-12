@@ -160,6 +160,19 @@ export function inDateRange(p) {
   return (!dateFrom || p.itemDate >= dateFrom) && (!dateTo || p.itemDate <= dateTo);
 }
 
+const num = (x) => (x === '' || x == null || !Number.isFinite(Number(x)) ? null : Number(x));
+/** 記録にある Amazon 価格（セール込みの表示価格）の範囲絞り込み。 */
+export function inPriceRange(p) {
+  const min = num(state.prefs.priceMin);
+  const max = num(state.prefs.priceMax);
+  const v = p.research?.amazonPrice ?? null;
+  if (state.prefs.priceUnknown) return v == null;
+  if (min == null && max == null) return true;
+  if (v == null) return false;
+  return (min == null || v >= min) && (max == null || v <= max);
+}
+export const priceRangeOn = () => !!(state.prefs.priceUnknown || num(state.prefs.priceMin) != null || num(state.prefs.priceMax) != null);
+
 export const isDateSort = (s = state.prefs.sort) => s === 'date_desc' || s === 'date_asc';
 
 /** Products matching the status chip and search (before the date range), for calendar counts. */
@@ -169,7 +182,7 @@ export function productsForCalendar() {
 
 export function visibleProducts() {
   const q = state.query.trim().toLowerCase().normalize('NFKC');
-  let items = [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && inDateRange(p));
+  let items = [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && inDateRange(p) && inPriceRange(p));
   if (q) {
     const terms = q.split(/\s+/);
     items = items.filter((p) => {

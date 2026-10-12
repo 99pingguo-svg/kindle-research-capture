@@ -3,7 +3,7 @@ import { state, loadAll, refreshSummaries, emit } from './state.js';
 import { showError } from './ui.js';
 import { mountList } from './list.js';
 import { mountDetail, showDetail, reload as reloadDetail } from './detail.js';
-import { showActivity, showImport, showSettings, showLedger, showDateImport } from './pages.js';
+import { showActivity, showImport, showSettings, showLedger, showDateImport, showSnapshots } from './pages.js';
 import * as uploads from './uploads.js';
 
 const app = document.getElementById('app');
@@ -14,11 +14,11 @@ function route() {
   if (m) {
     app.classList.add('show-detail');
     showDetail(m[1]);
-  } else if (['/activity', '/import', '/settings', '/ledger', '/dates'].includes(hash)) {
+  } else if (['/activity', '/import', '/settings', '/ledger', '/dates', '/snapshots'].includes(hash)) {
     app.classList.add('show-detail');
     state.detailId = null;
     state.detail = null;
-    ({ '/activity': showActivity, '/import': showImport, '/settings': showSettings, '/ledger': showLedger, '/dates': showDateImport })[hash]();
+    ({ '/activity': showActivity, '/import': showImport, '/settings': showSettings, '/ledger': showLedger, '/dates': showDateImport, '/snapshots': showSnapshots })[hash]();
   } else {
     app.classList.remove('show-detail');
     showDetail(null);

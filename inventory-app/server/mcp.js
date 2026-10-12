@@ -440,6 +440,10 @@ result: pass=問題なし / needs_review=ユーザー確認が必要 / fail=修�
   tool('mercari_mark_sold', 'メルカリで売れたことを記録する。', { id: s.id, price: s.int('売却価格') }, ['id'],
     ({ id, price }) => json(mercari.markSold(store, id, actor, { price }).channels.mercari));
 
+  tool('save_state_snapshot', 'アプリ全体の状態（全商品の内容と設定）を保存する。多数の商品をまとめて変更する前に使う。戻す（ロールバック）のはユーザーだけ。', {
+    label: s.str('保存名（例: 原稿一括作成の前）'),
+  }, [], ({ label = '' }) => json(store.saveSnapshot(actor, { label, kind: 'before' })));
+
   // ---- destinations: what each platform should receive ----
   tool('channel_package', '出品先（mercari=メルカリ / jmty=ジモティー / flea=フリマ）に出す内容の完成形を返す。出品先ごとの原稿（override.<出品先>.title/description/price と出品先ごとの写真）があればそれを、無ければ共通の原稿を使う。写真は順番どおりの絶対パス。アップロード作業はこれだけを正本として読む。targeted=false はユーザーがその出品先を選んでいない商品（出品しない）。', {
     id: s.id,
