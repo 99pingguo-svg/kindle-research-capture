@@ -174,7 +174,7 @@ function targetSeg(p) {
           showError(err);
         }
       },
-    }, `→${c.label}${!targets.includes(c.id) && suggested.includes(c.id) ? '＊' : ''}`)));
+    }, `${c.label.replace(/ー$/, '')}${!targets.includes(c.id) && suggested.includes(c.id) ? '＊' : ''}`)));
 }
 
 function decisionSeg(p) {

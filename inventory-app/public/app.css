@@ -161,7 +161,7 @@ a.icon-btn { text-decoration: none; }
 .seg button + button { border-left: 1px solid var(--border); }
 .seg button.on.sell { background: var(--accent); color: #fff; }
 .seg button.on.draft { background: var(--info); color: #fff; }
-.seg.targets button { font-size: 13px; }
+.seg.targets button { font-size: 13px; white-space: nowrap; padding-left: 10px; padding-right: 10px; }
 .seg.targets button.on { background: var(--info); color: #fff; }
 .seg.targets button.suggested { outline: 1.5px dashed var(--info); outline-offset: -3px; color: var(--info); }
 .seg button.on.hold { background: var(--warn); color: #fff; }
