@@ -11,7 +11,7 @@
 // 使い方:
 //   node scripts/amazon-info.js --add vine-review-links.txt --dry-run   # 追加される件数だけ
 //   node scripts/amazon-info.js --add vine-review-links.txt              # 追加して、追加分から取得
-//   node scripts/amazon-info.js [--limit N] [--ids 0003,0004] [--refresh] # 取得のみ
+//   node scripts/amazon-info.js [--limit N] [--ids 0003,0004] [--refresh] [--delay 秒] # 取得のみ
 // 前提: サーバーが起動中（Mac 内の入口 http://127.0.0.1:8787）
 
 import fs from 'node:fs';
@@ -35,6 +35,7 @@ const DRY = flag('--dry-run');
 const LIMIT = Number(opt('--limit')) || Infinity;
 const ONLY = opt('--ids') ? new Set(opt('--ids').split(',')) : null;
 const REFRESH = flag('--refresh');
+const DELAY = (Number(opt('--delay')) || 5) * 1000; // seconds between pages (a little random added)
 const today = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -201,7 +202,9 @@ async function uploadOfficial(p, asin, url) {
 const groupOf = (yen) => (yen == null ? '価格未確認' : yen >= 3000 ? '3000円以上' : yen >= 2300 ? '2300〜2999円' : '2300円未満');
 
 async function fetchAll(products, firstIds = []) {
-  const order = [...products].sort((a, b) => (firstIds.includes(b.id) ? 1 : 0) - (firstIds.includes(a.id) ? 1 : 0) || a.id.localeCompare(b.id));
+  // Newly added, then products still without an official image, then the rest.
+  const rank = (p) => (firstIds.includes(p.id) ? 0 : p.photos.some((ph) => ph.kind === 'reference' && !ph.deletedAt) ? 2 : 1);
+  const order = [...products].sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id));
   const todo = order.filter((p) => !p.trashedAt && asinsOf(p).length && (ONLY ? ONLY.has(p.id) : true) && (REFRESH || !p.amazon?.fetchedAt)).slice(0, LIMIT);
   console.log(`取得対象 ${todo.length}件${DRY ? '（--dry-run なので読まない）' : ''}`);
   if (DRY) return;
@@ -227,7 +230,7 @@ async function fetchAll(products, firstIds = []) {
       failed++; log({ type: 'error', id: p.id, asin, error: e.message });
     }
     if ((i + 1) % 10 === 0 || i === todo.length - 1) console.log(`${i + 1}/${todo.length} 取得${ok}（サイズあり${sized}・画像追加${images}）失敗${failed}`);
-    await sleep(4000 + Math.random() * 3000);
+    await sleep(DELAY * (0.8 + Math.random() * 0.6));
   }
   console.log(`完了: 取得${ok}件（サイズあり${sized}・公式画像を追加${images}）・失敗${failed}件。記録 ${path.relative(ROOT, LOG)}`);
 }
