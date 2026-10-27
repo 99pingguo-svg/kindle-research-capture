@@ -537,3 +537,17 @@ test('market: median from the stated match type; net = price − 10% − cheapes
   const net = mercariNet(p);
   assert.deepEqual([net.basis, net.price, net.fee, net.ship, net.net], ['market', 2000, 200, 160, 1640]);
 });
+
+test('size estimate fills in only when Amazon lists no size', async () => {
+  const { shippingOf } = await import('../server/shipping.js');
+  const store = new Store(tmp());
+  const { product } = store.create({ name: '見立て品' }, 'user');
+  const p = store.setSizeEstimate(product.id, 'claude', { dims: [30, 22, 2], kg: 0.3, confidence: 'mid', reason: '畳んで薄く送れる' });
+  const s = shippingOf(p.amazon, p.sizeEstimate);
+  assert.equal(s.dims.source, 'estimate');
+  assert.equal(s.dims.confidence, 'mid');
+  assert.equal(s.cheapest.id, 'nekopos');
+  // A real Amazon size wins over the estimate.
+  assert.equal(shippingOf({ package: { dims: [40, 30, 20], kg: 2 } }, p.sizeEstimate).dims.source, 'package');
+  assert.throws(() => store.setSizeEstimate(product.id, 'claude', { dims: [10, 10] }), /3つ/);
+});

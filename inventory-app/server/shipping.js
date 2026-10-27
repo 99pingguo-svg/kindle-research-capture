@@ -103,9 +103,14 @@ function sizeClassOf(d) {
  * Dimensions to ship: Amazon's package size if known, else the product size plus a little packing.
  * Returns { L, W, H, kg, estimated, source } or null.
  */
-export function shipDims(amazon) {
+export function shipDims(amazon, estimate) {
   const pk = amazon?.package;
   const pr = amazon?.product;
+  // A size judged from the name and photos (packed size) when Amazon lists none.
+  if (!pk?.dims && !pr?.dims && estimate?.dims) {
+    const [L, W, H] = [...estimate.dims].map(Number).sort((a, b) => b - a);
+    return { L, W, H, kg: estimate.kg ?? pk?.kg ?? pr?.kg ?? null, estimated: true, source: 'estimate', confidence: estimate.confidence || '' };
+  }
   const pick = pk?.dims ? { ...pk, source: 'package' } : pr?.dims ? { ...pr, source: 'product' } : null;
   if (!pick) return null;
   const pad = pick.source === 'product' ? 1 : 0;
@@ -116,8 +121,8 @@ export function shipDims(amazon) {
 }
 
 /** Everything the list needs: size class, all ways it could go (cheapest first), cheapest Mercari way, band. */
-export function shippingOf(amazon) {
-  const d = shipDims(amazon);
+export function shippingOf(amazon, estimate) {
+  const d = shipDims(amazon, estimate);
   if (!d) return { sizeClass: 'unknown', band: 'unknown', options: [], cheapest: null, dims: null };
   const options = SHIPPING_METHODS
     .map((m) => ({ id: m.id, label: m.label, group: m.group, price: m.fits(d, d.kg) }))
@@ -130,7 +135,7 @@ export function shippingOf(amazon) {
     band,
     options,
     cheapest,
-    dims: { L: d.L, W: d.W, H: d.H, sum: Math.round((d.L + d.W + d.H) * 10) / 10, kg: d.kg, estimated: d.estimated, source: d.source },
+    dims: { L: d.L, W: d.W, H: d.H, sum: Math.round((d.L + d.W + d.H) * 10) / 10, kg: d.kg, estimated: d.estimated, source: d.source, confidence: d.confidence || '' },
   };
 }
 

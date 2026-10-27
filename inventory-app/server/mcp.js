@@ -458,9 +458,22 @@ result: pass=問題なし / needs_review=ユーザー確認が必要 / fail=修�
     const items = store.list()
       .filter((p) => !p.trashedAt && !p.archived && (only ? only.has(p.id) : !p.market || Date.parse(p.market.checkedAt) < old))
       .slice(0, limit)
-      .map((p) => ({ id: p.id, name: p.name, amazonTitle: p.amazon?.title || '', amazonPrice: p.research?.amazonPrice ?? p.amazon?.price ?? null, officialImage: p.amazon?.image || '', ...marketBrief(p), shipping: shippingOf(p.amazon).cheapest }));
+      .map((p) => ({ id: p.id, name: p.name, amazonTitle: p.amazon?.title || '', amazonPrice: p.research?.amazonPrice ?? p.amazon?.price ?? null, officialImage: p.amazon?.image || '', ...marketBrief(p), shipping: shippingOf(p.amazon, p.sizeEstimate).cheapest }));
     return json({ count: items.length, items });
   }, { readOnlyHint: true });
+
+  tool('save_size_estimate', 'Amazonにサイズが無い商品の「梱包した状態の」大きさと重さを、商品名・写真から見立てて記録する（送料の分類に使う。一覧に「見立て」と確信度が出る）。confidence: high=型や寸法がほぼ決まる / mid=よくある大きさから推定 / low=幅がある。reason に根拠を書く。', {
+    id: s.id,
+    length_cm: { type: 'number', description: '長さ（梱包後, cm）' },
+    width_cm: { type: 'number', description: '幅（cm）' },
+    height_cm: { type: 'number', description: '厚さ・高さ（cm）' },
+    kg: { type: 'number', description: '重さ（梱包後, kg・不明なら省略）' },
+    confidence: s.enumOf(['high', 'mid', 'low'], '確信度'),
+    reason: s.str('根拠（例: 文庫本サイズのポーチ、平たく畳める）'),
+  }, ['id', 'length_cm', 'width_cm', 'height_cm', 'confidence', 'reason'], ({ id, length_cm, width_cm, height_cm, kg, confidence, reason }) => {
+    const p = store.setSizeEstimate(id, actor, { dims: [length_cm, width_cm, height_cm], kg, confidence, reason });
+    return json({ sizeEstimate: p.sizeEstimate, ship: shippingOf(p.amazon, p.sizeEstimate) });
+  });
 
   tool('save_market_research', 'メルカリで最近売れた価格（売り切れ）を記録する。まず公式画像で画像検索して同じ商品を探し（method=image）、無ければ似た商品をキーワードで探す（method=keyword）。match_type=same（同じ商品）/ similar（似た商品）/ none（見つからない）。examples は実際に売れた出品の title・price・url（jp.mercari.com の商品ページ）・match（same/similar）。中央値は match_type と同じ種類の例から計算される。', {
     id: s.id,

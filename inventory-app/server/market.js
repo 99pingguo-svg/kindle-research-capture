@@ -24,7 +24,7 @@ export const mercariSoldUrl = (keyword) =>
 export const imageSearchUrl = (imageUrl) => (imageUrl ? `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(imageUrl)}` : '');
 
 /** Price basis: the sold median if researched, else the price the user set. */
-export function mercariNet(p, ship = shippingOf(p.amazon)) {
+export function mercariNet(p, ship = shippingOf(p.amazon, p.sizeEstimate)) {
   const m = p.market;
   const basis = m?.median != null ? { kind: 'market', price: m.median } : p.listing?.price != null ? { kind: 'listing', price: p.listing.price } : null;
   if (!basis) return null;

@@ -234,7 +234,7 @@ export function summary(p, settings) {
   const main = lp[0] || actual[0] || referencePhotos(p)[0];
   // The Amazon main image (official photo) so every row is recognisable even when it shows a generated or own photo.
   const official = referencePhotos(p)[0];
-  const ship = shippingOf(p.amazon);
+  const ship = shippingOf(p.amazon, p.sizeEstimate);
   const st = statusOf(p);
   const issues = rd.missing
     .filter((m) => !['decision'].includes(m.code))

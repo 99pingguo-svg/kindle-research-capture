@@ -77,6 +77,7 @@ function newProduct(id, at, settings) {
     research: null,
     amazon: null,
     market: null,
+    sizeEstimate: null,
     textCandidates: [],
     listing: {
       title: '',
@@ -1011,6 +1012,22 @@ export class Store extends EventEmitter {
       p.amazon = info || null;
       const sz = info?.package?.dims || info?.product?.dims;
       ctx.note(`Amazonの商品情報を更新${sz ? `（${sz.join('×')}cm）` : ''}`);
+    });
+  }
+
+  /**
+   * Packed size judged from the name and photos when Amazon lists none. Shown as 見立て with a confidence and a reason.
+   */
+  setSizeEstimate(id, actor, est) {
+    return this.mutate(id, actor, 'sizeEstimate', (p, ctx) => {
+      if (!est) { if (!p.sizeEstimate) return; p.sizeEstimate = null; ctx.note('サイズの見立てを削除'); return; }
+      const dims = (est.dims || []).map(Number);
+      if (dims.length !== 3 || dims.some((d) => !(d > 0) || d > 400)) throw new AppError(400, 'dims は [長さ, 幅, 高さ]（cm）の3つ');
+      const kg = est.kg == null || est.kg === '' ? null : Number(est.kg);
+      if (kg != null && !(kg > 0 && kg < 200)) throw new AppError(400, 'kg が不正');
+      const confidence = ['high', 'mid', 'low'].includes(est.confidence) ? est.confidence : 'low';
+      p.sizeEstimate = { dims, kg, confidence, reason: String(est.reason || '').slice(0, 300), by: actor, at: nowIso() };
+      ctx.note(`サイズの見立て ${dims.join('×')}cm${kg != null ? `・${kg}kg` : ''}（確信度${{ high: '高', mid: '中', low: '低' }[confidence]}）`);
     });
   }
 
