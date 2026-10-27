@@ -174,8 +174,9 @@ async function readPage(asin) {
     credentials: 'omit',
   });
   const html = await res.text();
-  if (/validateCaptcha|captcha|api-services-support@amazon\.com/i.test(html) && !/productTitle/.test(html)) throw new Stop('Amazonのロボット確認が出たため中止（突破はしない）。時間をおいて再実行すると続きから取得します。');
+  // 販売終了ページ（404）にも api-services-support の文言があるので、ロボット確認より先に判定する。
   if (res.status === 404) return { missing: true };
+  if (/validateCaptcha|captcha/i.test(html) && !/productTitle/.test(html)) throw new Stop('Amazonのロボット確認が出たため中止（突破はしない）。時間をおいて再実行すると続きから取得します。');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const hello = /nav-link-accountList-nav-line-1[^>]*>([^<]*)/.exec(html)?.[1] || '';
   if (hello && !/ログイン/.test(hello)) throw new Stop('ログイン中の表示を検出したため中止（ログアウト状態でのみ取得する）');
