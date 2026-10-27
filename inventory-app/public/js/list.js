@@ -295,8 +295,8 @@ function badgesFor(p) {
   }
   const sh = p.ship;
   if (sh?.dims) b.push(h('span', { class: 'badge', title: `${sh.dims.L}×${sh.dims.W}×${sh.dims.H}cm${sh.dims.kg != null ? `・${sh.dims.kg}kg` : ''}（${SIZE_SOURCE[sh.dims.source] || ''}）` },
-    `📦 ${sh.cheapest ? `${sh.cheapest.label} ${yen(sh.cheapest.price)}` : 'メルカリ便なし'}`,
-    sh.dims.source === 'estimate' && h('small', { class: 'est' }, ` 見立て・確信度${CONF[sh.dims.confidence] || '低'}`)));
+    `📦 ${sh.cheapest ? `${sh.cheapest.label} ${yen(sh.cheapest.price)}` : 'メルカリ便なし'}`));
+  if (sh?.dims?.source === 'estimate') b.push(h('span', { class: 'badge est', title: 'サイズは商品名・写真からの見立て' }, `見立て・確信度${CONF[sh.dims.confidence] || '低'}`));
   if (p.market?.checkedAt) {
     b.push(h('span', { class: `badge ${p.market.matchType === 'same' ? 'ok' : p.market.matchType === 'similar' ? 'info' : 'warn'}`, title: `メルカリ売り切れ ${p.market.count}件${p.market.low != null ? `（${yen(p.market.low)}〜${yen(p.market.high)}）` : ''}` },
       p.market.median != null ? `相場 ${yen(p.market.median)}（${MATCH_LABEL[p.market.matchType]}）` : '相場 見つからず'));
