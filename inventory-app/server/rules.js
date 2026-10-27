@@ -1,5 +1,7 @@
 // Pure functions over a product: readiness, deterministic lint, list summary, duplicates.
 import { MERCARI_LIMITS, CONFIRM_FIELDS, FIELD_MAP, stageLabel, decisionLabel, LISTABLE_KINDS, PREPARE_DECISIONS, COMMITTED_STATUSES, OFFERED_STATUSES, channelLabel } from './schema.js';
+import { shippingOf } from './shipping.js';
+import { mercariNet, marketBrief } from './market.js';
 import { norm, normUrl, similarity } from './util.js';
 
 export const livePhotos = (p) => p.photos.filter((ph) => !ph.deletedAt);
@@ -230,6 +232,9 @@ export function summary(p, settings) {
   const actual = actualPhotos(p);
   const lp = listingPhotos(p);
   const main = lp[0] || actual[0] || referencePhotos(p)[0];
+  // The Amazon main image (official photo) so every row is recognisable even when it shows a generated or own photo.
+  const official = referencePhotos(p)[0];
+  const ship = shippingOf(p.amazon);
   const st = statusOf(p);
   const issues = rd.missing
     .filter((m) => !['decision'].includes(m.code))
@@ -258,6 +263,10 @@ export function summary(p, settings) {
     status: st,
     thumb: main ? photoUrl(p, main, 'thumb') : null,
     thumbIsReference: !!main && main.kind === 'reference',
+    official: official && official !== main ? photoUrl(p, official, 'thumb') : null,
+    ship,
+    market: marketBrief(p),
+    net: mercariNet(p, ship),
     counts: { actual: actual.length, generated: generatedPhotos(p).length, listing: lp.length, reference: referencePhotos(p).length },
     channels: Object.fromEntries(Object.entries(p.channels || {}).filter(([, c]) => c?.status).map(([k, c]) => [k, c.status])),
     lastPhotoAt: p.lastPhotoAt,

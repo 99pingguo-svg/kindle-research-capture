@@ -504,3 +504,36 @@ test('在庫なし: user-only decision, leaves the queue, and flags anything sti
   assert.deepEqual(mercari.queue(store, { includeReady: true }).map((x) => x.id), []);
   assert.ok(lint(p).some((i) => i.code === 'offered_no_stock' && i.severity === 'error'));
 });
+
+test('shipping: size class, cheapest Mercari way and all options from the Amazon size', async () => {
+  const { shippingOf } = await import('../server/shipping.js');
+  const thin = shippingOf({ package: { dims: [24, 16, 2.5], kg: 0.2 } });
+  assert.equal(thin.sizeClass, 'thin');
+  assert.equal(thin.cheapest.id, 'nekopos');
+  assert.ok(thin.options.some((o) => o.id === 'clickpost' && o.price === 185));
+  const box = shippingOf({ product: { dims: [30, 20, 15], kg: 1.5 } }); // +1cm packing each side → 31+21+16 = 68
+  assert.equal(box.sizeClass, 's80');
+  assert.equal(box.dims.estimated, true);
+  assert.equal(box.cheapest.price, 730); // エコメルカリ便 beats 宅急便80 (850)
+  assert.equal(shippingOf(null).band, 'unknown');
+});
+
+test('market: median from the stated match type; net = price − 10% − cheapest Mercari shipping', async () => {
+  const { mercariNet } = await import('../server/market.js');
+  const store = new Store(tmp());
+  const { product } = store.create({ name: 'テスト品' }, 'user');
+  store.setAmazonInfo(product.id, 'import', { package: { dims: [18, 14, 2], kg: 0.1 } });
+  const p = store.setMarket(product.id, 'claude', {
+    matchType: 'same', method: 'image',
+    examples: [
+      { price: 1800, url: 'https://jp.mercari.com/item/m1', match: 'same' },
+      { price: 2200, url: 'https://jp.mercari.com/item/m2', match: 'same' },
+      { price: 900, url: 'https://evil.example.com/x', match: 'similar' },
+    ],
+  });
+  assert.equal(p.market.median, 2000);
+  assert.equal(p.market.count, 2);
+  assert.equal(p.market.examples[2].url, ''); // only Mercari links are kept
+  const net = mercariNet(p);
+  assert.deepEqual([net.basis, net.price, net.fee, net.ship, net.net], ['market', 2000, 200, 160, 1640]);
+});

@@ -10,6 +10,7 @@ const defaults = {
   dateFrom: '',
   dateTo: '',
   dateNone: false,
+  ship: '',
   camAutoNext: true,
   camRequestAi: true,
   camKeepTag: false,
@@ -173,6 +174,30 @@ export function inPriceRange(p) {
   if (v == null) return false;
   return (min == null || v >= min) && (max == null || v <= max);
 }
+/** Size / shipping / market / net filter: one of "size:<class>", "band:<band>", "method:<id>", "market:<same|similar|none|todo>", "net:<band>". */
+export const NET_BANDS = [
+  { id: 'loss', label: '赤字（0円以下）', test: (n) => n <= 0 },
+  { id: 'n1', label: '¥1〜¥499', test: (n) => n > 0 && n < 500 },
+  { id: 'n500', label: '¥500〜¥999', test: (n) => n >= 500 && n < 1000 },
+  { id: 'n1000', label: '¥1,000〜¥2,999', test: (n) => n >= 1000 && n < 3000 },
+  { id: 'n3000', label: '¥3,000〜', test: (n) => n >= 3000 },
+];
+export function inShipFilter(p, f = state.prefs.ship) {
+  if (!f) return true;
+  const [kind, id] = f.split(':');
+  const s = p.ship || {};
+  if (kind === 'size') return s.sizeClass === id;
+  if (kind === 'band') return s.band === id;
+  if (kind === 'method') return (s.options || []).some((o) => o.id === id);
+  if (kind === 'market') return id === 'todo' ? !p.market?.checkedAt : p.market?.matchType === id;
+  if (kind === 'net') {
+    if (id === 'unknown') return p.net?.net == null;
+    const b = NET_BANDS.find((x) => x.id === id);
+    return !!b && p.net?.net != null && b.test(p.net.net);
+  }
+  return true;
+}
+
 export const priceRangeOn = () => !!(state.prefs.priceUnknown || num(state.prefs.priceMin) != null || num(state.prefs.priceMax) != null);
 
 export const isDateSort = (s = state.prefs.sort) => s === 'date_desc' || s === 'date_asc';
@@ -184,7 +209,7 @@ export function productsForCalendar() {
 
 export function visibleProducts() {
   const q = state.query.trim().toLowerCase().normalize('NFKC');
-  let items = [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && inDateRange(p) && inPriceRange(p));
+  let items = [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && inDateRange(p) && inPriceRange(p) && inShipFilter(p));
   if (q) {
     const terms = q.split(/\s+/);
     items = items.filter((p) => {
@@ -203,6 +228,9 @@ export function visibleProducts() {
     if (sort === 'updated') return b.updatedAt.localeCompare(a.updatedAt);
     if (sort === 'name') return (a.name || '￿').localeCompare(b.name || '￿', 'ja');
     if (sort === 'stage') return STAGE_RANK.indexOf(a.stage) - STAGE_RANK.indexOf(b.stage) || a.id.localeCompare(b.id);
+    if (sort === 'net') return (b.net?.net ?? -Infinity) - (a.net?.net ?? -Infinity) || a.id.localeCompare(b.id);
+    if (sort === 'market') return (b.market?.median ?? -1) - (a.market?.median ?? -1) || a.id.localeCompare(b.id);
+    if (sort === 'ship') return (a.ship?.cheapest?.price ?? Infinity) - (b.ship?.cheapest?.price ?? Infinity) || a.id.localeCompare(b.id);
     if (sort === 'photos') return a.counts.actual - b.counts.actual || a.id.localeCompare(b.id);
     return a.id.localeCompare(b.id);
   });

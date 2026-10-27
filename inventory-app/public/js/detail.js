@@ -94,7 +94,7 @@ export function renderDetail(message) {
     return;
   }
   pane.append(h('div', { class: 'detail' },
-    header(p), topControls(p), destinationCard(p), readinessCard(p), photosCard(p), aiCard(p), listingCard(p), channelCard(p), qcCard(p), basicCard(p), linksCard(p), mercariCard(p), historyCard(p)));
+    header(p), topControls(p), destinationCard(p), marketCard(p), readinessCard(p), photosCard(p), aiCard(p), listingCard(p), channelCard(p), qcCard(p), basicCard(p), linksCard(p), mercariCard(p), historyCard(p)));
   pane.scrollTop = scroll;
   if (keep) {
     const el = pane.querySelector(`[data-path="${CSS.escape(keep.path)}"]`);
@@ -458,6 +458,59 @@ function destinationCard(p) {
       row('価格メモ', r.reviewNote),
       row('現行ページ', r.liveTitle && `${r.liveTitle}${r.liveVariant ? `（${r.liveVariant}）` : ''}`))
       : h('p', { class: 'muted small' }, '価格・分類の調査データはありません。'));
+}
+
+const MATCH_TEXT = { same: '同じ商品', similar: '似た商品', none: '見つからず' };
+/** Official image, size and every way to send it, the Mercari sold market, and the Mercari-only net (no purchase cost). */
+function marketCard(p) {
+  const s = p.summary || {};
+  const sh = s.ship || {};
+  const mk = s.market || {};
+  const net = s.net;
+  const m = p.market;
+  const a = p.amazon;
+  const official = s.official || (s.thumbIsReference ? s.thumb : null);
+  const link = (href, label) => href ? h('a', { class: 'btn small', href, target: '_blank', rel: 'noopener noreferrer' }, label) : null;
+  const row = (k, v) => v ? h('tr', null, h('td', { class: 'k' }, k), h('td', null, v)) : null;
+  const d = sh.dims;
+  return h('div', { class: 'card' },
+    h('h2', null, '📦 サイズ・送料・メルカリ相場'),
+    h('div', { class: 'row', style: { gap: '10px', alignItems: 'flex-start' } },
+      official && h('img', { src: official, alt: '公式画像', style: { width: '84px', height: '84px', objectFit: 'contain', background: '#fff', borderRadius: '8px', border: '1px solid var(--border)' } }),
+      h('div', { class: 'small', style: { flex: 1 } },
+        a?.title ? h('div', null, a.title) : h('div', { class: 'muted' }, 'Amazonの情報はまだ取得していません'),
+        a?.fetchedAt && h('div', { class: 'muted' }, `Amazon取得 ${a.fetchedAt.slice(0, 10)}${a.price != null ? `・表示価格 ${yen(a.price)}` : ''}`))),
+    h('table', { class: 'facts', style: { marginTop: '8px' } },
+      row('サイズ', d ? `${d.L}×${d.W}×${d.H}cm（3辺 ${d.sum}cm）${d.kg != null ? `・${d.kg}kg` : '・重さ不明'}${d.source === 'package' ? '（梱包サイズ）' : '（本体サイズ＋梱包分の目安）'}` : '不明'),
+      row('分類', (state.meta.delivery?.sizeClasses || []).find((c) => c.id === sh.sizeClass)?.label),
+      row('いちばん安いメルカリ便', sh.cheapest ? `${sh.cheapest.label} ${yen(sh.cheapest.price)}` : d ? '該当なし' : '')),
+    sh.options?.length ? h('details', { style: { marginTop: '6px' } },
+      h('summary', { class: 'small' }, `送れる方法と送料（${sh.options.length}通り・安い順）`),
+      h('table', { class: 'facts' }, sh.options.map((o) => h('tr', null,
+        h('td', { class: 'k' }, (state.meta.delivery?.groups || []).find((g) => g.id === o.group)?.label || ''),
+        h('td', null, `${o.label} ${yen(o.price)}`))))) : null,
+    h('h3', { class: 'small', style: { margin: '12px 0 4px' } }, 'メルカリ相場（最近売れた価格）'),
+    m ? h('div', { class: 'small' },
+      h('div', null,
+        h('span', { class: `badge ${m.matchType === 'same' ? 'ok' : m.matchType === 'similar' ? 'info' : 'warn'}` }, MATCH_TEXT[m.matchType]),
+        m.median != null ? ` 中央値 ${yen(m.median)}（${m.count}件・${yen(m.low)}〜${yen(m.high)}）` : ' 売れた例なし',
+        h('span', { class: 'muted' }, `　${m.method === 'image' ? '画像検索' : 'キーワード検索'}・${(m.checkedAt || '').slice(0, 10)}`)),
+      m.note && h('div', { class: 'muted' }, m.note),
+      m.examples?.length ? h('ul', { style: { margin: '6px 0', paddingLeft: '18px' } }, m.examples.map((e) => h('li', null,
+        e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener noreferrer' }, `${yen(e.price)} ${e.title || '（商品ページ）'}`) : `${yen(e.price)} ${e.title}`,
+        h('span', { class: 'muted' }, ` ${MATCH_TEXT[e.match] || ''}${e.soldAt ? `・${e.soldAt}` : ''}`)))) : null)
+      : h('p', { class: 'muted small' }, '未調査。「この商品のメルカリ相場を調べて」と頼むと、画像検索（同じ商品）→ 無ければ似た商品で調べて記録します。'),
+    h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap', marginTop: '6px' } },
+      link(mk.imageUrl, '🖼 画像で検索'),
+      link(mk.soldUrl, '🔎 メルカリ売り切れ検索'),
+      m?.searchUrl && m.searchUrl !== mk.soldUrl ? link(m.searchUrl, '🔎 調査に使った検索') : null),
+    h('h3', { class: 'small', style: { margin: '12px 0 4px' } }, '新品をメルカリで売った場合の手取り（仕入れ額は含まない）'),
+    net ? h('table', { class: 'facts' },
+      row(net.basis === 'market' ? '販売額（相場の中央値）' : '販売額（設定した販売価格）', yen(net.price)),
+      row('販売手数料 10%', `− ${yen(net.fee)}`),
+      row('送料', net.ship != null ? `− ${yen(net.ship)}（${net.shipLabel}）` : 'サイズ不明のため計算できません'),
+      row('手取り', net.net != null ? h('b', { style: { color: net.net <= 0 ? 'var(--danger)' : net.net < 500 ? 'var(--warn)' : 'var(--ok)' } }, yen(net.net)) : '—'))
+      : h('p', { class: 'muted small' }, '相場か販売価格が入ると計算します。'));
 }
 
 let channelTab = null;

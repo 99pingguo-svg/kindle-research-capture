@@ -17,6 +17,8 @@
 - 出品先は メルカリ／ジモティー／フリマ（`targets`、ユーザーのみ）。出品先ごとの原稿は `override.<出品先>.*` と出品先ごとの写真。各サイトへのアップロードは MCP `channel_package(id, channel)` を正本に読む。
 - 取り込み元の正本（10/12〜）: 画像は `399商品_Claude画像制作共有/handoff_to_dot/COORDINATOR_CLAUDE/ADOPTION_LEDGER.json`（formally_adopted、役ごと）＋旧台帳で補完、原稿は販売用（products_resale）を優先、価格・分類は最新の `*/outputs/399商品_価格確認データ_*.json`。
 - 多数の商品をまとめて変更する前は MCP `save_state_snapshot` で状態を保存する。ロールバックはユーザーのみ（`data/snapshots/`、セーブポイント=manual／自動保存=auto・before）。
+- Amazon の公式画像・価格・サイズは `node scripts/amazon-info.js`（ログアウト状態の fetch・CAPTCHA なら中止）。新しい商品リストは `--add <リスト>`（ASIN で重複除外）。送料表は `server/shipping.js`（メルカリ公式の料金表。改定時はここだけ直す）。
+- メルカリ相場（売り切れ）は頼まれたときだけ `.claude/skills/mercari-market/SKILL.md` の手順で調べ、MCP `save_market_research` に記録（同じ商品=same／似た商品=similar を必ず区別）。
 - メルカリの状況確認は頼まれたときだけ（`channel_tracked` → 一覧を文字で読む → `channel_sync_status` を1回）。定期実行しない。
 - QC（画像QC: 画質・写真間の整合性・違和感チェックを含む）は Claude Opus 5.5（`claude-opus-5-5`）で実施し、`save_qc_result` の `model` に記録する。サーバーは設定 `imageQcModels` 以外のモデルの QC を拒否する。
 

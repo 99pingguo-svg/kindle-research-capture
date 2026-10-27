@@ -75,6 +75,8 @@ function newProduct(id, at, settings) {
     override: Object.fromEntries(CHANNEL_IDS.map((c) => [c, { title: '', description: '', price: null }])),
     channelPhotos: {},
     research: null,
+    amazon: null,
+    market: null,
     textCandidates: [],
     listing: {
       title: '',
@@ -100,6 +102,37 @@ function newProduct(id, at, settings) {
 }
 
 /** Collects what a mutation did, for history and for the rev counter. */
+const MATCH_TYPES = ['same', 'similar', 'none'];
+/** Clean a market record; the median/low/high come from the sold examples of the stated match type. */
+export function normalizeMarket(m, actor) {
+  if (!m) return null;
+  const matchType = MATCH_TYPES.includes(m.matchType) ? m.matchType : 'none';
+  const examples = (Array.isArray(m.examples) ? m.examples : []).slice(0, 20).map((e) => ({
+    title: String(e.title || '').slice(0, 120),
+    price: Number.isFinite(Number(e.price)) ? Math.round(Number(e.price)) : null,
+    url: /^https:\/\/(jp\.mercari\.com|mercari-shops\.com|item\.mercari\.com)\//.test(e.url || '') ? e.url : '',
+    match: MATCH_TYPES.slice(0, 2).includes(e.match) ? e.match : matchType === 'none' ? 'similar' : matchType,
+    soldAt: String(e.soldAt || '').slice(0, 20),
+    note: String(e.note || '').slice(0, 80),
+  })).filter((e) => e.price != null && e.price > 0);
+  const basis = examples.filter((e) => e.match === matchType).map((e) => e.price).sort((a, b) => a - b);
+  const mid = basis.length ? (basis.length % 2 ? basis[(basis.length - 1) / 2] : Math.round((basis[basis.length / 2 - 1] + basis[basis.length / 2]) / 2)) : null;
+  return {
+    matchType,
+    method: ['image', 'keyword'].includes(m.method) ? m.method : 'keyword',
+    query: String(m.query || '').slice(0, 100),
+    searchUrl: /^https:\/\/(jp\.mercari\.com|lens\.google\.com|www\.google\.com)\//.test(m.searchUrl || '') ? m.searchUrl : '',
+    examples,
+    median: mid,
+    low: basis[0] ?? null,
+    high: basis.at(-1) ?? null,
+    count: basis.length,
+    note: String(m.note || '').slice(0, 300),
+    checkedAt: m.checkedAt || nowIso(),
+    by: actor,
+  };
+}
+
 class Ctx {
   constructor() {
     this.changes = [];
@@ -964,6 +997,32 @@ export class Store extends EventEmitter {
       if (a === b) return;
       p.research = research;
       ctx.note(`価格・分類の調査を更新（${research?.group || '分類なし'}${research?.amazonPrice != null ? `・Amazon ${yen(research.amazonPrice)}` : ''}）`);
+    });
+  }
+
+  /**
+   * Facts read from the public Amazon page (logged out): official title, package/product size and weight, main image.
+   * Used for size and shipping classification; never touches the listing.
+   */
+  setAmazonInfo(id, actor, info) {
+    return this.mutate(id, actor, 'amazon', (p, ctx) => {
+      const keep = ({ fetchedAt, ...rest } = {}) => JSON.stringify(rest);
+      if (keep(p.amazon || {}) === keep(info || {})) return;
+      p.amazon = info || null;
+      const sz = info?.package?.dims || info?.product?.dims;
+      ctx.note(`Amazonの商品情報を更新${sz ? `（${sz.join('×')}cm）` : ''}`);
+    });
+  }
+
+  /**
+   * Recently sold prices on Mercari for the same item (found by image search) or, failing that, similar items.
+   * Research, not a listing field: anyone may record it; the user decides prices.
+   */
+  setMarket(id, actor, market) {
+    return this.mutate(id, actor, 'market', (p, ctx) => {
+      const m = normalizeMarket(market, actor);
+      p.market = m;
+      ctx.note(m ? `メルカリ相場を記録（${m.matchType === 'same' ? '同じ商品' : m.matchType === 'similar' ? '似た商品' : '見つからず'}${m.median != null ? `・中央値 ${yen(m.median)}・${m.count}件` : ''}）` : 'メルカリ相場の記録を削除');
     });
   }
 

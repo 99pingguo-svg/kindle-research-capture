@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { X509Certificate } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Store, isUser } from './store.js';
+import { shippingMeta } from './shipping.js';
 import { AppError, nowIso } from './util.js';
 import { readBody, parseMultipart } from './multipart.js';
 import { summary, readiness, lint, channelPackage, suggestedTargets, bulkPrice } from './rules.js';
@@ -50,7 +51,7 @@ export function createApp({ dataDir, token = '' } = {}) {
 
   // ---- meta / settings ----
   route('GET', '/api/meta', () => ({
-    stages: schema.STAGES, decisions: schema.DECISIONS, fields: schema.FIELDS, conditions: schema.MERCARI_CONDITIONS,
+    delivery: shippingMeta(), stages: schema.STAGES, decisions: schema.DECISIONS, fields: schema.FIELDS, conditions: schema.MERCARI_CONDITIONS,
     linkTypes: schema.LINK_TYPES, photoTags: schema.PHOTO_TAGS, factConfidence: schema.FACT_CONFIDENCE,
     aiTaskTypes: schema.AI_TASK_TYPES, qcChecks: schema.QC_CHECKS, limits: schema.MERCARI_LIMITS,
     shipping: { payers: schema.SHIPPING_PAYERS, methods: schema.SHIPPING_METHODS, days: schema.SHIPPING_DAYS, prefectures: schema.PREFECTURES },
@@ -163,6 +164,8 @@ export function createApp({ dataDir, token = '' } = {}) {
     const pkg = channelPackage(store.get(params.id), params.channel);
     return { ...pkg, photos: pkg.photos.map((ph) => ({ ...ph, url: `/files/products/${params.id}/${ph.work}` })) };
   });
+  route('PUT', '/api/products/:id/market', ({ params, body, actor }) => full(store.setMarket(params.id, actor, body?.market ?? null)));
+  route('PUT', '/api/products/:id/amazon', ({ params, body, actor }) => full(store.setAmazonInfo(params.id, actor, body?.amazon ?? null)));
   route('PUT', '/api/products/:id/research', ({ params, body, actor }) => full(store.setResearch(params.id, actor, body?.research ?? null)));
   route('POST', '/api/products/:id/text-candidates', ({ params, body, actor }) => full(store.upsertTextCandidates(params.id, actor, body?.items || [])));
   route('PUT', '/api/products/:id/listing-photos', ({ params, body, actor }) => {

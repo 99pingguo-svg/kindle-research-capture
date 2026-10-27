@@ -2,7 +2,7 @@
 // available per row so most work never needs the detail page.
 import { h, clear, toast, showError, choose, sheet, yen } from './ui.js';
 import { api } from './api.js';
-import { state, setPref, on, FILTERS, matchesFilter, visibleProducts, applyProduct, loadAll, inDateRange, isDateSort, productsForCalendar, priceRangeOn } from './state.js';
+import { state, setPref, on, FILTERS, matchesFilter, visibleProducts, applyProduct, loadAll, inDateRange, isDateSort, productsForCalendar, priceRangeOn, inShipFilter, NET_BANDS } from './state.js';
 import { pickDateRange, rangeLabel, fmtDay } from './calendar.js';
 import { openCamera } from './camera.js';
 import * as uploads from './uploads.js';
@@ -89,6 +89,8 @@ function renderToolbar() {
     ranged ? h('button', { class: 'btn small ghost', 'aria-label': '期間を解除', onclick: () => setRange({ dateFrom: '', dateTo: '', dateNone: false }) }, '✕') : '',
     h('button', { class: `btn small date-range ${priceRangeOn() ? 'on' : ''}`, onclick: openPriceRange, 'aria-label': 'Amazon価格で絞り込み' }, '💴 ', priceRangeLabel()),
     priceRangeOn() ? h('button', { class: 'btn small ghost', 'aria-label': '価格帯を解除', onclick: () => setPriceRange({ priceMin: '', priceMax: '', priceUnknown: false }) }, '✕') : '',
+    h('button', { class: `btn small date-range ${state.prefs.ship ? 'on' : ''}`, onclick: openShipFilter, 'aria-label': 'サイズ・送料・相場で絞り込み' }, '📦 ', shipFilterLabel()),
+    state.prefs.ship ? h('button', { class: 'btn small ghost', 'aria-label': 'サイズ・送料の絞り込みを解除', onclick: () => setShipFilter('') }, '✕') : '',
     h('span', { class: 'spacer' }),
     // One tap: newest ⇄ oldest. From any other order it jumps back to newest first.
     h('button', {
@@ -96,7 +98,7 @@ function renderToolbar() {
       onclick: () => { setPref('sort', sort === 'date_desc' ? 'date_asc' : 'date_desc'); renderAll(); },
     }, sort === 'date_asc' ? '古い順 ↑' : sort === 'date_desc' ? '新しい順 ↓' : '日付順にする'),
     h('select', { class: 'sort-more', onchange: (e) => { setPref('sort', e.target.value); renderAll(); }, 'aria-label': 'その他の並び順' },
-      [['date_desc', '日付 新しい順'], ['date_asc', '日付 古い順'], ['id', 'ID順'], ['updated', '更新順'], ['name', '名前順'], ['stage', '状態順'], ['photos', '写真が少ない順']].map(([v, l]) =>
+      [['date_desc', '日付 新しい順'], ['date_asc', '日付 古い順'], ['id', 'ID順'], ['updated', '更新順'], ['name', '名前順'], ['stage', '状態順'], ['photos', '写真が少ない順'], ['net', '手取りが多い順'], ['market', '相場が高い順'], ['ship', '送料が安い順']].map(([v, l]) =>
         h('option', { value: v, selected: sort === v }, l))),
     h('button', { class: 'btn small', onclick: toggleSelect }, state.selectMode ? '選択終了' : '選択'));
 }
@@ -123,6 +125,47 @@ function setPriceRange(r) {
   renderAll();
   els.list.scrollIntoView({ block: 'start' });
 }
+const MATCH_LABEL = { same: '同じ商品', similar: '似た商品', none: '見つからず' };
+function shipFilterLabel() {
+  const f = state.prefs.ship;
+  if (!f) return 'サイズ・送料';
+  const [kind, id] = f.split(':');
+  const sh = state.meta.delivery || {};
+  if (kind === 'size') return sh.sizeClasses?.find((x) => x.id === id)?.label.replace(/（.*/, '') || id;
+  if (kind === 'band') return `送料${sh.bands?.find((x) => x.id === id)?.label.replace(/（.*/, '') || id}`;
+  if (kind === 'method') return sh.methods?.find((x) => x.id === id)?.label || id;
+  if (kind === 'market') return id === 'todo' ? '相場 未調査' : `相場 ${MATCH_LABEL[id]}`;
+  if (kind === 'net') return id === 'unknown' ? '手取り 不明' : `手取り ${NET_BANDS.find((x) => x.id === id)?.label || id}`;
+  return f;
+}
+function setShipFilter(v) {
+  setPref('ship', v);
+  state.selected.clear();
+  renderAll();
+  els.list.scrollIntoView({ block: 'start' });
+}
+/** Size class, cheapest Mercari shipping band, a specific way of sending, market research, and the Mercari-only net. */
+function openShipFilter() {
+  const sh = state.meta.delivery || { sizeClasses: [], bands: [], methods: [], groups: [] };
+  const all = [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && !p.trashedAt);
+  const n = (f) => all.filter((p) => inShipFilter(p, f)).length;
+  sheet((close) => {
+    const chip = (f, label) => h('button', { class: `btn small ${state.prefs.ship === f ? 'primary' : ''}`, onclick: () => { close(); setShipFilter(f); } }, label, h('span', { class: 'muted' }, ` ${n(f)}`));
+    const section = (title, chips) => [h('h3', { class: 'small', style: { margin: '12px 0 6px' } }, title), h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px' } }, chips)];
+    return h('div', null,
+      h('h2', null, 'サイズ・送料・相場で絞り込み'),
+      h('p', { class: 'muted small' }, `同じ物を新品でメルカリに出す場合の目安。サイズ・重さは Amazon の梱包サイズ（無ければ本体サイズ＋梱包分）。送料は${sh.source || 'メルカリ公式の料金表'}。手取り＝相場（無ければ設定した販売価格）−手数料10%−いちばん安いメルカリ便の送料。仕入れ額は含みません。`),
+      ...section('サイズ', sh.sizeClasses.map((c) => chip(`size:${c.id}`, c.label))),
+      ...section('いちばん安いメルカリ便の送料', sh.bands.map((b) => chip(`band:${b.id}`, b.label))),
+      ...sh.groups.flatMap((g) => section(`この方法で送れる（${g.label}）`, sh.methods.filter((m) => m.group === g.id).map((m) => chip(`method:${m.id}`, m.label)))),
+      ...section('メルカリ相場（売り切れ）', [chip('market:same', '同じ商品の相場'), chip('market:similar', '似た商品の相場'), chip('market:none', '見つからず'), chip('market:todo', '未調査')]),
+      ...section('メルカリでの手取り（仕入れ額は含まない）', [...NET_BANDS.map((b) => chip(`net:${b.id}`, b.label)), chip('net:unknown', '不明')]),
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn', onclick: () => { close(); setShipFilter(''); } }, '解除'),
+        h('button', { class: 'btn ghost', onclick: () => close() }, 'キャンセル')));
+  });
+}
+
 /** Filter by the recorded Amazon price (sale price included): presets or any range. */
 function openPriceRange() {
   sheet((close) => {
@@ -134,6 +177,8 @@ function openPriceRange() {
       h('h2', null, 'Amazon価格で絞り込み'),
       h('p', { class: 'muted small' }, '価格確認の記録（セール価格を含む表示価格・新品）で絞り込みます。'),
       h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px' } },
+        h('button', { class: 'btn small', onclick: () => pick({ priceMax: 999 }) }, '〜¥999'),
+        h('button', { class: 'btn small', onclick: () => pick({ priceMin: 1000, priceMax: 1999 }) }, '¥1,000〜¥1,999'),
         h('button', { class: 'btn small', onclick: () => pick({ priceMax: 2299 }) }, '〜¥2,299'),
         h('button', { class: 'btn small', onclick: () => pick({ priceMin: 2300, priceMax: 2999 }) }, '¥2,300〜¥2,999'),
         h('button', { class: 'btn small', onclick: () => pick({ priceMin: 3000 }) }, '¥3,000〜'),
@@ -242,9 +287,21 @@ function badgesFor(p) {
   const b = [h('span', { class: `badge ${STATUS_CLASS[p.status.id] || ''}` }, p.status.label)];
   b.push(h('span', { class: `badge ${p.counts.actual ? '' : 'warn'}` }, `📷 ${p.counts.actual}`));
   if (p.research?.group) {
-    const g = p.research.group.replace(/^\d\s*/, '');
+    const g = p.research.group.replace(/^\d\s+/, '');
     b.push(h('span', { class: `badge ${/ジモティ/.test(g) ? 'warn' : /3000/.test(g) ? 'ok' : ''}`, title: `Amazon価格: ${p.research.amazonPrice != null ? yen(p.research.amazonPrice) : '未確定'}` },
       `${g}${p.research.amazonPrice != null && !/円/.test(g) ? '' : ''}${p.research.amazonPrice != null ? `・A${yen(p.research.amazonPrice)}` : ''}`));
+  }
+  const sh = p.ship;
+  if (sh?.dims) b.push(h('span', { class: 'badge', title: `${sh.dims.L}×${sh.dims.W}×${sh.dims.H}cm${sh.dims.kg != null ? `・${sh.dims.kg}kg` : ''}（${sh.dims.source === 'package' ? '梱包サイズ' : '本体サイズ＋梱包分の目安'}）` },
+    `📦 ${sh.cheapest ? `${sh.cheapest.label} ${yen(sh.cheapest.price)}` : 'メルカリ便なし'}`));
+  if (p.market?.checkedAt) {
+    b.push(h('span', { class: `badge ${p.market.matchType === 'same' ? 'ok' : p.market.matchType === 'similar' ? 'info' : 'warn'}`, title: `メルカリ売り切れ ${p.market.count}件${p.market.low != null ? `（${yen(p.market.low)}〜${yen(p.market.high)}）` : ''}` },
+      p.market.median != null ? `相場 ${yen(p.market.median)}（${MATCH_LABEL[p.market.matchType]}）` : '相場 見つからず'));
+  }
+  if (p.net?.net != null) {
+    const v = p.net.net;
+    b.push(h('span', { class: `badge ${v <= 0 ? 'danger' : v < 500 ? 'warn' : 'ok'}`, title: `${p.net.basis === 'market' ? '相場' : '販売価格'} ${yen(p.net.price)} − 手数料 ${yen(p.net.fee)} − 送料 ${yen(p.net.ship)}（${p.net.shipLabel}）` },
+      `手取り ${yen(v)}${p.net.basis === 'listing' ? '（販売価格）' : ''}`));
   }
   if (p.counts.generated) b.push(h('span', { class: 'badge' }, `生成 ${p.counts.generated}`));
   if (p.counts.listing) b.push(h('span', { class: 'badge' }, `出品用 ${p.counts.listing}`));
@@ -342,7 +399,8 @@ function renderItems() {
     frag.append(h('article', { class: `item ${selected ? 'selected' : ''} ${state.detailId === p.id ? 'active' : ''}`, dataset: { id: p.id } },
       h('div', { class: 'thumb', style: p.thumb ? { backgroundImage: `url("${p.thumb}")` } : null, onclick: open },
         state.selectMode ? h('div', { class: 'select-check' }, selected ? '✓' : '') : !p.thumb && '📦',
-        p.thumbIsReference && !state.selectMode && h('div', { class: 'ref-badge' }, '参考画像')),
+        p.thumbIsReference && !state.selectMode && h('div', { class: 'ref-badge' }, '公式画像'),
+        p.official && !state.selectMode && h('div', { class: 'official-inset', title: '公式画像（Amazon）', style: { backgroundImage: `url("${p.official}")` } })),
       h('div', { class: 'item-main', onclick: open },
         h('div', { class: 'item-title' }, h('span', { class: 'pid' }, p.id), p.name || h('span', { class: 'muted' }, '名称未設定')),
         h('div', { class: 'item-sub' },
@@ -362,7 +420,12 @@ function renderItems() {
           class: 'icon-btn link', href: p.sourceUrl, target: '_blank', rel: 'noopener noreferrer',
           title: '購入ページを開く（別ウィンドウ）', 'aria-label': `${p.name || p.id} の購入ページを開く`,
           onclick: (e) => e.stopPropagation(),
-        }, '🔗'))));
+        }, '🔗'),
+        p.market?.soldUrl && h('a', {
+          class: 'icon-btn link', href: p.market.soldUrl, target: '_blank', rel: 'noopener noreferrer',
+          title: 'メルカリで売り切れを検索（別ウィンドウ）', 'aria-label': `${p.name || p.id} をメルカリの売り切れで検索`,
+          onclick: (e) => e.stopPropagation(),
+        }, '🔎'))));
   });
   els.list.append(frag);
 }

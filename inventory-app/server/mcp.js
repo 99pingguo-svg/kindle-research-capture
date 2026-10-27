@@ -14,6 +14,8 @@ import * as mercari from './adapters/mercari.js';
 import * as channels from './channels.js';
 import { CHANNELS, OBSERVED_STATUSES } from './schema.js';
 import { importDates } from './dates.js';
+import { marketBrief, mercariNet } from './market.js';
+import { shippingOf } from './shipping.js';
 
 const SERVER_INFO = { name: 'shohin-daicho', title: '商品台帳', version: '0.1.0' };
 const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -444,6 +446,34 @@ result: pass=問題なし / needs_review=ユーザー確認が必要 / fail=修�
   tool('save_state_snapshot', 'アプリ全体の状態（全商品の内容と設定）を保存する。多数の商品をまとめて変更する前に1回だけ使う（5分以内の再要求は直前の保存を返す。AIの保存は新しい10件まで）。戻す（ロールバック）のはユーザーだけ。', {
     label: s.str('保存名（例: 原稿一括作成の前）'),
   }, [], ({ label = '' }) => json(store.saveAiSnapshot(actor, label)));
+
+  // ---- Mercari market (sold prices): only when the user asks ----
+  tool('market_queue', 'メルカリ相場（売り切れ価格）の調査が必要な商品を返す（未調査、または days 日より古いもの）。公式画像のURL・画像検索リンク・売り切れ検索リンク・送料の目安つき。相場調査はユーザーに頼まれたときだけ行う。', {
+    ids: s.str('商品IDをカンマ区切りで（省略時は全商品から）'),
+    days: s.int('この日数より古い調査も対象にする（既定30）'),
+    limit: s.int('最大件数（既定20）'),
+  }, [], ({ ids, days = 30, limit = 20 }) => {
+    const only = ids ? new Set(String(ids).split(',').map((x) => x.trim())) : null;
+    const old = Date.now() - days * 864e5;
+    const items = store.list()
+      .filter((p) => !p.trashedAt && !p.archived && (only ? only.has(p.id) : !p.market || Date.parse(p.market.checkedAt) < old))
+      .slice(0, limit)
+      .map((p) => ({ id: p.id, name: p.name, amazonTitle: p.amazon?.title || '', amazonPrice: p.research?.amazonPrice ?? p.amazon?.price ?? null, officialImage: p.amazon?.image || '', ...marketBrief(p), shipping: shippingOf(p.amazon).cheapest }));
+    return json({ count: items.length, items });
+  }, { readOnlyHint: true });
+
+  tool('save_market_research', 'メルカリで最近売れた価格（売り切れ）を記録する。まず公式画像で画像検索して同じ商品を探し（method=image）、無ければ似た商品をキーワードで探す（method=keyword）。match_type=same（同じ商品）/ similar（似た商品）/ none（見つからない）。examples は実際に売れた出品の title・price・url（jp.mercari.com の商品ページ）・match（same/similar）。中央値は match_type と同じ種類の例から計算される。', {
+    id: s.id,
+    match_type: s.enumOf(['same', 'similar', 'none'], '相場がどちらの商品のものか'),
+    method: s.enumOf(['image', 'keyword'], '見つけ方'),
+    query: s.str('検索に使った言葉'),
+    search_url: s.str('使った検索ページのURL（売り切れで絞った検索）'),
+    examples: { type: 'array', description: '売れた例（最大20）', items: { type: 'object', properties: { title: { type: 'string' }, price: { type: 'integer' }, url: { type: 'string' }, match: { type: 'string', enum: ['same', 'similar'] }, soldAt: { type: 'string' }, note: { type: 'string' } }, required: ['price', 'url'] } },
+    note: s.str('補足（状態の違い・セット数の違いなど）'),
+  }, ['id', 'match_type'], ({ id, match_type, method, query, search_url, examples = [], note }) => {
+    const p = store.setMarket(id, actor, { matchType: match_type, method, query, searchUrl: search_url, examples, note });
+    return json({ market: p.market, net: mercariNet(p) });
+  });
 
   // ---- destinations: what each platform should receive ----
   tool('channel_package', '出品先（mercari=メルカリ / jmty=ジモティー / flea=フリマ）に出す内容の完成形を返す。出品先ごとの原稿（override.<出品先>.title/description/price と出品先ごとの写真）があればそれを、無ければ共通の原稿を使う。写真は順番どおりの絶対パス。アップロード作業はこれだけを正本として読む。targeted=false はユーザーがその出品先を選んでいない商品（出品しない）。', {
