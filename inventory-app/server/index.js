@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { X509Certificate } from 'node:crypto';
+import { X509Certificate, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Store, isUser } from './store.js';
 import { shippingMeta } from './shipping.js';
@@ -338,23 +338,37 @@ export function createApp({ dataDir, token = '' } = {}) {
   // Requests that arrived through trustedHandler (the Mac-only 127.0.0.1 listener). A server-side mark, not a header, so clients cannot set it.
   const trustedRequests = new WeakSet();
 
+  const tokenBuf = Buffer.from(token);
+  const isToken = (v) => {
+    if (!token || v == null) return false;
+    const b = Buffer.from(String(v));
+    return b.length === tokenBuf.length && timingSafeEqual(b, tokenBuf);
+  };
+
   function authorized(req, url) {
     if (!token || trustedRequests.has(req)) return true;
     const cookie = /(?:^|;\s*)inv_token=([^;]+)/.exec(req.headers.cookie || '')?.[1];
     const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '')?.[1];
-    return cookie === token || bearer === token || url.searchParams.get('token') === token;
+    return isToken(cookie) || isToken(bearer) || isToken(url.searchParams.get('token'));
   }
 
   async function handler(req, res) {
     const url = new URL(req.url, 'http://local');
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
     try {
       if (!authorized(req, url)) {
         if (url.pathname.startsWith('/api') || url.pathname === '/mcp') return sendJson(res, 401, { error: '認証が必要です（?token=… を付けて一度開いてください）' });
         res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
         return res.end('<meta name=viewport content="width=device-width"><p style="font:16px system-ui;padding:24px">商品台帳: アクセスにはトークン付きURL（…/?token=XXXX）で一度開いてください。</p>');
       }
-      if (token && url.searchParams.get('token') === token) {
-        res.setHeader('set-cookie', `inv_token=${token}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
+      if (isToken(url.searchParams.get('token'))) {
+        res.setHeader('set-cookie', `inv_token=${token}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly${req.socket.encrypted ? '; Secure' : ''}`);
+        // Pages: drop the token from the address bar / history once the cookie is set.
+        if (req.method === 'GET' && !url.pathname.startsWith('/api') && url.pathname !== '/mcp') {
+          url.searchParams.delete('token');
+          res.writeHead(303, { location: url.pathname + url.search, 'cache-control': 'no-store' });
+          return res.end();
+        }
       }
       if (url.pathname === '/mcp') return await handleMcp(req, res, url);
       if (url.pathname.startsWith('/api/')) {
@@ -390,6 +404,14 @@ export function createApp({ dataDir, token = '' } = {}) {
 
   return { store, handler, trustedHandler, sseClients };
 }
+
+// Same-origin only: photos are served by this app (blob: for photos still uploading), external sites are only linked.
+const SECURITY_HEADERS = {
+  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'same-origin',
+  'x-frame-options': 'DENY',
+};
 
 function sendJson(res, status, value) {
   const body = JSON.stringify(value);

@@ -155,6 +155,14 @@ test('token: LAN door requires it, Mac-only trusted door does not', async () => 
     const mcp = await at(local, '/mcp', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
     assert.equal(mcp.status, 200);
     assert.equal((await at(lan, '/mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 401);
+    // Opening the page with ?token sets the cookie and redirects so the token leaves the address bar.
+    const open = await at(lan, '/?token=secret-123&x=1', { redirect: 'manual' });
+    assert.equal(open.status, 303);
+    assert.equal(open.headers.get('location'), '/?x=1');
+    assert.match(open.headers.get('set-cookie'), /inv_token=secret-123;.*HttpOnly/);
+    assert.match(open.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+    assert.equal((await at(lan, '/api/meta', { headers: { cookie: 'inv_token=secret-123' } })).status, 200);
+    assert.equal((await at(lan, '/api/meta', { headers: { cookie: 'inv_token=secret-12' } })).status, 401);
   } finally {
     for (const s of [lan, local]) { s.closeAllConnections(); s.close(); }
   }
