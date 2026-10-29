@@ -85,6 +85,8 @@ const SEARCH = { yahoo: { url: closedUrl, parse: parseClosed, img: /^https:\/\/[
 async function readClosed(kw) {
   const site = SEARCH[SITE];
   const res = await fetch(site.url(kw), { headers: { 'user-agent': UA, 'accept-language': 'ja-JP,ja;q=0.9', accept: 'text/html' }, credentials: 'omit' });
+  // ヤフーフリマ answers 404 (with the usual page) when nothing matches: that is zero items, not an error.
+  if (res.status === 404 && SITE === 'paypay') return [];
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return site.parse(await res.text());
 }
