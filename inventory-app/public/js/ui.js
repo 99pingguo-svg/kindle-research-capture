@@ -99,4 +99,4 @@ export async function copyText(text, label = 'コピーしました') {
 }
 
 export const isAiActor = (actor) => actor && actor !== 'user';
-export const actorLabel = (actor) => (actor === 'user' ? 'あなた' : actor === 'api' ? 'API' : actor[0].toUpperCase() + actor.slice(1));
+export const actorLabel = (actor) => (actor === 'user' ? 'あなた' : actor === 'api' ? 'API' : actor === 'system' ? '自動ルール' : actor[0].toUpperCase() + actor.slice(1));

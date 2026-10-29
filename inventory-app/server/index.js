@@ -17,6 +17,7 @@ import { readBody, parseMultipart } from './multipart.js';
 import { summary, readiness, lint, channelPackage, suggestedTargets, bulkPrice } from './rules.js';
 import { writeZip } from './zip.js';
 import { createStudio } from './studio.js';
+import { createDefaults } from './defaults.js';
 import { exportEntries, productsCsv, officialEntries, officialStats } from './export.js';
 import { createMcpHandler, matchesFilter } from './mcp.js';
 import * as mercari from './adapters/mercari.js';
@@ -44,6 +45,7 @@ export function createApp({ dataDir, token = '' } = {}) {
 
   // Auto-finishing of newly shot photos (white background / crop / colour), one at a time in the background.
   const studio = createStudio(store);
+  createDefaults(store);
   const routes = [];
   const route = (method, pattern, handler) => {
     const keys = [];

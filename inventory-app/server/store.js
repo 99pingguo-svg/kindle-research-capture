@@ -1029,6 +1029,20 @@ export class Store extends EventEmitter {
       if (same(ordered, p.targets || [])) return;
       ctx.changes.push({ path: 'targets', label: '出品先', from: (p.targets || []).map(channelLabel).join('・') || 'なし', to: ordered.map(channelLabel).join('・') || 'なし' });
       ctx.dirty = true;
+      // A destination the user turned on/off by hand is never touched again by the defaults (server/defaults.js).
+      for (const c of CHANNEL_IDS) if ((p.targets || []).includes(c) !== ordered.includes(c)) p.targetsManual = { ...p.targetsManual, [c]: nowIso() };
+      p.targets = ordered;
+    });
+  }
+
+  /** The user's standing rule adds a destination once (server/defaults.js). Not for AI tools. */
+  applyDefaultTarget(id, channel, reason) {
+    return this.mutate(id, 'system', 'targets', (p, ctx) => {
+      if (p.targetDefaults?.[channel] || p.targetsManual?.[channel] || (p.targets || []).includes(channel)) return;
+      const ordered = CHANNEL_IDS.filter((c) => c === channel || (p.targets || []).includes(c));
+      ctx.note(`既定ルールで${channelLabel(channel)}を追加（${reason}）`);
+      ctx.changes.push({ path: 'targets', label: '出品先', from: (p.targets || []).map(channelLabel).join('・') || 'なし', to: ordered.map(channelLabel).join('・') });
+      p.targetDefaults = { ...p.targetDefaults, [channel]: { at: nowIso(), reason } };
       p.targets = ordered;
     });
   }
