@@ -183,7 +183,7 @@ function photosCard(p) {
   const tile = (ph, extra) => h('button', { class: `ph ${ph.kind === 'reference' ? 'ref' : ph.kind === 'generated' ? 'gen' : ''}`, onclick: () => photoSheet(p, ph) },
     h('img', { src: fileUrl(p, ph), loading: 'lazy', alt: ph.tag || '' }),
     order.get(ph.id) && h('span', { class: 'order' }, order.get(ph.id)),
-    (ph.tag || ph.derivedFrom || ph.kind === 'generated') && h('span', { class: 'tag' }, [ph.kind === 'generated' && '生成', ph.derivedFrom && '編集', ph.tag].filter(Boolean).join('・')),
+    (ph.tag || ph.derivedFrom || ph.kind === 'generated') && h('span', { class: 'tag' }, [ph.kind === 'generated' && '生成', ph.derivedFrom && (ph.source === 'studio' ? 'AI仕上げ' : '編集'), ph.tag].filter(Boolean).join('・')),
     extra);
   const pendingTile = (x) => h('button', { class: 'ph', onclick: async () => {
     const v = await choose(x.error ? `送信失敗: ${x.error}` : 'アップロード待ち', [{ label: '再送', value: 'r' }, { label: '破棄', value: 'd', danger: true }]);

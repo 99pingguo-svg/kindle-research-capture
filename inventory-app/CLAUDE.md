@@ -15,6 +15,7 @@
 - 日付は 注文日・購入日（`orderDate`）／到着日（`arrivalDate`）／区別しない日付（`itemDate`）。種類は `category`（`server/category.js` の一覧。未設定は商品名から推定）。これらは整理用なので変更しても QC はやり直しにならない（FIELDS の `meta`）。
 - 一覧の絞り込みは 状態チップ＋📅期間＋💴価格帯＋🔍条件（同じ見出しは OR、見出し間は AND）、並び順はキー＋向き。「保存した表示」は設定 `listViews`（ユーザーのみ・全端末共通）。
 - 純正カメラ連携: アプリで撮影対象を決める（`PUT /api/native-shoot`、ユーザーのみ）→ iPhone の「カメラ」で撮影 → ショートカット「台帳に送る」が撮影開始後の写真を `POST /api/native-shoot/photos`（合言葉 `x-upload-key`、この2口だけ有効）へ送り、サーバーが sips で work/thumb を作る。画面は `public/js/native.js`。
+- 撮った写真の自動仕上げ（`server/studio.js`、設定 `autoStudio`）: 届いた現物写真ごとに `tools/bin/studio`（macOS Vision の切り抜き＋自動補正。ビルド `npm run build:studio`）で白背景・正方形・色補正（白っぽい商品は薄いグレー背景、はみ出し・大写しは色補正のみ）→ ローカルAI（Ollama qwen3.5:4b）が欠けを確認 → 編集写真（source=studio）として追加し出品用で元写真と入れ替え（🔒確定時は入れ替えない）。未処理分は `POST /api/studio/run`。
 - 写真の種類: actual（ユーザー撮影の現物）・generated（注記入りのAI紹介画像。出品用に選べるが現物ではない）・reference（参考。出品不可）。
 - 399商品の取り込み・更新同期は `node scripts/import-399.js`（元フォルダは読むだけ。変化は data/imports/update-ledger に記録）。
 - 出品先は メルカリ／ジモティー／フリマ（`targets`、ユーザーのみ）。出品先ごとの原稿は `override.<出品先>.*` と出品先ごとの写真。各サイトへのアップロードは MCP `channel_package(id, channel)` を正本に読む。

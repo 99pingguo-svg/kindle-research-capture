@@ -5,3 +5,4 @@ data/
 !public/icons/*.png
 demo-data/
 backups-full/
+tools/bin/

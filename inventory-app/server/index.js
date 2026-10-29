@@ -16,6 +16,7 @@ import { AppError, nowIso } from './util.js';
 import { readBody, parseMultipart } from './multipart.js';
 import { summary, readiness, lint, channelPackage, suggestedTargets, bulkPrice } from './rules.js';
 import { writeZip } from './zip.js';
+import { createStudio } from './studio.js';
 import { exportEntries, productsCsv, officialEntries, officialStats } from './export.js';
 import { createMcpHandler, matchesFilter } from './mcp.js';
 import * as mercari from './adapters/mercari.js';
@@ -41,6 +42,8 @@ export function createApp({ dataDir, token = '' } = {}) {
     for (const res of sseClients) res.write(line);
   });
 
+  // Auto-finishing of newly shot photos (white background / crop / colour), one at a time in the background.
+  const studio = createStudio(store);
   const routes = [];
   const route = (method, pattern, handler) => {
     const keys = [];
@@ -154,6 +157,7 @@ export function createApp({ dataDir, token = '' } = {}) {
       edit = null;
     }
     const { photo, duplicate } = store.addPhoto(params.id, actor, { ...fields, edit, replaceInListing: fields.replaceInListing === 'true' }, files);
+    if (!duplicate) studio.enqueue(params.id, photo);
     return { photo, duplicate, product: sm(store.get(params.id)) };
   });
   // ---- 純正カメラ連携: アプリで撮影対象を決め → iPhone の「カメラ」で撮影 → ショートカットが撮った写真を送る ----
@@ -168,6 +172,9 @@ export function createApp({ dataDir, token = '' } = {}) {
     return { active: true, productId: p.id, name: p.name, since: ns.since, sinceLocal, photos: p.photos.filter((x) => !x.deletedAt && x.source === 'native' && x.createdAt >= ns.at).length };
   };
   route('GET', '/api/native-shoot', () => shootInfo());
+  // 自動仕上げ: 状況と、まだ仕上げていない写真の処理（商品を指定できる）
+  route('GET', '/api/studio', () => ({ available: studio.available(), pending: studio.pending(), on: store.settings.autoStudio !== false }));
+  route('POST', '/api/studio/run', ({ body }) => ({ queued: studio.backfill(Array.isArray(body?.productIds) ? body.productIds.map(String) : null) }));
   route('PUT', '/api/native-shoot', ({ body, actor }) => {
     store.setNativeShoot(actor, String(body?.productId || ''));
     return shootInfo();
@@ -186,6 +193,7 @@ export function createApp({ dataDir, token = '' } = {}) {
     const digest = createHash('sha256').update(buf).digest('hex').slice(0, 32);
     const files = await nativeVariants(buf);
     const { photo, duplicate } = store.addPhoto(ns.productId, 'user', { kind: 'actual', source: 'native', clientId: `native:${digest}`, width: files.width, height: files.height }, files);
+    if (!duplicate) studio.enqueue(ns.productId, photo);
     return { ok: true, productId: ns.productId, photoId: photo.id, duplicate };
   });
   route('PATCH', '/api/products/:id/photos/:pid', ({ params, body, actor }) => full(store.updatePhoto(params.id, actor, params.pid, body)));

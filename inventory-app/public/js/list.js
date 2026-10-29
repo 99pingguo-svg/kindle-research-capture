@@ -9,7 +9,7 @@ import {
 import { pickDateRange, rangeLabel, fmtDay } from './calendar.js';
 import { openCamera } from './camera.js';
 import * as uploads from './uploads.js';
-import { openNativeSetup } from './native.js';
+import { openNativeSetup, shootWithNativeCamera } from './native.js';
 
 let els = null;
 
@@ -727,6 +727,10 @@ function rowEl(p, idx, run) {
         class: 'icon-btn cam', 'aria-label': `${p.name || p.id} を撮影`,
         onclick: (e) => { e.stopPropagation(); openCamera({ ids: run.ids, index: idx }); },
       }, '📷'),
+      !p.trashedAt && h('button', {
+        class: 'icon-btn link native', 'aria-label': `${p.name || p.id} を純正カメラで撮る`, title: 'iPhone の「カメラ」アプリで撮る（スタイル等そのまま）',
+        onclick: (e) => { e.stopPropagation(); shootWithNativeCamera(p.id, { ids: run.ids, index: idx }); },
+      }, '📸'),
       p.sourceUrl && h('a', {
         class: 'icon-btn link', href: p.sourceUrl, target: '_blank', rel: 'noopener noreferrer',
         title: '購入ページを開く（別ウィンドウ）', 'aria-label': `${p.name || p.id} の購入ページを開く`,

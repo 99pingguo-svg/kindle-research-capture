@@ -215,6 +215,8 @@ export const DEFAULT_SETTINGS = {
   aiActorName: 'claude',
   /** Models allowed to perform AI QC (incl. 画像QC). QC from any other model is rejected. */
   imageQcModels: ['claude-opus-5-5'],
+  /** 撮った写真を自動で仕上げる（白背景・トリミング・色補正、Mac 上で処理。元写真は残す）。 */
+  autoStudio: true,
   /** 一覧の「保存した表示」（絞り込み・並び順の組み合わせ）。全端末で共有。 */
   listViews: [],
 };

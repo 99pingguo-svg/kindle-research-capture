@@ -14,6 +14,7 @@
     "mcp:stdio": "node bin/mcp-stdio.js",
     "backup": "node scripts/backup.js",
     "demo": "node scripts/seed-demo.js",
-    "icons": "node scripts/make-icons.js"
+    "icons": "node scripts/make-icons.js",
+    "build:studio": "mkdir -p tools/bin && swiftc -O tools/studio.swift -o tools/bin/studio"
   }
 }
