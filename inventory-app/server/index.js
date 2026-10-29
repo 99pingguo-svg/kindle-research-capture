@@ -10,6 +10,7 @@ import { X509Certificate, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Store, isUser } from './store.js';
 import { shippingMeta } from './shipping.js';
+import { CATEGORIES } from './category.js';
 import { AppError, nowIso } from './util.js';
 import { readBody, parseMultipart } from './multipart.js';
 import { summary, readiness, lint, channelPackage, suggestedTargets, bulkPrice } from './rules.js';
@@ -51,7 +52,7 @@ export function createApp({ dataDir, token = '' } = {}) {
 
   // ---- meta / settings ----
   route('GET', '/api/meta', () => ({
-    delivery: shippingMeta(), stages: schema.STAGES, decisions: schema.DECISIONS, fields: schema.FIELDS, conditions: schema.MERCARI_CONDITIONS,
+    delivery: shippingMeta(), categories: CATEGORIES, stages: schema.STAGES, decisions: schema.DECISIONS, fields: schema.FIELDS, conditions: schema.MERCARI_CONDITIONS,
     linkTypes: schema.LINK_TYPES, photoTags: schema.PHOTO_TAGS, factConfidence: schema.FACT_CONFIDENCE,
     aiTaskTypes: schema.AI_TASK_TYPES, qcChecks: schema.QC_CHECKS, limits: schema.MERCARI_LIMITS,
     shipping: { payers: schema.SHIPPING_PAYERS, methods: schema.SHIPPING_METHODS, days: schema.SHIPPING_DAYS, prefectures: schema.PREFECTURES },
@@ -92,7 +93,7 @@ export function createApp({ dataDir, token = '' } = {}) {
     preview.forEach((it, i) => {
       if (skip.has(i)) return;
       const fields = { name: it.name };
-      if (it.itemDate) fields.itemDate = it.itemDate;
+      for (const k of ['itemDate', 'orderDate', 'arrivalDate']) if (it[k]) fields[k] = it[k];
       if (body?.decision) fields.decision = body.decision;
       if (body?.shootPlan) fields.shootPlan = true;
       created.push(store.create(fields, actor, { links: it.links }).product.id);
@@ -101,7 +102,7 @@ export function createApp({ dataDir, token = '' } = {}) {
   });
   // 日付の一括反映 (existing products only; unmatched rows are ignored)
   route('POST', '/api/dates/import', ({ body, actor }) =>
-    importDates(store, actor, { text: body?.text || '', dryRun: body?.dryRun !== false, include: body?.include || [] }));
+    importDates(store, actor, { text: body?.text || '', dryRun: body?.dryRun !== false, include: body?.include || [], field: body?.field || 'itemDate' }));
   route('GET', '/api/products/:id', ({ params }) => full(store.get(params.id)));
   route('PATCH', '/api/products/:id', ({ params, body, actor }) => {
     const { set, confirm, unlock } = body || {};
@@ -456,8 +457,15 @@ export function parseImport(text) {
   const items = [];
   for (const raw of String(text).split(/\r?\n/)) {
     if (!raw.trim() || raw.trim().startsWith('#')) continue;
-    const { name, urls, date } = parseLine(raw);
-    items.push(date ? { name, links: urls, itemDate: date } : { name, links: urls });
+    const { name, urls, date, positional, ordered, delivered } = parseLine(raw);
+    const item = { name, links: urls };
+    // Browser exports keep 注文日 and 到着日 in their own columns; other lines give one undistinguished date.
+    if (positional) {
+      if (ordered) item.orderDate = ordered;
+      if (delivered) item.arrivalDate = delivered;
+      if (!ordered && !delivered && date) item.itemDate = date;
+    } else if (date) item.itemDate = date;
+    items.push(item);
   }
   return items;
 }

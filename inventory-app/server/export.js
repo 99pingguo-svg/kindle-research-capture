@@ -5,6 +5,7 @@ import path from 'node:path';
 import { listingText } from './store.js';
 import { listingPhotos, statusOf } from './rules.js';
 import { safeSegment } from './util.js';
+import { guessCategory } from './category.js';
 
 const CSV_COLUMNS = [
   ['id', (p) => p.id],
@@ -17,7 +18,10 @@ const CSV_COLUMNS = [
   ['ステータス', (p) => statusOf(p).label],
   ['出品判断', (p) => ({ undecided: '未定', sell: '出品する', draft: '下書き', hold: '保留', no_sell: '出品しない', no_stock: '在庫なし' })[p.decision]],
   ['保管場所', (p) => p.location],
-  ['日付（注文・購入・到着）', (p) => p.itemDate],
+  ['日付（区別しない）', (p) => p.itemDate],
+  ['注文日・購入日', (p) => p.orderDate],
+  ['到着日', (p) => p.arrivalDate],
+  ['種類', (p) => p.category || guessCategory(p.name)],
   ['購入時期', (p) => p.purchaseDate],
   ['購入価格', (p) => p.purchasePrice],
   ['出品予定価格', (p) => p.plannedPrice],

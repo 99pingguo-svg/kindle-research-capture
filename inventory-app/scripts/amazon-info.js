@@ -78,8 +78,13 @@ function parseList(text) {
     if (!url) continue;
     const asin = ASIN_RE.exec(url)[1];
     const full = (cols[0] || '').replace(/&amp;/g, '&').trim();
-    const date = cols.find((c) => /^\d{4}-\d{2}-\d{2}$/.test(c.trim()))?.trim() || '';
-    rows.push({ asin, full, name: full.split(' | ')[0].trim().slice(0, 120), date, url: `https://www.amazon.co.jp/dp/${asin}` });
+    // 観察ブラウザの書き出し: 商品名 / リンク / 注文日 / 到着日 / ラベルなしの日付（タブ区切り）。
+    const d = (i) => (/^\d{4}-\d{2}-\d{2}$/.test((cols[i] || '').trim()) ? cols[i].trim() : '');
+    const positional = cols[1] === url;
+    const ordered = positional ? d(2) : '';
+    const delivered = positional ? d(3) : '';
+    const date = positional ? d(4) : cols.find((c) => /^\d{4}-\d{2}-\d{2}$/.test(c.trim()))?.trim() || '';
+    rows.push({ asin, full, name: full.split(' | ')[0].trim().slice(0, 120), ordered, delivered, date, url: `https://www.amazon.co.jp/dp/${asin}` });
   }
   return rows;
 }
@@ -95,7 +100,7 @@ async function addList(file, products) {
   for (const r of fresh) {
     const notes = [`ASIN: ${r.asin}`, `取り込み元: ${path.basename(file)}（${today()}）`, r.full !== r.name ? `Amazonの商品名: ${r.full}` : ''].filter(Boolean).join('\n');
     const { product } = await api('POST', '/api/products', {
-      name: r.name, notes, ...(r.date ? { itemDate: r.date } : {}),
+      name: r.name, notes, ...(r.ordered ? { orderDate: r.ordered } : {}), ...(r.delivered ? { arrivalDate: r.delivered } : {}), ...(r.date ? { itemDate: r.date } : {}),
       links: [{ url: r.url, type: 'purchase', label: 'Amazon' }],
     });
     added.push(product.id);

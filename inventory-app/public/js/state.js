@@ -2,15 +2,17 @@
 import { api } from './api.js';
 
 const PREFS_KEY = 'daicho.prefs';
-const PREFS_VERSION = 2;
+const PREFS_VERSION = 3;
 const defaults = {
   v: PREFS_VERSION,
   filter: 'all',
-  sort: 'date_desc',
+  sort: 'date',
+  desc: true,
+  dateKind: 'itemDate',
   dateFrom: '',
   dateTo: '',
   dateNone: false,
-  ship: '',
+  conds: [],
   camAutoNext: true,
   camRequestAi: true,
   camKeepTag: false,
@@ -20,7 +22,16 @@ function loadPrefs() {
   try {
     const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
     // v2: the list is ordered by date (newest first) by default.
-    if ((saved.v || 1) < 2) Object.assign(saved, { v: PREFS_VERSION, sort: 'date_desc' });
+    if ((saved.v || 1) < 2) Object.assign(saved, { v: 2, sort: 'date_desc' });
+    // v3: sort = key + desc flag; the single 📦 filter became a list of conditions.
+    if (saved.v < 3) {
+      // (SORTS is defined further down and not initialised yet while state is being built.)
+      const [key, dir] = String(saved.sort || 'date_desc').split('_');
+      const known = ['date', 'id', 'updated', 'name', 'stage', 'photos', 'net', 'market', 'ship'].includes(key) ? key : 'date';
+      const descFirst = ['date', 'updated', 'net', 'market'].includes(known);
+      Object.assign(saved, { v: PREFS_VERSION, sort: known, desc: dir ? dir === 'desc' : descFirst, conds: saved.ship ? [saved.ship] : [] });
+      delete saved.ship;
+    }
     return { ...defaults, ...saved };
   } catch {
     return { ...defaults };
@@ -154,13 +165,44 @@ export function matchesFilter(sm, filter) {
 
 const STAGE_RANK = ['needs_review', 'needs_photos', 'shooting', 'unsorted', 'ai_pending', 'ai_processing', 'ready', 'queued', 'mercari_entered', 'final_check', 'listed', 'sold'];
 
-/** 日付（注文・購入・到着）の期間絞り込み。 */
+/** The three dates a product can carry. itemDate in a summary = the first known of (区別しない日付, 注文日, 到着日). */
+export const DATE_KINDS = [
+  { field: 'itemDate', label: '日付', long: '日付（代表）' },
+  { field: 'orderDate', label: '注文日', long: '注文日・購入日' },
+  { field: 'arrivalDate', label: '到着日', long: '到着日' },
+];
+export const dateKindOf = (field = state.prefs.dateKind) => DATE_KINDS.find((k) => k.field === field) || DATE_KINDS[0];
+
+/**
+ * Sort keys. `desc` = the natural first direction, `dir` = [ascending label, descending label].
+ * Products missing the value always go last, whichever direction.
+ */
+export const SORTS = [
+  { id: 'date', label: '日付（代表）', date: 'itemDate', desc: true, dir: ['古い順', '新しい順'] },
+  { id: 'order', label: '注文日・購入日', date: 'orderDate', desc: true, dir: ['古い順', '新しい順'] },
+  { id: 'arrival', label: '到着日', date: 'arrivalDate', desc: true, dir: ['古い順', '新しい順'] },
+  { id: 'amazon', label: 'Amazon価格', desc: true, dir: ['安い順', '高い順'], value: (p) => p.research?.amazonPrice ?? null },
+  { id: 'net', label: 'メルカリ手取り', desc: true, dir: ['少ない順', '多い順'], value: (p) => p.net?.net ?? null },
+  { id: 'market', label: 'メルカリ相場', desc: true, dir: ['安い順', '高い順'], value: (p) => p.market?.median ?? null },
+  { id: 'ship', label: '送料', desc: false, dir: ['安い順', '高い順'], value: (p) => p.ship?.cheapest?.price ?? null },
+  { id: 'size', label: 'サイズ（3辺合計）', desc: false, dir: ['小さい順', '大きい順'], value: (p) => p.ship?.dims?.sum ?? null },
+  { id: 'category', label: '種類', desc: false, dir: ['一覧の順', '逆順'], value: (p) => { const i = (state.meta?.categories || []).indexOf(p.category); return i < 0 ? null : i; } },
+  { id: 'name', label: '名前', desc: false, dir: ['あ→ん', 'ん→あ'], text: (p) => p.name || null },
+  { id: 'stage', label: '作業の段階', desc: false, dir: ['前の段階から', '後の段階から'], value: (p) => { const i = STAGE_RANK.indexOf(p.stage); return i < 0 ? null : i; } },
+  { id: 'photos', label: '現物写真の枚数', desc: false, dir: ['少ない順', '多い順'], value: (p) => p.counts?.actual ?? 0 },
+  { id: 'updated', label: '更新日時', desc: true, dir: ['古い順', '新しい順'], text: (p) => p.updatedAt || null },
+  { id: 'id', label: 'ID', desc: false, dir: ['小さい順', '大きい順'], text: (p) => p.id },
+];
+export const sortDef = (id = state.prefs.sort) => SORTS.find((x) => x.id === id) || SORTS[0];
+
+/** 期間絞り込み（📅 で選んだ日付の種類で判定）。 */
 export function inDateRange(p) {
   const { dateFrom, dateTo, dateNone } = state.prefs;
-  if (dateNone) return !p.itemDate;
+  const v = p[dateKindOf().field];
+  if (dateNone) return !v;
   if (!dateFrom && !dateTo) return true;
-  if (!p.itemDate) return false;
-  return (!dateFrom || p.itemDate >= dateFrom) && (!dateTo || p.itemDate <= dateTo);
+  if (!v) return false;
+  return (!dateFrom || v >= dateFrom) && (!dateTo || v <= dateTo);
 }
 
 const num = (x) => (x === '' || x == null || !Number.isFinite(Number(x)) ? null : Number(x));
@@ -174,7 +216,7 @@ export function inPriceRange(p) {
   if (v == null) return false;
   return (min == null || v >= min) && (max == null || v <= max);
 }
-/** Size / shipping / market / net filter: one of "size:<class>", "band:<band>", "method:<id>", "market:<same|similar|none|todo>", "net:<band>". */
+
 export const NET_BANDS = [
   { id: 'loss', label: '赤字（0円以下）', test: (n) => n <= 0 },
   { id: 'n1', label: '¥1〜¥499', test: (n) => n > 0 && n < 500 },
@@ -182,57 +224,91 @@ export const NET_BANDS = [
   { id: 'n1000', label: '¥1,000〜¥2,999', test: (n) => n >= 1000 && n < 3000 },
   { id: 'n3000', label: '¥3,000〜', test: (n) => n >= 3000 },
 ];
-export function inShipFilter(p, f = state.prefs.ship) {
-  if (!f) return true;
-  const [kind, id] = f.split(':');
+
+/**
+ * One condition "kind:id". Kinds: cat (種類) / dec (出品判断) / tgt (出品先) / photo / date (日付の有無) /
+ * size / band (送料帯) / method (送り方) / market (相場) / net (手取り).
+ */
+export function matchCond(p, cond) {
+  const i = cond.indexOf(':');
+  const kind = cond.slice(0, i);
+  const id = cond.slice(i + 1);
   const s = p.ship || {};
-  if (kind === 'size') return s.sizeClass === id;
-  if (kind === 'band') return s.band === id;
-  if (kind === 'method') return (s.options || []).some((o) => o.id === id);
-  if (kind === 'market') return id === 'todo' ? !p.market?.checkedAt : p.market?.matchType === id;
-  if (kind === 'net') {
-    if (id === 'unknown') return p.net?.net == null;
-    const b = NET_BANDS.find((x) => x.id === id);
-    return !!b && p.net?.net != null && b.test(p.net.net);
+  switch (kind) {
+    case 'cat': return p.category === id;
+    case 'dec': return p.decision === id;
+    case 'tgt': return id === 'none' ? !(p.targets || []).length : (p.targets || []).includes(id);
+    case 'photo': return id === 'none' ? !p.counts?.actual : !!p.counts?.actual;
+    case 'date': return { order: !!p.orderDate, noorder: !p.orderDate, arrival: !!p.arrivalDate, noarrival: !p.arrivalDate, any: !!p.itemDate, none: !p.itemDate }[id] ?? true;
+    case 'size': return s.sizeClass === id;
+    case 'band': return s.band === id;
+    case 'method': return (s.options || []).some((o) => o.id === id);
+    case 'market': return id === 'todo' ? !p.market?.checkedAt : p.market?.matchType === id;
+    case 'net': {
+      if (id === 'unknown') return p.net?.net == null;
+      const b = NET_BANDS.find((x) => x.id === id);
+      return !!b && p.net?.net != null && b.test(p.net.net);
+    }
+    default: return true;
   }
+}
+
+/** Conditions of the same kind are alternatives (OR); different kinds must all hold (AND). */
+export function inConds(p, conds = state.prefs.conds) {
+  if (!conds?.length) return true;
+  const byKind = new Map();
+  for (const c of conds) {
+    const k = c.slice(0, c.indexOf(':'));
+    if (!byKind.has(k)) byKind.set(k, []);
+    byKind.get(k).push(c);
+  }
+  for (const list of byKind.values()) if (!list.some((c) => matchCond(p, c))) return false;
   return true;
 }
 
 export const priceRangeOn = () => !!(state.prefs.priceUnknown || num(state.prefs.priceMin) != null || num(state.prefs.priceMax) != null);
+export const dateRangeOn = () => !!(state.prefs.dateFrom || state.prefs.dateTo || state.prefs.dateNone);
 
-export const isDateSort = (s = state.prefs.sort) => s === 'date_desc' || s === 'date_asc';
+/** The date field the list is grouped by, or null when the sort is not by a date. */
+export const groupDateField = () => sortDef().date || null;
+export const isDateSort = () => !!groupDateField();
 
-/** Products matching the status chip and search (before the date range), for calendar counts. */
+/** Products matching the status chip, search-free (before the date range), for calendar counts. */
 export function productsForCalendar() {
-  return [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter));
+  return [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && inPriceRange(p) && inConds(p));
+}
+
+/** The prefs that make up a saved view. */
+export const VIEW_KEYS = ['filter', 'sort', 'desc', 'dateKind', 'dateFrom', 'dateTo', 'dateNone', 'priceMin', 'priceMax', 'priceUnknown', 'conds'];
+export const currentView = () => Object.fromEntries(VIEW_KEYS.map((k) => [k, state.prefs[k] ?? defaults[k] ?? '']));
+export function applyView(view) {
+  for (const k of VIEW_KEYS) setPref(k, k in view ? view[k] : defaults[k] ?? '');
+  state.selected.clear();
+}
+
+function compareBy(def, desc) {
+  return (a, b) => {
+    const get = def.date ? (p) => p[def.date] || null : def.text || def.value;
+    const va = get(a);
+    const vb = get(b);
+    if ((va == null) !== (vb == null)) return va == null ? 1 : -1; // missing last
+    let c = 0;
+    if (va != null) c = typeof va === 'number' ? va - vb : String(va).localeCompare(String(vb), 'ja');
+    if (c) return desc ? -c : c;
+    return desc && def.date ? b.id.localeCompare(a.id) : a.id.localeCompare(b.id);
+  };
 }
 
 export function visibleProducts() {
   const q = state.query.trim().toLowerCase().normalize('NFKC');
-  let items = [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && inDateRange(p) && inPriceRange(p) && inShipFilter(p));
+  let items = [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && inDateRange(p) && inPriceRange(p) && inConds(p));
   if (q) {
     const terms = q.split(/\s+/);
     items = items.filter((p) => {
-      const hay = [p.id, p.name, p.brand, p.model, p.jan, p.notes, p.location, p.title].join(' ').toLowerCase().normalize('NFKC');
+      const hay = [p.id, p.name, p.brand, p.model, p.jan, p.notes, p.location, p.title, p.category].join(' ').toLowerCase().normalize('NFKC');
       return terms.every((t) => hay.includes(t));
     });
   }
-  const sort = state.prefs.sort;
-  items.sort((a, b) => {
-    if (isDateSort(sort)) {
-      if (!a.itemDate !== !b.itemDate) return a.itemDate ? -1 : 1; // undated last
-      const c = (a.itemDate || '').localeCompare(b.itemDate || '');
-      if (c) return sort === 'date_desc' ? -c : c;
-      return sort === 'date_desc' ? b.id.localeCompare(a.id) : a.id.localeCompare(b.id);
-    }
-    if (sort === 'updated') return b.updatedAt.localeCompare(a.updatedAt);
-    if (sort === 'name') return (a.name || '￿').localeCompare(b.name || '￿', 'ja');
-    if (sort === 'stage') return STAGE_RANK.indexOf(a.stage) - STAGE_RANK.indexOf(b.stage) || a.id.localeCompare(b.id);
-    if (sort === 'net') return (b.net?.net ?? -Infinity) - (a.net?.net ?? -Infinity) || a.id.localeCompare(b.id);
-    if (sort === 'market') return (b.market?.median ?? -1) - (a.market?.median ?? -1) || a.id.localeCompare(b.id);
-    if (sort === 'ship') return (a.ship?.cheapest?.price ?? Infinity) - (b.ship?.cheapest?.price ?? Infinity) || a.id.localeCompare(b.id);
-    if (sort === 'photos') return a.counts.actual - b.counts.actual || a.id.localeCompare(b.id);
-    return a.id.localeCompare(b.id);
-  });
+  items.sort(compareBy(sortDef(), !!state.prefs.desc));
   return items;
 }

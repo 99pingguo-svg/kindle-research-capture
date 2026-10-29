@@ -1,6 +1,7 @@
 // Pure functions over a product: readiness, deterministic lint, list summary, duplicates.
 import { MERCARI_LIMITS, CONFIRM_FIELDS, FIELD_MAP, stageLabel, decisionLabel, LISTABLE_KINDS, PREPARE_DECISIONS, COMMITTED_STATUSES, OFFERED_STATUSES, channelLabel } from './schema.js';
 import { shippingOf } from './shipping.js';
+import { guessCategory } from './category.js';
 import { mercariNet, marketBrief } from './market.js';
 import { norm, normUrl, similarity } from './util.js';
 
@@ -283,7 +284,12 @@ export function summary(p, settings) {
     title: p.listing.title,
     updatedAt: p.updatedAt,
     createdAt: p.createdAt,
-    itemDate: p.itemDate || null,
+    // 代表の日付: 区別しない日付 → 注文日 → 到着日 の順で最初にあるもの（期間・日付順の既定）。
+    itemDate: p.itemDate || p.orderDate || p.arrivalDate || null,
+    orderDate: p.orderDate || null,
+    arrivalDate: p.arrivalDate || null,
+    category: p.category || guessCategory(p.name),
+    categoryGuessed: !p.category,
   };
 }
 

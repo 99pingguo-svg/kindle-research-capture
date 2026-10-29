@@ -14,6 +14,7 @@ import * as mercari from './adapters/mercari.js';
 import * as channels from './channels.js';
 import { CHANNELS, OBSERVED_STATUSES } from './schema.js';
 import { importDates } from './dates.js';
+import { CATEGORIES } from './category.js';
 import { marketBrief, mercariNet } from './market.js';
 import { shippingOf } from './shipping.js';
 
@@ -120,14 +121,18 @@ export function productForAi(store, p) {
   };
 }
 
-/** Date sorts put products without a date last; ties fall back to ID. */
+const DATE_SORT_KEYS = { date: 'itemDate', order: 'orderDate', arrival: 'arrivalDate' };
+
+/** Date sorts (date = 代表の日付 / order = 注文日 / arrival = 到着日) put products without that date last; ties fall back to ID. */
 export function sortSummaries(sort) {
   return (a, b) => {
-    if (sort === 'date_desc' || sort === 'date_asc') {
-      if (!a.itemDate !== !b.itemDate) return a.itemDate ? -1 : 1;
-      const c = (a.itemDate || '').localeCompare(b.itemDate || '');
-      if (c) return sort === 'date_desc' ? -c : c;
-      return sort === 'date_desc' ? b.id.localeCompare(a.id) : a.id.localeCompare(b.id);
+    const [kind, dir] = sort.split('_');
+    const key = DATE_SORT_KEYS[kind];
+    if (key && (dir === 'desc' || dir === 'asc')) {
+      if (!a[key] !== !b[key]) return a[key] ? -1 : 1;
+      const c = (a[key] || '').localeCompare(b[key] || '');
+      if (c) return dir === 'desc' ? -c : c;
+      return dir === 'desc' ? b.id.localeCompare(a.id) : a.id.localeCompare(b.id);
     }
     if (sort === 'updated') return b.updatedAt.localeCompare(a.updatedAt);
     return a.id.localeCompare(b.id);
@@ -154,7 +159,7 @@ function buildTools(store, actor) {
       shippingMethods: SHIPPING_METHODS, shippingDays: SHIPPING_DAYS, prefectures: PREFECTURES, limits: MERCARI_LIMITS,
       qcChecks: QC_CHECKS, photoTags: PHOTO_TAGS, factConfidence: FACT_CONFIDENCE, linkTypes: LINK_TYPES, aiTaskTypes: AI_TASK_TYPES,
       fields: FIELDS.map(({ path: p, label, type, options, confirm, max }) => ({ path: p, label, type, options, confirmRequired: !!confirm, max })),
-      settings: store.settings, listFilters: LIST_FILTERS,
+      settings: store.settings, listFilters: LIST_FILTERS, categories: CATEGORIES,
     }), { readOnlyHint: true });
 
   tool('inventory_overview', '在庫全体の状況（ステータス別件数、AIキュー、撮影依頼、今日撮影した商品数、メルカリ待ち）を返す。', {}, [], () => {
@@ -173,17 +178,21 @@ function buildTools(store, actor) {
     filter: s.enumOf(LIST_FILTERS, '絞り込み（既定 all = アーカイブ・ゴミ箱以外）'),
     query: s.str('商品名・型番・ブランド・JAN・メモの部分一致'),
     updated_since: s.str('ISO日時。これ以降に更新された商品のみ'),
-    date_from: s.str('日付（注文・購入・到着）がこの日以降（YYYY-MM-DD）'),
-    date_to: s.str('日付（注文・購入・到着）がこの日以前（YYYY-MM-DD）'),
-    sort: s.enumOf(['date_desc', 'date_asc', 'id', 'updated'], '並び順（既定 date_desc。日付なしは末尾）'),
+    date_from: s.str('日付がこの日以降（YYYY-MM-DD）。date_kind の日付で判定'),
+    date_to: s.str('日付がこの日以前（YYYY-MM-DD）。date_kind の日付で判定'),
+    date_kind: s.enumOf(['date', 'order', 'arrival'], '期間に使う日付（既定 date=代表の日付 / order=注文日・購入日 / arrival=到着日）'),
+    category: s.str('種類（get_reference_data の categories のどれか。未設定の商品は商品名からの推定で判定）'),
+    sort: s.enumOf(['date_desc', 'date_asc', 'order_desc', 'order_asc', 'arrival_desc', 'arrival_asc', 'id', 'updated'], '並び順（既定 date_desc。その日付がない商品は末尾）'),
     limit: s.int('最大件数（既定100）'),
-  }, [], ({ filter = 'all', query, updated_since, date_from, date_to, sort = 'date_desc', limit = 100 }) => {
+  }, [], ({ filter = 'all', query, updated_since, date_from, date_to, date_kind = 'date', category, sort = 'date_desc', limit = 100 }) => {
     const q = (query || '').toLowerCase();
     let items = store.list().map((p) => summary(p, store.settings)).filter((sm) => matchesFilter(sm, filter));
     if (q) items = items.filter((sm) => [sm.id, sm.name, sm.brand, sm.model, sm.jan, sm.notes, sm.title].join(' ').toLowerCase().includes(q));
     if (updated_since) items = items.filter((sm) => sm.updatedAt >= updated_since);
-    if (date_from) items = items.filter((sm) => sm.itemDate && sm.itemDate >= date_from);
-    if (date_to) items = items.filter((sm) => sm.itemDate && sm.itemDate <= date_to);
+    const dk = DATE_SORT_KEYS[date_kind] || 'itemDate';
+    if (date_from) items = items.filter((sm) => sm[dk] && sm[dk] >= date_from);
+    if (date_to) items = items.filter((sm) => sm[dk] && sm[dk] <= date_to);
+    if (category) items = items.filter((sm) => sm.category === category);
     items.sort(sortSummaries(sort));
     return json(items.slice(0, limit).map(({ thumb, thumbIsReference, ...rest }) => rest));
   }, { readOnlyHint: true });
@@ -394,12 +403,13 @@ result: pass=問題なし / needs_review=ユーザー確認が必要 / fail=修�
     return json(store.duplicatesFor({ name, model, jan, links: urls }));
   }, { readOnlyHint: true });
 
-  tool('apply_dates', '日付（注文・購入・到着を区別しない1つの日付）を既存商品へ一括反映する。text は「商品名<TAB>URL<TAB>日付…」の行。Amazon ASIN → URL完全一致 → 商品名完全一致(双方で一意の場合のみ) の順で照合し、該当しない行は無視（新規登録しない）。まず dry_run=true で結果を確認してから dry_run=false で反映すること。', {
+  tool('apply_dates', '日付を既存商品へ一括反映する。field で日付の種類を選ぶ（orderDate=注文日・購入日 / arrivalDate=到着日 / itemDate=どちらか分からない日付、既定 itemDate）。text は「商品名<TAB>URL<TAB>日付…」の行（1行の最初の日付を使う）。Amazon ASIN → URL完全一致 → 商品名完全一致(双方で一意の場合のみ) の順で照合し、該当しない行は無視（新規登録しない）。まず dry_run=true で結果を確認してから dry_run=false で反映すること。', {
     text: s.str('貼り付けられた一覧（TSV等）'),
+    field: s.enumOf(['itemDate', 'orderDate', 'arrivalDate'], '反映先の日付（既定 itemDate）'),
     dry_run: s.bool('true=確認のみ（既定）'),
     include_lines: { type: 'array', items: { type: 'integer' }, description: '要確認(ambiguous/conflict)の行のうち、ユーザーが反映を了承した行番号' },
-  }, ['text'], ({ text, dry_run = true, include_lines = [] }) => {
-    const r = importDates(store, actor, { text, dryRun: dry_run, include: include_lines });
+  }, ['text'], ({ text, field = 'itemDate', dry_run = true, include_lines = [] }) => {
+    const r = importDates(store, actor, { text, dryRun: dry_run, include: include_lines, field });
     const brief = r.rows.filter((x) => x.status !== 'same').map(({ line, name, date, status, matchedBy, candidates }) => ({ line, name: name.slice(0, 40), date, status, matchedBy, ids: candidates.map((c) => c.id) }));
     return json({ total: r.total, counts: r.counts, applied: r.applied.length, proposed: r.applied.filter((a) => a.proposed).length, errors: r.errors, rows: brief });
   });

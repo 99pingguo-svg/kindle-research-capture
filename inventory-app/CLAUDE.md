@@ -12,6 +12,8 @@
 - 商品データの読み書きは MCP `shohin-daicho` 経由（`.mcp.json`）。サーバー起動: `npm start`。
 - 手順は `.claude/skills/inventory-ai/SKILL.md`。メルカリ転記は `.claude/skills/mercari-adapter/SKILL.md`。
 - 出品判断は 出品／下書き／保留／出さない／在庫なし（ユーザーのみ）。「下書き」はメルカリへ下書き保存までで公開しない。
+- 日付は 注文日・購入日（`orderDate`）／到着日（`arrivalDate`）／区別しない日付（`itemDate`）。種類は `category`（`server/category.js` の一覧。未設定は商品名から推定）。これらは整理用なので変更しても QC はやり直しにならない（FIELDS の `meta`）。
+- 一覧の絞り込みは 状態チップ＋📅期間＋💴価格帯＋🔍条件（同じ見出しは OR、見出し間は AND）、並び順はキー＋向き。「保存した表示」は設定 `listViews`（ユーザーのみ・全端末共通）。
 - 写真の種類: actual（ユーザー撮影の現物）・generated（注記入りのAI紹介画像。出品用に選べるが現物ではない）・reference（参考。出品不可）。
 - 399商品の取り込み・更新同期は `node scripts/import-399.js`（元フォルダは読むだけ。変化は data/imports/update-ledger に記録）。
 - 出品先は メルカリ／ジモティー／フリマ（`targets`、ユーザーのみ）。出品先ごとの原稿は `override.<出品先>.*` と出品先ごとの写真。各サイトへのアップロードは MCP `channel_package(id, channel)` を正本に読む。

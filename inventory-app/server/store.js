@@ -55,6 +55,9 @@ function newProduct(id, at, settings) {
     conditionNote: '',
     notes: '',
     itemDate: '',
+    orderDate: '',
+    arrivalDate: '',
+    category: '',
     purchaseDate: '',
     purchasePrice: null,
     plannedPrice: null,
@@ -167,6 +170,19 @@ class Ctx {
   }
 }
 
+/** Saved list views: [{ name, view }] — the view is the list's filter/sort prefs, kept as plain data. */
+export function normalizeListViews(v) {
+  if (!Array.isArray(v)) throw new AppError(400, 'listViews は配列で指定してください');
+  if (v.length > 40) throw new AppError(400, '保存できる表示は40件までです');
+  return v.map((x) => {
+    const name = String(x?.name || '').trim().slice(0, 40);
+    if (!name) throw new AppError(400, '表示の名前が空です');
+    const view = x?.view && typeof x.view === 'object' && !Array.isArray(x.view) ? x.view : {};
+    if (JSON.stringify(view).length > 4000) throw new AppError(400, `「${name}」の条件が長すぎます`);
+    return { name, view };
+  });
+}
+
 export class Store extends EventEmitter {
   constructor(dataDir) {
     super();
@@ -225,7 +241,7 @@ export class Store extends EventEmitter {
   updateSettings(patch) {
     for (const [k, v] of Object.entries(patch || {})) {
       if (!(k in DEFAULT_SETTINGS)) throw new AppError(400, `不明な設定: ${k}`);
-      this.meta.settings[k] = v;
+      this.meta.settings[k] = k === 'listViews' ? normalizeListViews(v) : v;
     }
     this.saveMeta();
     this.emit('change', { type: 'settings' });
@@ -389,7 +405,8 @@ export class Store extends EventEmitter {
           if (!same(old, value)) {
             setPath(p, field, value);
             ctx.change(field, old, value);
-            ctx.bump();
+            // 日付・種類などの整理用の項目は出品内容ではないので、QC をやり直させない。
+            if (!def.meta) ctx.bump();
             outcome.set.push(field);
           } else outcome.unchanged.push(field);
           if (lock && value !== '' && value != null && !p.locks[field]) {
@@ -411,7 +428,7 @@ export class Store extends EventEmitter {
         } else if (!same(old, value)) {
           setPath(p, field, value);
           ctx.change(field, old, value);
-          ctx.bump();
+          if (!def.meta) ctx.bump();
           outcome.set.push(field);
         } else outcome.unchanged.push(field);
       }

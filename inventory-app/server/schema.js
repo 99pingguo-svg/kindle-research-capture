@@ -1,5 +1,7 @@
 // Domain constants shared by the server, the MCP tools and (via /api/meta) the UI.
 
+import { CATEGORIES } from './category.js';
+
 /** Workflow stage. Independent from the sell/hold/no-sell decision so toggling "保留" never loses progress. */
 export const STAGES = [
   { id: 'unsorted', label: '未整理' },
@@ -160,7 +162,10 @@ export const IMAGE_QC_CHECK_IDS = QC_CHECKS.filter((c) => c.group === 'image').m
  */
 export const FIELDS = [
   { path: 'name', label: '商品名', type: 'text', group: 'basic' },
-  { path: 'itemDate', label: '日付（注文・購入・到着）', type: 'date', group: 'basic', hint: '注文日・購入日・到着日のどれか（区別しない）' },
+  { path: 'itemDate', label: '日付（どれか・区別しない）', type: 'date', group: 'basic', meta: true, hint: '注文日か到着日か分からない日付。分かるときは下の欄へ' },
+  { path: 'orderDate', label: '注文日・購入日', type: 'date', group: 'basic', meta: true },
+  { path: 'arrivalDate', label: '到着日', type: 'date', group: 'basic', meta: true },
+  { path: 'category', label: '種類', type: 'select', options: CATEGORIES, group: 'basic', meta: true, hint: '未設定なら商品名から推定して一覧に表示' },
   { path: 'brand', label: 'メーカー／ブランド', type: 'text', group: 'basic' },
   { path: 'model', label: '型番', type: 'text', group: 'basic' },
   { path: 'jan', label: 'JAN等', type: 'text', group: 'basic' },
@@ -210,6 +215,8 @@ export const DEFAULT_SETTINGS = {
   aiActorName: 'claude',
   /** Models allowed to perform AI QC (incl. 画像QC). QC from any other model is rejected. */
   imageQcModels: ['claude-opus-5-5'],
+  /** 一覧の「保存した表示」（絞り込み・並び順の組み合わせ）。全端末で共有。 */
+  listViews: [],
 };
 
 /**

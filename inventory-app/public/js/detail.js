@@ -367,7 +367,8 @@ function fieldEl(p, def, { copy = false } = {}) {
   const common = { 'data-path': def.path, onchange: (e) => save(e.target.value) };
   if (def.type === 'textarea') input = h('textarea', { ...common, rows: def.path === 'listing.description' ? 10 : 3 }, value ?? '');
   else if (def.type === 'select') {
-    input = h('select', common, h('option', { value: '' }, '—'), def.options.map((o) => h('option', { value: o, selected: value === o }, o)));
+    const empty = def.path === 'category' && !value && p.summary?.category ? `— 推定: ${p.summary.category}` : '—';
+    input = h('select', common, h('option', { value: '' }, empty), def.options.map((o) => h('option', { value: o, selected: value === o }, o)));
   } else if (def.type === 'date') {
     input = h('input', { ...common, type: 'date', value: value || '' });
   } else input = h('input', { ...common, type: def.type === 'int' ? 'text' : 'text', inputmode: def.type === 'int' ? 'numeric' : undefined, value: value ?? '', placeholder: def.hint || '' });

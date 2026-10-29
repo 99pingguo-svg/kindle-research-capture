@@ -155,7 +155,7 @@ node scripts/import-399.js --dry-run  # 件数だけ確認（何も書かない�
 ## 8. 公式画像・サイズ・送料・メルカリ相場
 
 ```bash
-node scripts/amazon-info.js --add <商品名[TAB]AmazonURL[TAB]日付 のリスト>   # 新商品の登録（ASIN で重複除外）＋取得
+node scripts/amazon-info.js --add <商品名[TAB]AmazonURL[TAB]注文日[TAB]到着日 のリスト>   # 新商品の登録（ASIN で重複除外）＋取得
 node scripts/amazon-info.js                                                    # まだ取得していない商品だけ取得
 node scripts/amazon-info.js --refresh --ids 0402,0403                          # 取り直し
 ```

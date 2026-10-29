@@ -184,7 +184,11 @@ export function showImport() {
       parsed.items.map((it, i) => h('label', { class: 'preview-row' },
         h('input', { type: 'checkbox', checked: !skip.has(i), onchange: (e) => (e.target.checked ? skip.delete(i) : skip.add(i)) }),
         h('div', null,
-          h('div', null, it.itemDate && h('strong', null, `${fmtDay(it.itemDate)} `), it.name || h('span', { class: 'muted' }, '（名称なし・AIがURLから特定）')),
+          h('div', null,
+            it.orderDate && h('strong', null, `注文 ${fmtDay(it.orderDate)} `),
+            it.arrivalDate && h('strong', null, `到着 ${fmtDay(it.arrivalDate)} `),
+            it.itemDate && h('strong', null, `${fmtDay(it.itemDate)} `),
+            it.name || h('span', { class: 'muted' }, '（名称なし・AIがURLから特定）')),
           it.links.map((l) => h('div', { class: 'small muted', style: { wordBreak: 'break-all' } }, l)),
           it.duplicates.map((d) => h('div', { class: 'small', style: { color: 'var(--warn)' } }, `⚠ #${d.id} ${d.name} と重複の可能性（${d.reasons.join('・')}）`))))),
       h('div', { class: 'row-actions' },
@@ -275,13 +279,19 @@ const DATE_STATUS = {
 
 /** 日付の一括反映: paste "商品名 / URL / 日付…" lines; only existing products are updated. */
 export function showDateImport() {
-  const ta = h('textarea', { class: 'import', placeholder: '商品名<TAB>URL<TAB>日付 … の一覧をそのまま貼り付け\n（注文・購入・到着のどの列の日付でも OK。1行の最初の日付を使います）' });
+  const ta = h('textarea', { class: 'import', placeholder: '商品名<TAB>URL<TAB>日付 … の一覧をそのまま貼り付け\n（1行の最初の日付を使います）' });
   const preview = h('div');
   let plan = null;
+  // Which date this list carries. Changing it re-checks against that date.
+  let field = 'orderDate';
+  const kinds = [['orderDate', '注文日・購入日'], ['arrivalDate', '到着日'], ['itemDate', 'どちらか分からない']];
+  const kindSeg = h('div', { class: 'seg wide', style: { margin: '8px 0' } });
+  const renderKind = () => clear(kindSeg).append(...kinds.map(([f, l]) => h('button', { class: f === field ? 'on' : '', onclick: () => { field = f; renderKind(); if (plan) run(true); } }, l)));
+  renderKind();
   const include = new Set();
   const run = async (dryRun) => {
     try {
-      const r = await api.post('/api/dates/import', { text: ta.value, dryRun, include: [...include] });
+      const r = await api.post('/api/dates/import', { text: ta.value, dryRun, include: [...include], field });
       if (dryRun) {
         plan = r;
         include.clear();
@@ -335,7 +345,9 @@ export function showDateImport() {
   };
   frame('日付を一括反映',
     h('div', { class: 'card' },
-      h('p', { class: 'small', style: { marginTop: 0 } }, '既存の商品にだけ日付（注文・購入・到着のいずれか）を付けます。一覧にあっても台帳に無い商品は無視され、新しく登録されることはありません。'),
+      h('p', { class: 'small', style: { marginTop: 0 } }, '既存の商品にだけ日付を付けます。一覧にあっても台帳に無い商品は無視され、新しく登録されることはありません。'),
+      h('div', { class: 'small', style: { fontWeight: 700 } }, 'この一覧の日付は'),
+      kindSeg,
       ta,
       h('button', { class: 'btn primary', style: { marginTop: '10px' }, onclick: () => run(true) }, '確認する（まだ反映しません）')),
     preview);

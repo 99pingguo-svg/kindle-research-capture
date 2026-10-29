@@ -90,6 +90,27 @@ test('name fallback only when unique; ambiguous rows need explicit opt-in', () =
 });
 
 test('product list import also picks up the date and keeps it out of the name', () => {
+  // Browser export columns: 商品名 / リンク / 注文日 / 到着日 / ラベルなしの日付.
   const items = parseImport('Nintendo Switch 2(日本語・国内専用)\thttps://www.amazon.co.jp/dp/B0DX1BC3R8\t2026-04-22\t\t');
-  assert.deepEqual(items, [{ name: 'Nintendo Switch 2(日本語・国内専用)', links: ['https://www.amazon.co.jp/dp/B0DX1BC3R8'], itemDate: '2026-04-22' }]);
+  assert.deepEqual(items, [{ name: 'Nintendo Switch 2(日本語・国内専用)', links: ['https://www.amazon.co.jp/dp/B0DX1BC3R8'], orderDate: '2026-04-22' }]);
+  const [both] = parseImport('A\thttps://www.amazon.co.jp/dp/B0DX1BC3R8\t2026-04-22\t2026-04-25\t');
+  assert.equal(both.orderDate, '2026-04-22');
+  assert.equal(both.arrivalDate, '2026-04-25');
+  const [plain] = parseImport('Sony WH-1000XM4 2026/9/23 https://c.example');
+  assert.equal(plain.itemDate, '2026-09-23');
+});
+
+test('date import: browser exports fill 注文日 / 到着日 from their own columns', () => {
+  const store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-dates-kind-')));
+  const { product } = store.create({ name: 'X' }, 'user', { links: ['https://www.amazon.co.jp/dp/B0HB31SVLH'] });
+  const text = `X${T}https://www.amazon.co.jp/dp/B0HB31SVLH${T}2026-10-01${T}2026-10-04${T}`;
+  importDates(store, 'user', { text, dryRun: false, field: 'arrivalDate' });
+  importDates(store, 'user', { text, dryRun: false, field: 'orderDate' });
+  const p = store.get(product.id);
+  assert.equal(p.orderDate, '2026-10-01');
+  assert.equal(p.arrivalDate, '2026-10-04');
+  assert.equal(p.itemDate, '');
+  // Only an arrival date in the export: nothing to give 注文日.
+  const r = importDates(store, 'user', { text: `X${T}https://www.amazon.co.jp/dp/B0HB31SVLH${T}${T}2026-10-09${T}`, dryRun: true, field: 'orderDate' });
+  assert.equal(r.rows[0].status, 'nodate');
 });

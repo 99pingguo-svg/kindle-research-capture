@@ -14,18 +14,28 @@ export function asinOf(url) {
   return m ? m[1].toUpperCase() : null;
 }
 
-/** One line → { name, urls, asins, date, dates }. Shared with the product list import. */
+/**
+ * One line → { name, urls, asins, date, dates, ordered?, delivered? }. Shared with the product list import.
+ * The observation browser's export is positional (商品名 / リンク / 注文日 / 到着日 / ラベルなしの日付, tab separated),
+ * so for those lines the order and delivery columns are kept apart.
+ */
 export function parseLine(raw) {
   const line = String(raw).replace(/^\s*(?:[-*・]|\d+[.)])\s+/, '').trim();
   const urls = line.match(URL_RE) || [];
   const dates = [...line.matchAll(DATE_RE)].map((m) => normalizeDate(m[0])).filter(Boolean);
+  const cols = String(raw).split('\t').map((c) => c.trim());
+  const positional = cols.length >= 4 && /^https?:\/\//.test(cols[1] || '');
+  const col = (i) => (cols[i] ? normalizeDate(cols[i]) : null);
   const name = line
     .replace(URL_RE, ' ')
     .replace(DATE_RE, ' ')
     .replace(/[\t|,]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  return { name, urls, asins: [...new Set(urls.map(asinOf).filter(Boolean))], date: dates[0] || null, dates };
+  return {
+    name, urls, asins: [...new Set(urls.map(asinOf).filter(Boolean))], date: dates[0] || null, dates,
+    ...(positional ? { positional: true, ordered: col(2), delivered: col(3) } : {}),
+  };
 }
 
 export function parseDateRows(text) {
@@ -51,7 +61,12 @@ const pushTo = (map, key, p) => {
  *  nodate (row has no date) / ambiguous (several products) / conflict (another row
  *  already gives this product a different date).
  */
-export function planDates(products, rows) {
+export const DATE_FIELDS = { itemDate: '日付（区別しない）', orderDate: '注文日・購入日', arrivalDate: '到着日' };
+
+/** The date a row gives for `field`: browser exports use their 注文日 / 到着日 columns, other lines their first date. */
+const rowDate = (r, field) => (r.positional && field === 'orderDate' ? r.ordered : r.positional && field === 'arrivalDate' ? r.delivered : r.date);
+
+export function planDates(products, rows, field = 'itemDate') {
   const byAsin = new Map();
   const byUrl = new Map();
   const byName = new Map();
@@ -67,7 +82,8 @@ export function planDates(products, rows) {
   for (const r of rows) rowNames.set(norm(r.name), (rowNames.get(norm(r.name)) || 0) + 1);
 
   const claimed = new Map(); // productId -> first row date
-  return rows.map((r) => {
+  return rows.map((row) => {
+    const r = { ...row, date: rowDate(row, field) };
     const base = { line: r.line, name: r.name, urls: r.urls, date: r.date };
     let cands = [];
     let matchedBy = '';
@@ -83,14 +99,14 @@ export function planDates(products, rows) {
       matchedBy = '商品名';
     }
     cands = [...new Set(cands)];
-    const candidates = cands.map((p) => ({ id: p.id, name: p.name, itemDate: p.itemDate || null }));
+    const candidates = cands.map((p) => ({ id: p.id, name: p.name, itemDate: p[field] || null }));
     if (!cands.length) return { ...base, status: 'nomatch', matchedBy, candidates };
     if (!r.date) return { ...base, status: 'nodate', matchedBy, candidates };
     if (cands.length > 1) return { ...base, status: 'ambiguous', matchedBy, candidates };
     const p = cands[0];
     if (claimed.has(p.id) && claimed.get(p.id) !== r.date) return { ...base, status: 'conflict', matchedBy, candidates };
     claimed.set(p.id, r.date);
-    const status = p.itemDate === r.date ? 'same' : p.itemDate ? 'change' : 'set';
+    const status = p[field] === r.date ? 'same' : p[field] ? 'change' : 'set';
     return { ...base, status, matchedBy, candidates };
   });
 }
@@ -99,8 +115,9 @@ export function planDates(products, rows) {
  * Plan and (unless dryRun) apply. `include` = line numbers of ambiguous/conflict rows
  * the user explicitly ticked; those are applied to all their candidates.
  */
-export function importDates(store, actor, { text, dryRun = true, include = [] }) {
-  const plan = planDates(store.list(), parseDateRows(text));
+export function importDates(store, actor, { text, dryRun = true, include = [], field = 'itemDate' }) {
+  if (!DATE_FIELDS[field]) throw new Error(`日付の種類が不正です: ${field}`);
+  const plan = planDates(store.list(), parseDateRows(text), field);
   const forced = new Set(include.map(Number));
   const counts = {};
   for (const r of plan) counts[r.status] = (counts[r.status] || 0) + 1;
@@ -112,7 +129,7 @@ export function importDates(store, actor, { text, dryRun = true, include = [] })
       if (!go) continue;
       for (const c of r.candidates) {
         try {
-          const res = store.updateFields(c.id, actor, { itemDate: r.date }, { reason: '日付の一括反映' });
+          const res = store.updateFields(c.id, actor, { [field]: r.date }, { reason: `${DATE_FIELDS[field]}の一括反映` });
           applied.push({ id: c.id, date: r.date, proposed: res.proposed.length > 0 });
         } catch (e) {
           errors.push({ id: c.id, line: r.line, error: e.message });

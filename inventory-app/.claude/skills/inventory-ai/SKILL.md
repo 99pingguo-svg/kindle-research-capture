@@ -38,8 +38,9 @@ for each task (古い順):
   finish_ai_task(id, task_id, status, message="型番特定・原稿作成・QC PASS" など短く)
 ```
 
-日付（注文・購入・到着を区別しない1つの日付 `itemDate`）で探すときは `list_products(date_from, date_to, sort=date_desc)`。
-ユーザーが「商品名 / URL / 日付」の一覧を渡して日付を付けたいと言ったら `apply_dates`（まず dry_run=true で結果を見せ、了承後に dry_run=false。該当なしの行は無視し、新規登録しない）。
+日付は3つ: `orderDate`（注文日・購入日）・`arrivalDate`（到着日）・`itemDate`（どちらか分からない日付）。一覧の代表日付は itemDate→注文日→到着日 の最初のもの。探すときは `list_products(date_kind, date_from, date_to, sort=order_desc 等)`。
+ユーザーが「商品名 / URL / 日付」の一覧を渡して日付を付けたいと言ったら `apply_dates`（`field` に注文日か到着日かを指定。分からなければ聞く。まず dry_run=true で結果を見せ、了承後に dry_run=false。該当なしの行は無視し、新規登録しない）。観察ブラウザの書き出し（商品名/リンク/注文日/到着日/ラベルなし）は列どおりに読む。
+種類 `category` は `get_reference_data` の categories から選ぶ（未設定は商品名から推定して表示される）。新しく登録した商品には付けておく。
 
 「今日撮った商品を全部」と言われたら `list_products(filter=shot_today)` とキューの両方を対象にする。
 

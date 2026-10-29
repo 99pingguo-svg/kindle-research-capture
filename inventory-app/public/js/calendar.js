@@ -1,4 +1,4 @@
-// Date range picker for the list (日付＝注文・購入・到着のいずれか).
+// Date range picker for the list (代表の日付・注文日・到着日のどれか1つで絞る).
 // Tap a day = start, tap another = end. Tap the month title = whole month.
 // Each day shows how many products have that date, so the busy days are visible at a glance.
 import { h, clear, sheet } from './ui.js';
@@ -24,8 +24,8 @@ export function fmtDay(s, { weekday = true } = {}) {
   return `${y}${d.getMonth() + 1}/${d.getDate()}${weekday ? `(${WD[d.getDay()]})` : ''}`;
 }
 
-export function rangeLabel({ dateFrom, dateTo, dateNone }) {
-  if (dateNone) return '日付なし';
+export function rangeLabel({ dateFrom, dateTo, dateNone }, label = '日付') {
+  if (dateNone) return `${label}なし`;
   if (!dateFrom && !dateTo) return '全期間';
   if (dateFrom && dateTo && dateFrom === dateTo) return fmtDay(dateFrom);
   return `${fmtDay(dateFrom, { weekday: false }) || '…'} 〜 ${fmtDay(dateTo, { weekday: false }) || '…'}`;
@@ -50,17 +50,18 @@ function presets() {
  * products: summaries (used for per-day counts). Resolves to
  * { dateFrom, dateTo, dateNone } or undefined when cancelled.
  */
-export function pickDateRange({ dateFrom = '', dateTo = '', dateNone = false }, products) {
+export function pickDateRange({ dateFrom = '', dateTo = '', dateNone = false }, products, { field = 'itemDate', label = '日付', kinds = [], onKind } = {}) {
   const counts = new Map();
   let undated = 0;
   let latest = '';
   for (const p of products) {
-    if (!p.itemDate) {
+    const v = p[field];
+    if (!v) {
       undated++;
       continue;
     }
-    counts.set(p.itemDate, (counts.get(p.itemDate) || 0) + 1);
-    if (p.itemDate > latest) latest = p.itemDate;
+    counts.set(v, (counts.get(v) || 0) + 1);
+    if (v > latest) latest = v;
   }
   let start = dateNone ? '' : dateFrom;
   let end = dateNone ? '' : dateTo;
@@ -130,10 +131,13 @@ export function pickDateRange({ dateFrom = '', dateTo = '', dateNone = false }, 
     render();
     const apply = (v) => close(v);
     return h('div', { class: 'cal' },
-      h('h2', null, '📅 日付で絞り込み', h('span', { class: 'muted small', style: { fontWeight: 'normal', marginLeft: '8px' } }, '注文・購入・到着')),
+      h('h2', null, `📅 ${label}で絞り込み`),
+      // Which date the range applies to (代表の日付 / 注文日 / 到着日). Switching keeps the sheet's choice for next time.
+      kinds.length > 1 && h('div', { class: 'seg wide', style: { margin: '0 0 8px' } },
+        kinds.map((k) => h('button', { class: k.field === field ? 'on' : '', onclick: () => { close(); onKind?.(k.field); } }, k.label))),
       h('div', { class: 'cal-presets' },
         presets().map((p) => h('button', { class: 'chip', onclick: () => apply({ dateFrom: p.from, dateTo: p.to, dateNone: false }) }, p.label)),
-        h('button', { class: 'chip', onclick: () => apply({ dateFrom: '', dateTo: '', dateNone: true }) }, `日付なし ${undated}`),
+        h('button', { class: 'chip', onclick: () => apply({ dateFrom: '', dateTo: '', dateNone: true }) }, `${label}なし ${undated}`),
         h('button', { class: 'chip', onclick: () => apply({ dateFrom: '', dateTo: '', dateNone: false }) }, 'すべて')),
       grid,
       summary,

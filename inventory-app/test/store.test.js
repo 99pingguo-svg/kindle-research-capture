@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../server/store.js';
-import { readiness, lint, bulkPrice } from '../server/rules.js';
+import { readiness, lint, bulkPrice, summary } from '../server/rules.js';
+import { guessCategory } from '../server/category.js';
 import * as mercari from '../server/adapters/mercari.js';
 import * as channels from '../server/channels.js';
 import { IMAGE_QC_CHECK_IDS } from '../server/schema.js';
@@ -550,4 +551,34 @@ test('size estimate fills in only when Amazon lists no size', async () => {
   // A real Amazon size wins over the estimate.
   assert.equal(shippingOf({ package: { dims: [40, 30, 20], kg: 2 } }, p.sizeEstimate).dims.source, 'package');
   assert.throws(() => store.setSizeEstimate(product.id, 'claude', { dims: [10, 10] }), /3つ/);
+});
+
+test('dates and 種類: representative date, guessed category, no QC re-run for these fields', async () => {
+  const store = new Store(tmp());
+  const { product } = store.create({ name: 'iPhone 17 Pro 用 MagSafe クリアケース' });
+  const id = product.id;
+  let sm = summary(store.get(id), store.settings);
+  assert.equal(sm.itemDate, null);
+  assert.equal(sm.category, 'スマホ・タブレット用品');
+  assert.equal(sm.categoryGuessed, true);
+  const rev = store.get(id).rev;
+  store.updateFields(id, 'claude', { arrivalDate: '2026-10-28', orderDate: '2026-10-20', category: 'PC・家電・AV周辺' });
+  assert.equal(store.get(id).rev, rev);
+  sm = summary(store.get(id), store.settings);
+  assert.equal(sm.itemDate, '2026-10-20'); // 注文日 before 到着日 when no undistinguished date
+  assert.equal(sm.arrivalDate, '2026-10-28');
+  assert.equal(sm.category, 'PC・家電・AV周辺');
+  assert.equal(sm.categoryGuessed, false);
+  assert.throws(() => store.updateFields(id, 'user', { category: 'なんでも' }), /種類の値が不正/);
+  assert.equal(guessCategory('AppleWatch用ハロウィーン柄スポーツバンド'), 'スマートウォッチ用品');
+  assert.equal(guessCategory('ブラザー用LC3119互換インク（ブラック）'), 'PC・家電・AV周辺');
+  assert.equal(guessCategory('韓国eSIM（無制限・30日間）'), 'eSIM・SIM（海外通信）');
+});
+
+test('saved list views are validated and kept in settings', async () => {
+  const store = new Store(tmp());
+  const s = store.updateSettings({ listViews: [{ name: ' 注文が新しい順 ', view: { sort: 'order', desc: true, conds: ['cat:食品・飲料'] } }] });
+  assert.deepEqual(s.listViews, [{ name: '注文が新しい順', view: { sort: 'order', desc: true, conds: ['cat:食品・飲料'] } }]);
+  assert.throws(() => store.updateSettings({ listViews: [{ name: '', view: {} }] }), /名前が空/);
+  assert.throws(() => store.updateSettings({ listViews: 'x' }), /配列/);
 });
