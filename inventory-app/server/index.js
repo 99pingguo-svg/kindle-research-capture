@@ -673,13 +673,13 @@ export function parseImport(text) {
   return items;
 }
 
-/** Keep small, frequent backups of everything except photo binaries (photos are append-only). */
+/** Keep small, frequent backups of everything except photo binaries (photos are append-only) and the re-downloadable market-scan thumbnails. */
 export function backupMetadata(dataDir, { keep = 30 } = {}) {
   const dir = path.join(dataDir, 'backups');
   fs.mkdirSync(dir, { recursive: true });
   const out = path.join(dir, `metadata-${stamp()}.tar.gz`);
   return new Promise((resolve) => {
-    const tar = spawn('tar', ['-czf', out, '--exclude=./backups', '--exclude=./outbox', '--exclude=*/photos', '--exclude=*/versions', '-C', dataDir, '.'], { stdio: 'ignore' });
+    const tar = spawn('tar', ['-czf', out, '--exclude=./backups', '--exclude=./outbox', '--exclude=*/photos', '--exclude=*/versions', '--exclude=./imports/*-scan/img', '-C', dataDir, '.'], { stdio: 'ignore' });
     tar.on('error', () => resolve(null));
     tar.on('close', (code) => {
       const files = fs.readdirSync(dir).filter((f) => f.startsWith('metadata-')).sort();

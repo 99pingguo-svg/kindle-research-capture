@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node --test test/*.test.js",
+    "test": "sh -c 'd=$(mktemp -d -t daicho-test); TMPDIR=$d node --test test/*.test.js; s=$?; rm -rf \"$d\"; exit $s'",
     "mcp:stdio": "node bin/mcp-stdio.js",
     "backup": "node scripts/backup.js",
     "demo": "node scripts/seed-demo.js",
