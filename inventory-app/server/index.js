@@ -180,6 +180,24 @@ export function createApp({ dataDir, token = '' } = {}) {
     return shootInfo();
   });
   route('DELETE', '/api/native-shoot', ({ actor }) => store.clearNativeShoot(actor) ?? { active: false });
+  // The two iPhone shortcuts as signed files (the send one carries the upload key). Opened from the app on the iPhone.
+  route('GET', '/api/native-shoot/shortcut/:which', async ({ params, req, res }) => {
+    const name = { camera: '台帳カメラ', send: '台帳に送る' }[params.which];
+    if (!name) throw new AppError(404, 'not found');
+    const host = String(req.headers['x-forwarded-host'] || req.headers.host || '');
+    if (!/^[a-z0-9.:-]+$/i.test(host)) throw new AppError(400, 'ホスト名が不正です');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-shortcut-'));
+    try {
+      await new Promise((resolve, reject) => execFile('python3', [path.join(ROOT, 'tools', 'make_shortcuts.py'), dir, `https://${host}`, store.uploadKey()], { timeout: 120000 }, (e) => (e ? reject(e) : resolve())));
+      const file = path.join(dir, `${name}.shortcut`);
+      if (!fs.existsSync(file)) throw new AppError(500, 'ショートカットの署名に失敗しました');
+      const buf = fs.readFileSync(file);
+      res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': buf.length, 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}.shortcut`, 'cache-control': 'no-store' });
+      res.end(buf);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
   route('GET', '/api/native-shoot/key', ({ actor, query }) => {
     if (!isUser(actor)) throw new AppError(403, 'ユーザーのみ');
     return { key: store.uploadKey({ rotate: query.rotate === '1' }) };
@@ -192,7 +210,9 @@ export function createApp({ dataDir, token = '' } = {}) {
     if (buf.length < 1000) throw new AppError(400, '画像データがありません');
     const digest = createHash('sha256').update(buf).digest('hex').slice(0, 32);
     const files = await nativeVariants(buf);
-    const { photo, duplicate } = store.addPhoto(ns.productId, 'user', { kind: 'actual', source: 'native', clientId: `native:${digest}`, width: files.width, height: files.height }, files);
+    // The shortcut sends the latest photos; only those taken after the shoot started belong to this product.
+    if (files.takenAt && files.takenAt < new Date(Date.parse(ns.since) - 60_000)) return { ok: true, skipped: '撮影開始より前の写真' };
+    const { photo, duplicate } = store.addPhoto(ns.productId, 'user', { kind: 'actual', source: 'native', clientId: `native:${digest}`, width: files.width, height: files.height, takenAt: files.takenAt?.toISOString() || null }, files);
     if (!duplicate) studio.enqueue(ns.productId, photo);
     return { ok: true, productId: ns.productId, photoId: photo.id, duplicate };
   });
@@ -515,7 +535,7 @@ async function nativeVariants(buf) {
   try {
     const src = path.join(dir, 'in');
     fs.writeFileSync(src, buf);
-    const info = await run(['-g', 'pixelWidth', '-g', 'pixelHeight', '-g', 'format', src]).catch(() => '');
+    const info = await run(['-g', 'pixelWidth', '-g', 'pixelHeight', '-g', 'format', '-g', 'creation', src]).catch(() => '');
     const num = (k) => Number(new RegExp(`${k}: (\\d+)`).exec(info)?.[1]) || null;
     const fmt = /format: (\w+)/.exec(info)?.[1] || '';
     if (!/jpeg|heic|heif|png|tiff/i.test(fmt)) throw new AppError(400, `画像として読めません（${fmt || '不明な形式'}）`);
@@ -531,6 +551,11 @@ async function nativeVariants(buf) {
       thumb: { buffer: await mk(400, 'thumb.jpg', 82), mime: 'image/jpeg' },
       width: num('pixelWidth'),
       height: num('pixelHeight'),
+      // EXIF date taken ("2026:10:29 18:49:44", the phone's local time) → Date, or null.
+      takenAt: (() => {
+        const m = /creation: (\d{4}):(\d\d):(\d\d) (\d\d):(\d\d):(\d\d)/.exec(info);
+        return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : null;
+      })(),
     };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
