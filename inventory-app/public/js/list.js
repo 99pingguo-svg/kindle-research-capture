@@ -9,6 +9,7 @@ import {
 import { pickDateRange, rangeLabel, fmtDay } from './calendar.js';
 import { openCamera } from './camera.js';
 import * as uploads from './uploads.js';
+import { openNativeSetup } from './native.js';
 
 let els = null;
 
@@ -872,6 +873,7 @@ async function mainMenu() {
     { label: '📋 商品リストを一括登録', value: '#/import' },
     { label: '📅 日付を一括反映（既存商品）', value: '#/dates' },
     { label: '🖼 公式画像を ZIP でダウンロード', value: 'official' },
+    { label: '📸 純正カメラ連携の設定', value: 'native' },
     { label: '⚙️ 設定・AI接続・書き出し', value: '#/settings' },
     { label: '↻ 再読み込み', value: 'reload' },
   ]);
@@ -879,6 +881,7 @@ async function mainMenu() {
     await loadAll().catch(showError);
     toast('更新しました');
   } else if (v === 'official') openOfficialZip();
+  else if (v === 'native') openNativeSetup();
   else if (v) location.hash = v;
 }
 

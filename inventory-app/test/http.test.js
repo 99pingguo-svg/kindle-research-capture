@@ -167,3 +167,52 @@ test('token: LAN door requires it, Mac-only trusted door does not', async () => 
     for (const s of [lan, local]) { s.closeAllConnections(); s.close(); }
   }
 });
+
+/** A noisy 80×60 PNG (big enough to look like a photo to the server). */
+async function noisePng() {
+  const { deflateSync } = await import('node:zlib');
+  const w = 80;
+  const hgt = 60;
+  const raw = Buffer.alloc((w * 3 + 1) * hgt);
+  for (let i = 0; i < raw.length; i++) raw[i] = i % (w * 3 + 1) === 0 ? 0 : (i * 2654435761) >>> 24;
+  const crc = (buf) => { let c = ~0; for (const b of buf) { c ^= b; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; } return ~c >>> 0; };
+  const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([len, td, c]); };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(hgt, 4); ihdr[8] = 8; ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+test('native camera: the shortcut key can only read the target and send photos to it', async () => {
+  const app = createApp({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-native-')), token: 'secret-123' });
+  const lan = http.createServer(app.handler);
+  const local = http.createServer(app.trustedHandler);
+  await Promise.all([lan, local].map((s) => new Promise((r) => s.listen(0, '127.0.0.1', r))));
+  const at = (s, p, init = {}) => fetch(`http://127.0.0.1:${s.address().port}${p}`, init);
+  const user = { 'content-type': 'application/json', 'x-actor': 'user' };
+  try {
+    const { product } = app.store.create({ name: 'テスト商品' }, 'user');
+    // Only the user can start a shoot; the AI cannot.
+    assert.equal((await at(local, '/api/native-shoot', { method: 'PUT', headers: { ...user, 'x-actor': 'claude' }, body: JSON.stringify({ productId: product.id }) })).status, 403);
+    assert.equal((await (await at(local, '/api/native-shoot', { method: 'PUT', headers: user, body: JSON.stringify({ productId: product.id }) })).json()).productId, product.id);
+    const { key } = await (await at(local, '/api/native-shoot/key', { headers: user })).json();
+    assert.ok(key.length > 20);
+    const k = { 'x-upload-key': key };
+    assert.equal((await (await at(lan, '/api/native-shoot', { headers: k })).json()).name, 'テスト商品');
+    assert.equal((await at(lan, '/api/native-shoot', { headers: { 'x-upload-key': 'wrong' } })).status, 401);
+    assert.equal((await at(lan, '/api/products', { headers: k })).status, 401); // nothing else
+    const png = await noisePng();
+    const r = await (await at(lan, '/api/native-shoot/photos', { method: 'POST', headers: { ...k, 'content-type': 'image/png' }, body: png })).json();
+    assert.equal(r.productId, product.id);
+    const again = await (await at(lan, '/api/native-shoot/photos', { method: 'POST', headers: { ...k, 'content-type': 'image/png' }, body: png })).json();
+    assert.equal(again.duplicate, true);
+    const ph = app.store.get(product.id).photos.filter((x) => !x.deletedAt);
+    assert.equal(ph.length, 1);
+    assert.equal(ph[0].source, 'native');
+    assert.match(ph[0].files.work, /\.work\.jpg$/);
+    assert.match(ph[0].files.thumb, /\.thumb\.jpg$/);
+    // After the shoot ends, photos are refused.
+    await at(local, '/api/native-shoot', { method: 'DELETE', headers: user });
+    assert.equal((await at(lan, '/api/native-shoot/photos', { method: 'POST', headers: k, body: png })).status, 409);
+  } finally {
+    for (const s of [lan, local]) { s.closeAllConnections(); s.close(); }
+  }
+});

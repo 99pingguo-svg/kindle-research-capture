@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import zlib from 'node:zlib';
-import { X509Certificate, timingSafeEqual } from 'node:crypto';
+import { X509Certificate, timingSafeEqual, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Store, isUser } from './store.js';
 import { shippingMeta } from './shipping.js';
@@ -155,6 +155,38 @@ export function createApp({ dataDir, token = '' } = {}) {
     }
     const { photo, duplicate } = store.addPhoto(params.id, actor, { ...fields, edit, replaceInListing: fields.replaceInListing === 'true' }, files);
     return { photo, duplicate, product: sm(store.get(params.id)) };
+  });
+  // ---- 純正カメラ連携: アプリで撮影対象を決め → iPhone の「カメラ」で撮影 → ショートカットが撮った写真を送る ----
+  const shootInfo = () => {
+    const ns = store.nativeShoot;
+    if (!ns) return { active: false };
+    const p = store.get(ns.productId);
+    // sinceLocal: the Mac's local time as "2026/10/29 18:30:05", which the Shortcuts app reads reliably as a date.
+    const d = new Date(ns.since);
+    const pad = (n) => String(n).padStart(2, '0');
+    const sinceLocal = `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    return { active: true, productId: p.id, name: p.name, since: ns.since, sinceLocal, photos: p.photos.filter((x) => !x.deletedAt && x.source === 'native' && x.createdAt >= ns.at).length };
+  };
+  route('GET', '/api/native-shoot', () => shootInfo());
+  route('PUT', '/api/native-shoot', ({ body, actor }) => {
+    store.setNativeShoot(actor, String(body?.productId || ''));
+    return shootInfo();
+  });
+  route('DELETE', '/api/native-shoot', ({ actor }) => store.clearNativeShoot(actor) ?? { active: false });
+  route('GET', '/api/native-shoot/key', ({ actor, query }) => {
+    if (!isUser(actor)) throw new AppError(403, 'ユーザーのみ');
+    return { key: store.uploadKey({ rotate: query.rotate === '1' }) };
+  });
+  // Body = the photo itself (JPEG / HEIC / PNG). Display and list sizes are made here with sips.
+  route('POST', '/api/native-shoot/photos', async ({ req }) => {
+    const ns = store.nativeShoot;
+    if (!ns) throw new AppError(409, '撮影中の商品がありません（アプリで「純正カメラで撮る」を押してから送ってください）');
+    const buf = await readBody(req, 60 * 1024 * 1024);
+    if (buf.length < 1000) throw new AppError(400, '画像データがありません');
+    const digest = createHash('sha256').update(buf).digest('hex').slice(0, 32);
+    const files = await nativeVariants(buf);
+    const { photo, duplicate } = store.addPhoto(ns.productId, 'user', { kind: 'actual', source: 'native', clientId: `native:${digest}`, width: files.width, height: files.height }, files);
+    return { ok: true, productId: ns.productId, photoId: photo.id, duplicate };
   });
   route('PATCH', '/api/products/:id/photos/:pid', ({ params, body, actor }) => full(store.updatePhoto(params.id, actor, params.pid, body)));
   route('DELETE', '/api/products/:id/photos/:pid', ({ params, actor }) => full(store.deletePhoto(params.id, actor, params.pid)));
@@ -358,8 +390,17 @@ export function createApp({ dataDir, token = '' } = {}) {
     return b.length === tokenBuf.length && timingSafeEqual(b, tokenBuf);
   };
 
+  // The iPhone shortcut's key opens only these two doors (read the target, send photos to it).
+  const isUploadKeyRequest = (req, url) => {
+    if (!(url.pathname === '/api/native-shoot' && req.method === 'GET') && !(url.pathname === '/api/native-shoot/photos' && req.method === 'POST')) return false;
+    const k = String(req.headers['x-upload-key'] || '');
+    const want = store.meta.uploadKey;
+    return !!want && k.length === want.length && timingSafeEqual(Buffer.from(k), Buffer.from(want));
+  };
+
   function authorized(req, url) {
     if (!token || trustedRequests.has(req)) return true;
+    if (isUploadKeyRequest(req, url)) return true;
     const cookie = /(?:^|;\s*)inv_token=([^;]+)/.exec(req.headers.cookie || '')?.[1];
     const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '')?.[1];
     return isToken(cookie) || isToken(bearer) || isToken(url.searchParams.get('token'));
@@ -391,7 +432,9 @@ export function createApp({ dataDir, token = '' } = {}) {
         const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
         let body;
         const isMultipart = (req.headers['content-type'] || '').startsWith('multipart/');
-        if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !isMultipart) {
+        // Raw photos (from the iPhone shortcut) are read by their route, not as JSON.
+        const isRaw = url.pathname === '/api/native-shoot/photos';
+        if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !isMultipart && !isRaw) {
           const raw = await readBody(req, 2 * 1024 * 1024);
           body = raw.length ? JSON.parse(raw.toString('utf8')) : {};
         }
@@ -455,6 +498,35 @@ function serveDataFile(req, res, dataDir, rel) {
   }
   if (!fs.existsSync(file)) throw new AppError(404, 'not found');
   pipeFile(res, file, headers);
+}
+
+/** A photo sent as-is from the iPhone: keep the original, make the 2048px work copy and the 400px thumb (JPEG) with sips. */
+async function nativeVariants(buf) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-native-'));
+  const run = (args) => new Promise((resolve, reject) => execFile('sips', args, { timeout: 60000 }, (e, out) => (e ? reject(e) : resolve(String(out)))));
+  try {
+    const src = path.join(dir, 'in');
+    fs.writeFileSync(src, buf);
+    const info = await run(['-g', 'pixelWidth', '-g', 'pixelHeight', '-g', 'format', src]).catch(() => '');
+    const num = (k) => Number(new RegExp(`${k}: (\\d+)`).exec(info)?.[1]) || null;
+    const fmt = /format: (\w+)/.exec(info)?.[1] || '';
+    if (!/jpeg|heic|heif|png|tiff/i.test(fmt)) throw new AppError(400, `画像として読めません（${fmt || '不明な形式'}）`);
+    const mk = async (edge, name, q) => {
+      const out = path.join(dir, name);
+      await run(['-s', 'format', 'jpeg', '-s', 'formatOptions', String(q), '-Z', String(edge), src, '--out', out]);
+      return fs.readFileSync(out);
+    };
+    const mime = /heic|heif/i.test(fmt) ? 'image/heic' : /png/i.test(fmt) ? 'image/png' : 'image/jpeg';
+    return {
+      original: { buffer: buf, mime },
+      work: { buffer: await mk(2048, 'work.jpg', 86), mime: 'image/jpeg' },
+      thumb: { buffer: await mk(400, 'thumb.jpg', 82), mime: 'image/jpeg' },
+      width: num('pixelWidth'),
+      height: num('pixelHeight'),
+    };
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 // 256px on the long side: sharp at 3x for the 72px list thumbnail, about a third of the 400px thumb.

@@ -250,6 +250,39 @@ export class Store extends EventEmitter {
     return this.meta.settings;
   }
 
+  // ---------- 純正カメラ連携（iPhone のショートカットから写真を受け取る） ----------
+
+  /** Which product photos from the native Camera app go to, and since when they count. */
+  get nativeShoot() {
+    return this.meta.nativeShoot || null;
+  }
+
+  setNativeShoot(actor, productId) {
+    forbidAi(actor, '純正カメラの撮影対象の設定');
+    const p = this.get(productId);
+    // A few seconds of slack: the Camera app may already have been open when the button was tapped.
+    this.meta.nativeShoot = { productId: p.id, since: new Date(Date.now() - 10_000).toISOString(), at: nowIso() };
+    this.saveMeta();
+    this.emit('change', { type: 'settings' });
+    return this.meta.nativeShoot;
+  }
+
+  clearNativeShoot(actor) {
+    forbidAi(actor, '純正カメラの撮影対象の解除');
+    this.meta.nativeShoot = null;
+    this.saveMeta();
+    return null;
+  }
+
+  /** Key for the iPhone shortcut: it can only read the shoot target and send photos to it. */
+  uploadKey({ rotate = false } = {}) {
+    if (!this.meta.uploadKey || rotate) {
+      this.meta.uploadKey = crypto.randomBytes(18).toString('base64url');
+      this.saveMeta();
+    }
+    return this.meta.uploadKey;
+  }
+
   updateSettings(patch) {
     for (const [k, v] of Object.entries(patch || {})) {
       if (!(k in DEFAULT_SETTINGS)) throw new AppError(400, `不明な設定: ${k}`);

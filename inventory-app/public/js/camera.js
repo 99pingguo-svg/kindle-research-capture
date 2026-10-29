@@ -6,6 +6,7 @@ import { state, setPref, on, applyProduct, emit } from './state.js';
 import { captureFrame, makeVariants } from './images.js';
 import { fmtDay } from './calendar.js';
 import * as uploads from './uploads.js';
+import { shootWithNativeCamera } from './native.js';
 
 let open = null;
 
@@ -54,6 +55,8 @@ class CameraSession {
     this.doneBtn = h('button', { class: 'cam-btn done', onclick: () => this.done() }, '撮影完了 ✓');
     const bottom = h('div', { class: 'cam-bottom' },
       h('button', { class: 'cam-btn', style: { flex: '0 0 auto' }, onclick: () => this.fileLibrary.click() }, '🖼 追加'),
+      // iPhone の「カメラ」アプリで撮る（フォトグラフスタイル等）。この一覧の続きもそのまま撮れる。
+      h('button', { class: 'cam-btn', style: { flex: '0 0 auto' }, onclick: () => { const ids = this.ids; const i = this.i; this.close(); shootWithNativeCamera(ids[i], { ids, index: i }); } }, '📸 純正'),
       this.doneBtn,
       h('button', { class: 'cam-btn', style: { flex: '0 0 auto' }, onclick: () => this.newProduct() }, '＋新商品'));
 

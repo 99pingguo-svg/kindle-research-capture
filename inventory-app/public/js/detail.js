@@ -5,6 +5,7 @@ import { state, on, applyProduct, emit } from './state.js';
 import { openCamera } from './camera.js';
 import { makeVariants, fetchBitmap, renderEdit, editToVariants, DEFAULT_EDIT } from './images.js';
 import * as uploads from './uploads.js';
+import { shootWithNativeCamera } from './native.js';
 
 let pane;
 let photoTab = 'actual';
@@ -223,6 +224,7 @@ function photosCard(p) {
       photoTab === 'reference'
         ? [h('button', { class: 'btn small', onclick: () => refInput.click() }, '＋ 参考画像を追加')]
         : [h('button', { class: 'btn small primary', onclick: () => openCamera({ ids: [p.id] }) }, '📷 撮影'),
+          h('button', { class: 'btn small', onclick: () => shootWithNativeCamera(p.id), title: 'iPhone の「カメラ」アプリで撮って取り込む' }, '📸 純正カメラ'),
           h('button', { class: 'btn small', onclick: () => libInput.click() }, '🖼 写真を追加')]),
     libInput, refInput);
 }

@@ -5,6 +5,7 @@ import { mountList } from './list.js';
 import { mountDetail, showDetail, reload as reloadDetail } from './detail.js';
 import { showActivity, showImport, showSettings, showLedger, showDateImport, showSnapshots } from './pages.js';
 import * as uploads from './uploads.js';
+import { watchNativeReturn } from './native.js';
 
 const app = document.getElementById('app');
 
@@ -59,6 +60,7 @@ async function boot() {
   }
   mountList();
   mountDetail();
+  watchNativeReturn();
   window.addEventListener('hashchange', route);
   route();
   connectEvents(onServerEvent, (ok) => {
