@@ -187,6 +187,7 @@ export const SORTS = [
   { id: 'net', label: 'メルカリ手取り', desc: true, dir: ['少ない順', '多い順'], value: (p) => p.net?.net ?? null },
   { id: 'market', label: 'メルカリ相場', desc: true, dir: ['安い順', '高い順'], value: (p) => p.market?.median ?? null },
   { id: 'ymarket', label: 'ヤフオク相場', desc: true, dir: ['安い順', '高い順'], value: (p) => p.market?.yahoo?.median ?? null },
+  { id: 'rmarket', label: 'ラクマ相場', desc: true, dir: ['安い順', '高い順'], value: (p) => p.market?.rakuma?.median ?? null },
   { id: 'ship', label: '送料', desc: false, dir: ['安い順', '高い順'], value: (p) => p.ship?.cheapest?.price ?? null },
   { id: 'size', label: 'サイズ（3辺合計）', desc: false, dir: ['小さい順', '大きい順'], value: (p) => p.ship?.dims?.sum ?? null },
   { id: 'category', label: '種類', desc: false, dir: ['一覧の順', '逆順'], value: (p) => { const i = (state.meta?.categories || []).indexOf(p.category); return i < 0 ? null : i; } },
@@ -248,6 +249,7 @@ export function matchCond(p, cond) {
     case 'method': return (s.options || []).some((o) => o.id === id);
     case 'market': return id === 'todo' ? !p.market?.checkedAt : p.market?.matchType === id;
     case 'ymarket': return id === 'todo' ? !p.market?.yahoo?.checkedAt : p.market?.yahoo?.matchType === id;
+    case 'rmarket': return id === 'todo' ? !p.market?.rakuma?.checkedAt : p.market?.rakuma?.matchType === id;
     case 'net': {
       if (id === 'unknown') return p.net?.net == null;
       const b = NET_BANDS.find((x) => x.id === id);

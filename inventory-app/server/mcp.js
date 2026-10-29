@@ -485,7 +485,7 @@ result: pass=問題なし / needs_review=ユーザー確認が必要 / fail=修�
     return json({ sizeEstimate: p.sizeEstimate, ship: shippingOf(p.amazon, p.sizeEstimate) });
   });
 
-  tool('save_market_research', 'メルカリで最近売れた価格（売り切れ）、または site=yahoo でヤフオクの落札価格を記録する。まず公式画像で画像検索して同じ商品を探し（method=image）、無ければ似た商品をキーワードで探す（method=keyword）。match_type=same（同じ商品）/ similar（似た商品）/ none（見つからない）。examples は実際に売れた出品の title・price・url（jp.mercari.com の商品ページ）・match（same/similar）。中央値は match_type と同じ種類の例から計算される。', {
+  tool('save_market_research', 'メルカリで最近売れた価格（売り切れ）、または site=yahoo でヤフオクの落札価格、site=rakuma でラクマの売り切れ価格を記録する。まず公式画像で画像検索して同じ商品を探し（method=image）、無ければ似た商品をキーワードで探す（method=keyword）。match_type=same（同じ商品）/ similar（似た商品）/ none（見つからない）。examples は実際に売れた出品の title・price・url（jp.mercari.com の商品ページ）・match（same/similar）。中央値は match_type と同じ種類の例から計算される。', {
     id: s.id,
     match_type: s.enumOf(['same', 'similar', 'none'], '相場がどちらの商品のものか'),
     method: s.enumOf(['image', 'keyword'], '見つけ方'),
@@ -493,10 +493,10 @@ result: pass=問題なし / needs_review=ユーザー確認が必要 / fail=修�
     search_url: s.str('使った検索ページのURL（売り切れで絞った検索）'),
     examples: { type: 'array', description: '売れた例（最大20）', items: { type: 'object', properties: { title: { type: 'string' }, price: { type: 'integer' }, url: { type: 'string' }, match: { type: 'string', enum: ['same', 'similar'] }, soldAt: { type: 'string' }, note: { type: 'string' } }, required: ['price', 'url'] } },
     note: s.str('補足（状態の違い・セット数の違いなど）'),
-    site: s.enumOf(['mercari', 'yahoo'], '既定 mercari。yahoo の url は page.auctions.yahoo.co.jp の商品ページ'),
+    site: s.enumOf(['mercari', 'yahoo', 'rakuma'], '既定 mercari。yahoo の url は page.auctions.yahoo.co.jp、rakuma は item.fril.jp の商品ページ'),
   }, ['id', 'match_type'], ({ id, match_type, method, query, search_url, examples = [], note, site = 'mercari' }) => {
     const p = store.setMarket(id, actor, { matchType: match_type, method, query, searchUrl: search_url, examples, note }, site);
-    return json({ market: site === 'yahoo' ? p.marketYahoo : p.market, net: mercariNet(p) });
+    return json({ market: { yahoo: p.marketYahoo, rakuma: p.marketRakuma }[site] ?? p.market, net: mercariNet(p) });
   });
 
   // ---- destinations: what each platform should receive ----

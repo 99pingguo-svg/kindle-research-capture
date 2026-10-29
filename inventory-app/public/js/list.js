@@ -209,6 +209,7 @@ function condLabel(c) {
     case 'method': return sh.methods?.find((x) => x.id === id)?.label || id;
     case 'market': return id === 'todo' ? '相場 未調査' : `相場 ${MATCH_LABEL[id]}`;
     case 'ymarket': return id === 'todo' ? 'ヤフオク 未調査' : `ヤフオク ${MATCH_LABEL[id]}`;
+    case 'rmarket': return id === 'todo' ? 'ラクマ 未調査' : `ラクマ ${MATCH_LABEL[id]}`;
     case 'net': return id === 'unknown' ? '手取り 不明' : `手取り ${NET_BANDS.find((x) => x.id === id)?.label || id}`;
     default: return c;
   }
@@ -261,6 +262,7 @@ function openConds() {
         ...sh.groups.flatMap((g) => section(`この方法で送れる（${g.label}）`, sh.methods.filter((m) => m.group === g.id).map((m) => chip(`method:${m.id}`)))),
         ...section('メルカリ相場（売り切れ）', [chip('market:same', '同じ商品の相場'), chip('market:similar', '似た商品の相場'), chip('market:none', '見つからず'), chip('market:todo', '未調査')]),
         ...section('ヤフオク相場（落札）', [chip('ymarket:same', '同じ商品の相場'), chip('ymarket:similar', '似た商品の相場'), chip('ymarket:none', '見つからず'), chip('ymarket:todo', '未調査')]),
+        ...section('ラクマ相場（売り切れ）', [chip('rmarket:same', '同じ商品の相場'), chip('rmarket:similar', '似た商品の相場'), chip('rmarket:none', '見つからず'), chip('rmarket:todo', '未調査')]),
         ...section('メルカリでの手取り（仕入れ額は含まない）', [...NET_BANDS.map((b) => chip(`net:${b.id}`, b.label)), chip('net:unknown', '不明')],
           '相場（無ければ販売価格）−手数料10%−いちばん安いメルカリ便'),
         h('div', { class: 'actions sticky-actions' },
@@ -516,10 +518,11 @@ function badgesFor(p) {
     b.push(h('span', { class: `badge ${p.market.matchType === 'same' ? 'ok' : p.market.matchType === 'similar' ? 'info' : 'warn'}`, title: `メルカリ売り切れ ${p.market.count}件${p.market.low != null ? `（${yen(p.market.low)}〜${yen(p.market.high)}）` : ''}` },
       p.market.median != null ? `相場 ${yen(p.market.median)}（${MATCH_LABEL[p.market.matchType]}）` : '相場 見つからず'));
   }
-  const y = p.market?.yahoo;
-  if (y?.checkedAt) {
-    b.push(h('span', { class: `badge ${y.matchType === 'same' ? 'ok' : y.matchType === 'similar' ? 'info' : 'warn'}`, title: `ヤフオク落札 ${y.count}件${y.low != null ? `（${yen(y.low)}〜${yen(y.high)}）` : ''}` },
-      y.median != null ? `ヤフオク ${yen(y.median)}（${MATCH_LABEL[y.matchType]}）` : 'ヤフオク 見つからず'));
+  for (const [key, name] of [['yahoo', 'ヤフオク'], ['rakuma', 'ラクマ']]) {
+    const y = p.market?.[key];
+    if (!y?.checkedAt) continue;
+    b.push(h('span', { class: `badge ${y.matchType === 'same' ? 'ok' : y.matchType === 'similar' ? 'info' : 'warn'}`, title: `${name} ${y.count}件${y.low != null ? `（${yen(y.low)}〜${yen(y.high)}）` : ''}` },
+      y.median != null ? `${name} ${yen(y.median)}（${MATCH_LABEL[y.matchType]}）` : `${name} 見つからず`));
   }
   if (p.net?.net != null) {
     const v = p.net.net;
@@ -670,6 +673,25 @@ function groupHead(run, d) {
     }, d || '種類なし', h('span', { class: 'n' }, `${groups.get(d)}件`));
 }
 
+/** Sites whose sold prices are researched, and their one-tap searches (別ウィンドウ). */
+const SITES = [
+  { id: 'mercari', label: 'メルカリ', what: '売り切れ', url: (m) => m.soldUrl, stats: (m) => m },
+  { id: 'yahoo', label: 'ヤフオク', what: '落札相場', url: (m) => m.yahooUrl, stats: (m) => m.yahoo },
+  { id: 'rakuma', label: 'ラクマ', what: '売り切れ', url: (m) => m.rakumaUrl, stats: (m) => m.rakuma },
+];
+function marketLinks(p) {
+  const m = p.market;
+  if (!m) return null;
+  return h('div', { class: 'mk-links' }, SITES.map((s) => {
+    const st = s.stats(m);
+    return s.url(m) && h('a', {
+      class: `mk-link ${s.id}`, href: s.url(m), target: '_blank', rel: 'noopener noreferrer',
+      title: `${s.label}の${s.what}を検索（別ウィンドウ）`, 'aria-label': `${p.name || p.id} を${s.label}の${s.what}で検索`,
+      onclick: (e) => e.stopPropagation(),
+    }, `${s.label} ↗`, st?.median != null ? h('span', { class: 'v' }, yen(st.median)) : h('span', { class: 'go' }, s.what));
+  }));
+}
+
 function rowEl(p, idx, run) {
   const selected = state.selected.has(p.id);
   const open = (e) => {
@@ -695,6 +717,7 @@ function rowEl(p, idx, run) {
         h('span', { class: `item-cat ${p.categoryGuessed ? 'guess' : ''}`, title: p.categoryGuessed ? '商品名からの推定（詳細画面で設定できます）' : '種類' }, p.category, p.categoryGuessed ? '?' : ''),
         [p.brand, p.model, p.location && `📍${p.location}`].filter(Boolean).join(' · ')),
       h('div', { class: 'badges' }, badgesFor(p)),
+      marketLinks(p),
       issuesFor(p),
       !state.selectMode && !p.trashedAt && decisionSeg(p),
       !state.selectMode && !p.trashedAt && targetSeg(p)),
@@ -708,17 +731,7 @@ function rowEl(p, idx, run) {
         title: '購入ページを開く（別ウィンドウ）', 'aria-label': `${p.name || p.id} の購入ページを開く`,
         onclick: (e) => e.stopPropagation(),
       }, '🔗'),
-      // One tap to the sold / closed listings on each site (別ウィンドウ).
-      p.market?.soldUrl && h('a', {
-        class: 'icon-btn link site mercari', href: p.market.soldUrl, target: '_blank', rel: 'noopener noreferrer',
-        title: 'メルカリの売り切れを検索（別ウィンドウ）', 'aria-label': `${p.name || p.id} をメルカリの売り切れで検索`,
-        onclick: (e) => e.stopPropagation(),
-      }, h('span', { class: 'ic' }, '🔎'), h('span', { class: 'cap' }, 'メルカリ')),
-      p.market?.yahooUrl && h('a', {
-        class: 'icon-btn link site yahoo', href: p.market.yahooUrl, target: '_blank', rel: 'noopener noreferrer',
-        title: 'ヤフオクの落札相場を検索（別ウィンドウ）', 'aria-label': `${p.name || p.id} をヤフオクの落札相場で検索`,
-        onclick: (e) => e.stopPropagation(),
-      }, h('span', { class: 'ic' }, '🔨'), h('span', { class: 'cap' }, 'ヤフオク'))));
+      ));
 }
 
 /** Date chips on a row: 注文 / 到着 when known, else the undistinguished date. The grouped-by date is already in the heading. */

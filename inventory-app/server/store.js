@@ -81,6 +81,7 @@ function newProduct(id, at, settings) {
     amazon: null,
     market: null,
     marketYahoo: null,
+    marketRakuma: null,
     sizeEstimate: null,
     textCandidates: [],
     listing: {
@@ -113,6 +114,7 @@ const MATCH_TYPES = ['same', 'similar', 'none'];
 const SITE_URLS = {
   mercari: { item: /^https:\/\/(jp\.mercari\.com|mercari-shops\.com|item\.mercari\.com)\//, search: /^https:\/\/(jp\.mercari\.com|lens\.google\.com|www\.google\.com)\// },
   yahoo: { item: /^https:\/\/(page\.auctions\.yahoo\.co\.jp|auctions\.yahoo\.co\.jp)\//, search: /^https:\/\/(auctions\.yahoo\.co\.jp|lens\.google\.com|www\.google\.com)\// },
+  rakuma: { item: /^https:\/\/item\.fril\.jp\//, search: /^https:\/\/(fril\.jp|lens\.google\.com|www\.google\.com)\// },
 };
 export const MARKET_SITES = Object.keys(SITE_URLS);
 
@@ -1066,8 +1068,9 @@ export class Store extends EventEmitter {
     return this.mutate(id, actor, 'market', (p, ctx) => {
       const m = normalizeMarket(market, actor, site);
       if (site === 'yahoo') p.marketYahoo = m;
+      else if (site === 'rakuma') p.marketRakuma = m;
       else p.market = m;
-      const name = site === 'yahoo' ? 'ヤフオク相場' : 'メルカリ相場';
+      const name = { yahoo: 'ヤフオク相場', rakuma: 'ラクマ相場' }[site] || 'メルカリ相場';
       ctx.note(m ? `${name}を記録（${m.matchType === 'same' ? '同じ商品' : m.matchType === 'similar' ? '似た商品' : '見つからず'}${m.median != null ? `・中央値 ${yen(m.median)}・${m.count}件` : ''}）` : `${name}の記録を削除`);
     });
   }
