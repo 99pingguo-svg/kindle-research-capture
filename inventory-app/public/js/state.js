@@ -109,6 +109,7 @@ export const FILTERS = [
   { id: 'to_mercari', label: '→メルカリ' },
   { id: 'to_jmty', label: '→ジモティー' },
   { id: 'to_yahoo', label: '→ヤフオク' },
+  { id: 'to_paypay', label: '→ヤフーフリマ' },
   { id: 'to_rakuma', label: '→ラクマ' },
   { id: 'to_flea', label: '→フリマ' },
   { id: 'research_jmty', label: 'ジモティ候補' },
@@ -158,6 +159,7 @@ export function matchesFilter(sm, filter) {
     case 'to_jmty': return active && (sm.targets || []).includes('jmty');
     case 'to_yahoo': return active && (sm.targets || []).includes('yahoo');
     case 'to_rakuma': return active && (sm.targets || []).includes('rakuma');
+    case 'to_paypay': return active && (sm.targets || []).includes('paypay');
     case 'to_flea': return active && (sm.targets || []).includes('flea');
     case 'research_jmty': return active && /ジモティ/.test(sm.research?.group || '');
     case 'research_3000': return active && /3000円以上/.test(sm.research?.group || '');
@@ -191,6 +193,7 @@ export const SORTS = [
   { id: 'net', label: 'メルカリ手取り', desc: true, dir: ['少ない順', '多い順'], value: (p) => p.net?.net ?? null },
   { id: 'market', label: 'メルカリ相場', desc: true, dir: ['安い順', '高い順'], value: (p) => p.market?.median ?? null },
   { id: 'ymarket', label: 'ヤフオク相場', desc: true, dir: ['安い順', '高い順'], value: (p) => p.market?.yahoo?.median ?? null },
+  { id: 'pmarket', label: 'ヤフーフリマ相場', desc: true, dir: ['安い順', '高い順'], value: (p) => p.market?.paypay?.median ?? null },
   { id: 'rmarket', label: 'ラクマ相場', desc: true, dir: ['安い順', '高い順'], value: (p) => p.market?.rakuma?.median ?? null },
   { id: 'ship', label: '送料', desc: false, dir: ['安い順', '高い順'], value: (p) => p.ship?.cheapest?.price ?? null },
   { id: 'size', label: 'サイズ（3辺合計）', desc: false, dir: ['小さい順', '大きい順'], value: (p) => p.ship?.dims?.sum ?? null },
@@ -254,6 +257,7 @@ export function matchCond(p, cond) {
     case 'market': return id === 'todo' ? !p.market?.checkedAt : p.market?.matchType === id;
     case 'ymarket': return id === 'todo' ? !p.market?.yahoo?.checkedAt : p.market?.yahoo?.matchType === id;
     case 'rmarket': return id === 'todo' ? !p.market?.rakuma?.checkedAt : p.market?.rakuma?.matchType === id;
+    case 'pmarket': return id === 'todo' ? !p.market?.paypay?.checkedAt : p.market?.paypay?.matchType === id;
     case 'net': {
       if (id === 'unknown') return p.net?.net == null;
       const b = NET_BANDS.find((x) => x.id === id);

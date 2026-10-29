@@ -424,8 +424,8 @@ code, .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 .show-toggle.on .tick { background: var(--accent); border-color: var(--accent); color: #fff; }
 .cond-chip.hide { border-style: dashed; }
 
-/* one-tap search links (メルカリ / ヤフオク / ラクマ): one row of three, price under the name */
-.mk-links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin-top: 6px; max-width: 330px; }
+/* one-tap links (メルカリ / ヤフオク / ヤフーフリマ / ラクマ): four in a row when there is room, else 2×2; price under the name */
+.mk-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 4px; margin-top: 6px; max-width: 380px; }
 .mk-link {
   display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 38px; padding: 2px 4px; border-radius: 8px;
   text-decoration: none; border: 1px solid var(--border); background: var(--card); font-size: 12px; font-weight: 700; line-height: 1.2; white-space: nowrap;
@@ -438,3 +438,4 @@ code, .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 .mk-link.mercari { color: #d7263d; }
 .mk-link.yahoo { color: #7b2fd0; }
 .mk-link.rakuma { color: #b0006f; }
+.mk-link.paypay { color: #e60033; }

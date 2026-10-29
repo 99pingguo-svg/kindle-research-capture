@@ -6,7 +6,7 @@ import { OBSERVED_STATUSES, CHANNELS, channelLabel } from './schema.js';
 
 const OBS = new Map(OBSERVED_STATUSES.map((s) => [s.id, s.label]));
 /** Item id inside a platform URL, e.g. jp.mercari.com/item/m12345678901. */
-const ITEM_ID = { mercari: /\/item\/(m\d+)/, jmty: /\/article-([a-z0-9]+)/i, yahoo: /\/auction\/([a-z]?\d+)/i, rakuma: /item\.fril\.jp\/([0-9a-f]+)/i };
+const ITEM_ID = { mercari: /\/item\/(m\d+)/, jmty: /\/article-([a-z0-9]+)/i, yahoo: /\/auction\/([a-z]?\d+)/i, rakuma: /item\.fril\.jp\/([0-9a-f]+)/i, paypay: /paypayfleamarket\.yahoo\.co\.jp\/item\/([a-z0-9]+)/i };
 const DRAFT_STATUSES = ['entered', 'transfer_ok', 'transfer_ng'];
 
 export function itemIdOf(channel, obs) {

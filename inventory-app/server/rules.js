@@ -195,7 +195,7 @@ export function channelPackage(p, channel) {
 }
 
 /** Price fields the bulk price tool may set. */
-export const PRICE_FIELDS = ['listing.price', 'override.mercari.price', 'override.jmty.price', 'override.yahoo.price', 'override.rakuma.price', 'override.flea.price'];
+export const PRICE_FIELDS = ['listing.price', 'override.mercari.price', 'override.jmty.price', 'override.yahoo.price', 'override.paypay.price', 'override.rakuma.price', 'override.flea.price'];
 
 /**
  * Bulk price for one product: a fixed amount, or a percentage of the recorded Amazon price (sale price included),

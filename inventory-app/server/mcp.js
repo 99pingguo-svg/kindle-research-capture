@@ -43,7 +43,7 @@ const s = {
   enumOf: (values, description) => ({ type: 'string', enum: values, description }),
 };
 
-const LIST_FILTERS = ['all', 'sell', 'draft', 'undecided', 'hold', 'no_sell', 'no_stock', 'needs_photos', 'shot_today', 'shoot_plan', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'trading', 'sold', 'to_mercari', 'to_jmty', 'to_yahoo', 'to_rakuma', 'to_flea', 'research_jmty', 'research_3000', 'research_2300', 'archived', 'trash'];
+const LIST_FILTERS = ['all', 'sell', 'draft', 'undecided', 'hold', 'no_sell', 'no_stock', 'needs_photos', 'shot_today', 'shoot_plan', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'trading', 'sold', 'to_mercari', 'to_jmty', 'to_yahoo', 'to_paypay', 'to_rakuma', 'to_flea', 'research_jmty', 'research_3000', 'research_2300', 'archived', 'trash'];
 
 function today() {
   const d = new Date();
@@ -80,6 +80,7 @@ export function matchesFilter(sm, filter) {
     case 'to_jmty': return active && (sm.targets || []).includes('jmty');
     case 'to_yahoo': return active && (sm.targets || []).includes('yahoo');
     case 'to_rakuma': return active && (sm.targets || []).includes('rakuma');
+    case 'to_paypay': return active && (sm.targets || []).includes('paypay');
     case 'to_flea': return active && (sm.targets || []).includes('flea');
     case 'research_jmty': return active && /ジモティ/.test(sm.research?.group || '');
     case 'research_3000': return active && /3000円以上/.test(sm.research?.group || '');
@@ -487,7 +488,7 @@ result: pass=問題なし / needs_review=ユーザー確認が必要 / fail=修�
     return json({ sizeEstimate: p.sizeEstimate, ship: shippingOf(p.amazon, p.sizeEstimate) });
   });
 
-  tool('save_market_research', 'メルカリで最近売れた価格（売り切れ）、または site=yahoo でヤフオクの落札価格、site=rakuma でラクマの売り切れ価格を記録する。まず公式画像で画像検索して同じ商品を探し（method=image）、無ければ似た商品をキーワードで探す（method=keyword）。match_type=same（同じ商品）/ similar（似た商品）/ none（見つからない）。examples は実際に売れた出品の title・price・url（jp.mercari.com の商品ページ）・match（same/similar）。中央値は match_type と同じ種類の例から計算される。', {
+  tool('save_market_research', 'メルカリで最近売れた価格（売り切れ）、または site=yahoo でヤフオクの落札価格、site=rakuma でラクマの売り切れ価格、site=paypay でヤフーフリマ（旧PayPayフリマ）の売り切れ価格を記録する。まず公式画像で画像検索して同じ商品を探し（method=image）、無ければ似た商品をキーワードで探す（method=keyword）。match_type=same（同じ商品）/ similar（似た商品）/ none（見つからない）。examples は実際に売れた出品の title・price・url（jp.mercari.com の商品ページ）・match（same/similar）。中央値は match_type と同じ種類の例から計算される。', {
     id: s.id,
     match_type: s.enumOf(['same', 'similar', 'none'], '相場がどちらの商品のものか'),
     method: s.enumOf(['image', 'keyword'], '見つけ方'),
@@ -495,14 +496,14 @@ result: pass=問題なし / needs_review=ユーザー確認が必要 / fail=修�
     search_url: s.str('使った検索ページのURL（売り切れで絞った検索）'),
     examples: { type: 'array', description: '売れた例（最大20）', items: { type: 'object', properties: { title: { type: 'string' }, price: { type: 'integer' }, url: { type: 'string' }, match: { type: 'string', enum: ['same', 'similar'] }, soldAt: { type: 'string' }, note: { type: 'string' } }, required: ['price', 'url'] } },
     note: s.str('補足（状態の違い・セット数の違いなど）'),
-    site: s.enumOf(['mercari', 'yahoo', 'rakuma'], '既定 mercari。yahoo の url は page.auctions.yahoo.co.jp、rakuma は item.fril.jp の商品ページ'),
+    site: s.enumOf(['mercari', 'yahoo', 'paypay', 'rakuma'], '既定 mercari。yahoo の url は page.auctions.yahoo.co.jp、paypay は paypayfleamarket.yahoo.co.jp/item、rakuma は item.fril.jp の商品ページ'),
   }, ['id', 'match_type'], ({ id, match_type, method, query, search_url, examples = [], note, site = 'mercari' }) => {
     const p = store.setMarket(id, actor, { matchType: match_type, method, query, searchUrl: search_url, examples, note }, site);
-    return json({ market: { yahoo: p.marketYahoo, rakuma: p.marketRakuma }[site] ?? p.market, net: mercariNet(p) });
+    return json({ market: { yahoo: p.marketYahoo, rakuma: p.marketRakuma, paypay: p.marketPaypay }[site] ?? p.market, net: mercariNet(p) });
   });
 
   // ---- destinations: what each platform should receive ----
-  tool('channel_package', '出品先（mercari=メルカリ / jmty=ジモティー / yahoo=ヤフオク / rakuma=ラクマ / flea=フリマ）に出す内容の完成形を返す。出品先ごとの原稿（override.<出品先>.title/description/price と出品先ごとの写真）があればそれを、無ければ共通の原稿を使う。写真は順番どおりの絶対パス。アップロード作業はこれだけを正本として読む。targeted=false はユーザーがその出品先を選んでいない商品（出品しない）。', {
+  tool('channel_package', '出品先（mercari=メルカリ / jmty=ジモティー / yahoo=ヤフオク / paypay=ヤフーフリマ / rakuma=ラクマ / flea=フリマ）に出す内容の完成形を返す。出品先ごとの原稿（override.<出品先>.title/description/price と出品先ごとの写真）があればそれを、無ければ共通の原稿を使う。写真は順番どおりの絶対パス。アップロード作業はこれだけを正本として読む。targeted=false はユーザーがその出品先を選んでいない商品（出品しない）。', {
     id: s.id,
     channel: s.enumOf(CHANNELS.map((c) => c.id), '出品先'),
   }, ['id', 'channel'], ({ id, channel }) => {

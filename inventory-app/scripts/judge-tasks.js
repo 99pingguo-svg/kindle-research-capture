@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 相場の候補（market-scan / yahoo-scan / rakuma-scan の結果）を、ローカルAI判定（scripts/local_judge.py）の入力 JSONL にする。
 //
-// 使い方: node scripts/judge-tasks.js --site yahoo|rakuma|mercari [--ids 0003,0004] [--top 12] [--labels] > tasks.jsonl
+// 使い方: node scripts/judge-tasks.js --site yahoo|paypay|rakuma|mercari [--ids 0003,0004] [--top 12] [--labels] > tasks.jsonl
 //   --top    : 商品ごとに画像の近い順で何件まで判定するか（既定 12）
 //   --labels : メルカリの既存の判定（data/imports/market-decisions/*.json）を label に付ける（ローカルAIの精度確認用）
 // 判定ルール（judge-decide.js）だけで決まる候補は AI に回さない: 写真がほぼ同じ（同じ商品で確定）、

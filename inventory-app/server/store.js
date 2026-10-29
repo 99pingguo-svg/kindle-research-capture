@@ -82,6 +82,7 @@ function newProduct(id, at, settings) {
     market: null,
     marketYahoo: null,
     marketRakuma: null,
+    marketPaypay: null,
     sizeEstimate: null,
     textCandidates: [],
     listing: {
@@ -115,6 +116,7 @@ const SITE_URLS = {
   mercari: { item: /^https:\/\/(jp\.mercari\.com|mercari-shops\.com|item\.mercari\.com)\//, search: /^https:\/\/(jp\.mercari\.com|lens\.google\.com|www\.google\.com)\// },
   yahoo: { item: /^https:\/\/(page\.auctions\.yahoo\.co\.jp|auctions\.yahoo\.co\.jp)\//, search: /^https:\/\/(auctions\.yahoo\.co\.jp|lens\.google\.com|www\.google\.com)\// },
   rakuma: { item: /^https:\/\/item\.fril\.jp\//, search: /^https:\/\/(fril\.jp|lens\.google\.com|www\.google\.com)\// },
+  paypay: { item: /^https:\/\/paypayfleamarket\.yahoo\.co\.jp\/item\//, search: /^https:\/\/(paypayfleamarket\.yahoo\.co\.jp|lens\.google\.com|www\.google\.com)\// },
 };
 export const MARKET_SITES = Object.keys(SITE_URLS);
 
@@ -1102,8 +1104,9 @@ export class Store extends EventEmitter {
       const m = normalizeMarket(market, actor, site);
       if (site === 'yahoo') p.marketYahoo = m;
       else if (site === 'rakuma') p.marketRakuma = m;
+      else if (site === 'paypay') p.marketPaypay = m;
       else p.market = m;
-      const name = { yahoo: 'ヤフオク相場', rakuma: 'ラクマ相場' }[site] || 'メルカリ相場';
+      const name = { yahoo: 'ヤフオク相場', rakuma: 'ラクマ相場', paypay: 'ヤフーフリマ相場' }[site] || 'メルカリ相場';
       ctx.note(m ? `${name}を記録（${m.matchType === 'same' ? '同じ商品' : m.matchType === 'similar' ? '似た商品' : '見つからず'}${m.median != null ? `・中央値 ${yen(m.median)}・${m.count}件` : ''}）` : `${name}の記録を削除`);
     });
   }
@@ -1332,7 +1335,7 @@ function makeLink(l, actor) {
 function guessLinkType(url) {
   if (/amazon\.|rakuten\.|yodobashi|biccamera|yahoo\.co\.jp\/.*(store|shopping)|kakaku|joshinweb|monotaro/i.test(url)) return 'purchase';
   if (/manual|support|\.pdf($|\?)/i.test(url)) return 'manual';
-  if (/mercari|fril\.jp|rakuma|aucfan|auctions\.yahoo/i.test(url)) return 'market';
+  if (/mercari|fril\.jp|rakuma|aucfan|auctions\.yahoo|paypayfleamarket/i.test(url)) return 'market';
   return 'other';
 }
 

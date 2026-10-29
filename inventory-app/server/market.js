@@ -24,17 +24,20 @@ export const mercariSoldUrl = (keyword) =>
 export const yahooClosedUrl = (keyword) =>
   `https://auctions.yahoo.co.jp/closedsearch/closedsearch?p=${encodeURIComponent(keyword)}&va=${encodeURIComponent(keyword)}&b=1&n=50`;
 
+/** ヤフーフリマ（旧PayPayフリマ）sold-out items. */
+export const paypaySoldUrl = (keyword) => `https://paypayfleamarket.yahoo.co.jp/search/${encodeURIComponent(keyword)}?sold=1`;
+
 /** ラクマ sold-out items, newest first. */
 export const rakumaSoldUrl = (keyword) => `https://fril.jp/s?query=${encodeURIComponent(keyword)}&transaction=soldout&sort=created_at&order=desc`;
 
 /** Image search with the official (Amazon) photo — the basic way to find the very same item. */
 export const imageSearchUrl = (imageUrl) => (imageUrl ? `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(imageUrl)}` : '');
 
-const SITE_NAMES = { mercari: 'メルカリ', yahoo: 'ヤフオク', rakuma: 'ラクマ' };
-const siteRecords = (p) => [['mercari', p.market], ['rakuma', p.marketRakuma], ['yahoo', p.marketYahoo]];
+const SITE_NAMES = { mercari: 'メルカリ', yahoo: 'ヤフオク', paypay: 'ヤフーフリマ', rakuma: 'ラクマ' };
+const siteRecords = (p) => [['mercari', p.market], ['paypay', p.marketPaypay], ['rakuma', p.marketRakuma], ['yahoo', p.marketYahoo]];
 
 /**
- * Price basis, best first: a sold median of the very same item (メルカリ → ラクマ → ヤフオク), then a median of similar
+ * Price basis, best first: a sold median of the very same item (メルカリ → ヤフーフリマ → ラクマ → ヤフオク), then a median of similar
  * items (same order), then the price the user set. Similar-only is shown as 参考 (reference).
  */
 export function mercariNet(p, ship = shippingOf(p.amazon, p.sizeEstimate)) {
@@ -86,9 +89,11 @@ export function marketBrief(p) {
     soldUrl: mercariSoldUrl(kw),
     yahooUrl: yahooClosedUrl(p.marketYahoo?.query || kw),
     rakumaUrl: rakumaSoldUrl(p.marketRakuma?.query || kw),
+    paypayUrl: paypaySoldUrl(p.marketPaypay?.query || kw),
     imageUrl: imageSearchUrl(p.amazon?.image),
     ...stats(p.market),
     yahoo: stats(p.marketYahoo),
     rakuma: stats(p.marketRakuma),
+    paypay: stats(p.marketPaypay),
   };
 }

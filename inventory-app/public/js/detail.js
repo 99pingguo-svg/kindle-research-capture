@@ -510,6 +510,7 @@ function marketCard(p) {
     // Each site: the recorded result (sold items open one by one) and, separately, its sold-items list.
     [['メルカリ相場（最近売れた価格）', m, mk.soldUrl, '売り切れ一覧', '未調査。「この商品のメルカリ相場を調べて」と頼むと、画像検索（同じ商品）→ 無ければ似た商品で調べて記録します。'],
       ['ヤフオク相場（落札価格）', p.marketYahoo, mk.yahooUrl, '落札相場一覧', '未調査。「ヤフオクの相場も調べて」と頼むと、落札済みから同じ商品（無ければ似た商品）を探して記録します。'],
+      ['ヤフーフリマ相場（売り切れ）', p.marketPaypay, mk.paypayUrl, '売り切れ一覧', '未調査。「ヤフーフリマの相場も調べて」と頼むと、売り切れから同じ商品（無ければ似た商品）を探して記録します。'],
       ['ラクマ相場（売り切れ）', p.marketRakuma, mk.rakumaUrl, '売り切れ一覧', '未調査。「ラクマの相場も調べて」と頼むと、売り切れから同じ商品（無ければ似た商品）を探して記録します。'],
     ].map(([title, rec, listUrl, listLabel, empty]) => [
       h('h3', { class: 'small mk-head' }, title, h('span', { class: 'spacer' }),

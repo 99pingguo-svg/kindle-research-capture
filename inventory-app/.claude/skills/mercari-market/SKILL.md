@@ -36,7 +36,7 @@ MCP `save_market_research`:
 ## 多数をまとめて（ヤフオク・ラクマ・メルカリ）— ローカルAIで安く、精度は落とさない
 Claude が1件ずつ見ると使用量が大きいので、候補の判定は Mac 上のローカルAI（無料）に任せる。
 1. キーワード: `data/imports/market-keywords*.json`（{ID: [主, 予備]}）。無い商品は Claude が短い検索語を作って足す。
-2. 候補集め: `node scripts/site-scan.js --site yahoo|rakuma --keywords <files>`（メルカリは `market-scan.js`）。ログイン・Cookie なし、数秒おき。
+2. 候補集め: `node scripts/site-scan.js --site yahoo|paypay|rakuma --keywords <files>`（メルカリは `market-scan.js`）。ログイン・Cookie なし、数秒おき。
 3. 判定: `node scripts/judge-tasks.js --site <site> > tasks.jsonl` → `python3 scripts/local_judge.py --backend ollama:qwen3.5:4b --in tasks.jsonl --out r.jsonl`
 4. 決定: `node scripts/judge-decide.js --site <site> --results r.jsonl > dec.json` → `node scripts/apply-market.js dec.json --site <site>`
 - 同じ商品は「公式画像とほぼ同じ写真」（dHash 距離10以下、AIが同じと言えば12以下）だけ。AI の「同じ」単独は半分が似た商品だった（2026-10-29、Claude 判定済み約600候補で確認）。

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// ヤフオクの落札相場・ラクマの売り切れから候補を集め、公式画像（参考画像）とサムネイルを画像照合する下調べ。
+// ヤフオクの落札相場・ヤフーフリマ・ラクマの売り切れから候補を集め、公式画像（参考画像）とサムネイルを画像照合する下調べ。
 // 結果は data/imports/<site>-scan/<商品ID>.json、サムネイルは同じ場所の img/
 // （記録はしない。同じ/似たの判定は scripts/judge-decide.js、記録は apply-market --site <site>）。
 //
-// 使い方: node scripts/site-scan.js --site yahoo|rakuma --keywords a.json[,b.json…] [--ids 0003,0004] [--delay 4] [--force]
+// 使い方: node scripts/site-scan.js --site yahoo|paypay|rakuma --keywords a.json[,b.json…] [--ids 0003,0004] [--delay 4] [--force]
 //   keywords: { "<商品ID>": ["主キーワード", "予備キーワード"] }（メルカリ用と同じファイルを使える）
 // ログインはしない。Cookie を送らない普通の取得で、ページに埋め込まれた一覧データを読む。1件ごとに数秒あける。
 
@@ -61,7 +61,26 @@ export function parseRakuma(html) {
   return out.filter((x) => x.price > 0);
 }
 
-const SEARCH = { yahoo: { url: closedUrl, parse: parseClosed, img: /^https:\/\/[a-z0-9.-]+\.yimg\.jp\// }, rakuma: { url: rakumaUrl, parse: parseRakuma, img: /^https:\/\/img\.fril\.jp\// } };
+export const paypayUrl = (kw) => `https://paypayfleamarket.yahoo.co.jp/search/${encodeURIComponent(kw)}?sold=1`;
+
+/** ヤフーフリマ（旧PayPayフリマ）の売り切れ一覧（Next.js data）。 */
+export function parsePaypay(html) {
+  const m = /<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/.exec(html);
+  if (!m) throw new Error('一覧データが見つかりません（ページの形式が変わった可能性）');
+  const items = JSON.parse(m[1])?.props?.initialState?.searchState?.search?.result?.items || [];
+  return items.filter((it) => it.id && it.itemStatus === 'SOLD' && Number(it.price) > 0).map((it) => ({
+    auctionId: it.id,
+    title: String(it.title || ''),
+    price: Math.round(Number(it.price)),
+    endTime: String(it.endTime || '').slice(0, 10),
+    condition: '',
+    bids: null,
+    image: it.thumbnailImageUrl || '',
+    url: `https://paypayfleamarket.yahoo.co.jp/item/${it.id}`,
+  }));
+}
+
+const SEARCH = { yahoo: { url: closedUrl, parse: parseClosed, img: /^https:\/\/[a-z0-9.-]+\.yimg\.jp\// }, rakuma: { url: rakumaUrl, parse: parseRakuma, img: /^https:\/\/img\.fril\.jp\// }, paypay: { url: paypayUrl, parse: parsePaypay, img: /^https:\/\/[a-z0-9.-]+\.yimg\.jp\// } };
 
 async function readClosed(kw) {
   const site = SEARCH[SITE];

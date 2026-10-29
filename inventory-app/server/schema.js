@@ -24,6 +24,7 @@ export const CHANNELS = [
   { id: 'mercari', label: 'メルカリ' },
   { id: 'jmty', label: 'ジモティー' },
   { id: 'yahoo', label: 'ヤフオク' },
+  { id: 'paypay', label: 'ヤフーフリマ', short: 'Yフリマ' },
   { id: 'rakuma', label: 'ラクマ' },
   { id: 'flea', label: 'フリマ', note: '会場のフリーマーケット（オンラインの出品作業はなし。値札・持ち物の準備用）' },
 ];

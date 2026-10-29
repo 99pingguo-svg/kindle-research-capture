@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // ローカルAIの判定（scripts/local_judge.py の出力）と画像の近さから、相場の判定ファイル（apply-market.js の入力）を作る。
 //
-// 使い方: node scripts/judge-decide.js --site yahoo|rakuma|mercari --results r.jsonl[,r2.jsonl] [--ids …] [--model 名前] > decisions.json
+// 使い方: node scripts/judge-decide.js --site yahoo|paypay|rakuma|mercari --results r.jsonl[,r2.jsonl] [--ids …] [--model 名前] > decisions.json
 //
 // 決め方（メルカリで Claude が判定済みの 51商品・約600候補で確かめた基準）:
 //   同じ商品 = 公式画像とほぼ同じ写真（dHash 距離 10 以下）、または ローカルAIが「同じ」かつ距離 12 以下

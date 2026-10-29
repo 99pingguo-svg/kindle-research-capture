@@ -211,6 +211,7 @@ function condLabel(c) {
     case 'market': return id === 'todo' ? '相場 未調査' : `相場 ${MATCH_LABEL[id]}`;
     case 'ymarket': return id === 'todo' ? 'ヤフオク 未調査' : `ヤフオク ${MATCH_LABEL[id]}`;
     case 'rmarket': return id === 'todo' ? 'ラクマ 未調査' : `ラクマ ${MATCH_LABEL[id]}`;
+    case 'pmarket': return id === 'todo' ? 'ヤフーフリマ 未調査' : `ヤフーフリマ ${MATCH_LABEL[id]}`;
     case 'net': return id === 'unknown' ? '手取り 不明' : `手取り ${NET_BANDS.find((x) => x.id === id)?.label || id}`;
     default: return c;
   }
@@ -263,6 +264,7 @@ function openConds() {
         ...sh.groups.flatMap((g) => section(`この方法で送れる（${g.label}）`, sh.methods.filter((m) => m.group === g.id).map((m) => chip(`method:${m.id}`)))),
         ...section('メルカリ相場（売り切れ）', [chip('market:same', '同じ商品の相場'), chip('market:similar', '似た商品の相場'), chip('market:none', '見つからず'), chip('market:todo', '未調査')]),
         ...section('ヤフオク相場（落札）', [chip('ymarket:same', '同じ商品の相場'), chip('ymarket:similar', '似た商品の相場'), chip('ymarket:none', '見つからず'), chip('ymarket:todo', '未調査')]),
+        ...section('ヤフーフリマ相場（売り切れ）', [chip('pmarket:same', '同じ商品の相場'), chip('pmarket:similar', '似た商品の相場'), chip('pmarket:none', '見つからず'), chip('pmarket:todo', '未調査')]),
         ...section('ラクマ相場（売り切れ）', [chip('rmarket:same', '同じ商品の相場'), chip('rmarket:similar', '似た商品の相場'), chip('rmarket:none', '見つからず'), chip('rmarket:todo', '未調査')]),
         ...section('メルカリでの手取り（仕入れ額は含まない）', [...NET_BANDS.map((b) => chip(`net:${b.id}`, b.label)), chip('net:unknown', '不明')],
           '相場（無ければ販売価格）−手数料10%−いちばん安いメルカリ便'),
@@ -519,7 +521,7 @@ function badgesFor(p) {
     b.push(h('span', { class: `badge ${p.market.matchType === 'same' ? 'ok' : p.market.matchType === 'similar' ? 'info' : 'warn'}`, title: `メルカリ売り切れ ${p.market.count}件${p.market.low != null ? `（${yen(p.market.low)}〜${yen(p.market.high)}）` : ''}` },
       p.market.median != null ? `相場 ${yen(p.market.median)}（${MATCH_LABEL[p.market.matchType]}）` : '相場 見つからず'));
   }
-  for (const [key, name] of [['yahoo', 'ヤフオク'], ['rakuma', 'ラクマ']]) {
+  for (const [key, name] of [['yahoo', 'ヤフオク'], ['paypay', 'ヤフーフリマ'], ['rakuma', 'ラクマ']]) {
     const y = p.market?.[key];
     if (!y?.checkedAt) continue;
     b.push(h('span', { class: `badge ${y.matchType === 'same' ? 'ok' : y.matchType === 'similar' ? 'info' : 'warn'}`, title: `${name} ${y.count}件${y.low != null ? `（${yen(y.low)}〜${yen(y.high)}）` : ''}` },
@@ -572,7 +574,7 @@ function targetSeg(p) {
           showError(err);
         }
       },
-    }, `${c.label.replace(/ー$/, '')}${!targets.includes(c.id) && suggested.includes(c.id) ? '＊' : ''}`)));
+    }, `${c.short || c.label.replace(/ー$/, '')}${!targets.includes(c.id) && suggested.includes(c.id) ? '＊' : ''}`)));
 }
 
 function decisionSeg(p) {
@@ -681,6 +683,7 @@ function groupHead(run, d) {
 const SITES = [
   { id: 'mercari', label: 'メルカリ', what: '売り切れ', url: (m) => m.soldUrl, stats: (m) => m },
   { id: 'yahoo', label: 'ヤフオク', what: '落札相場', url: (m) => m.yahooUrl, stats: (m) => m.yahoo },
+  { id: 'paypay', label: 'Yフリマ', name: 'ヤフーフリマ', what: '売り切れ', url: (m) => m.paypayUrl, stats: (m) => m.paypay },
   { id: 'rakuma', label: 'ラクマ', what: '売り切れ', url: (m) => m.rakumaUrl, stats: (m) => m.rakuma },
 ];
 function marketLinks(p) {
@@ -693,8 +696,8 @@ function marketLinks(p) {
     const href = ref?.url || s.url(m);
     return href && h('a', {
       class: `mk-link ${s.id} ${ref ? 'item' : ''}`, href, target: '_blank', rel: 'noopener noreferrer',
-      title: ref ? `${s.label}で売れた${kind}（${yen(ref.price)}）を開く（別ウィンドウ）` : `${s.label}の${s.what}を検索（別ウィンドウ）`,
-      'aria-label': ref ? `${p.name || p.id} の${s.label}の参考商品を開く` : `${p.name || p.id} を${s.label}の${s.what}で検索`,
+      title: ref ? `${s.name || s.label}で売れた${kind}（${yen(ref.price)}）を開く（別ウィンドウ）` : `${s.name || s.label}の${s.what}を検索（別ウィンドウ）`,
+      'aria-label': ref ? `${p.name || p.id} の${s.name || s.label}の参考商品を開く` : `${p.name || p.id} を${s.name || s.label}の${s.what}で検索`,
       onclick: (e) => e.stopPropagation(),
     }, `${s.label} ↗`,
     st?.median != null ? h('span', { class: 'v' }, yen(st.median), ref?.match === 'similar' ? h('small', null, '似') : null) : h('span', { class: 'go' }, s.what));
