@@ -11,7 +11,7 @@ const args = process.argv.slice(2);
 const actor = args.includes('--actor') ? args[args.indexOf('--actor') + 1] : 'claude';
 const site = args.includes('--site') ? args[args.indexOf('--site') + 1] : 'mercari';
 const files = args.filter((a, i) => !a.startsWith('--') && !['--actor', '--site'].includes(args[i - 1]));
-const SCAN = path.join(ROOT, 'data', 'imports', site === 'yahoo' ? 'yahoo-scan' : 'market-scan');
+const SCAN = path.join(ROOT, 'data', 'imports', site === 'mercari' ? 'market-scan' : `${site}-scan`);
 let ok = 0; let n = 0;
 for (const f of files) {
   for (const [id, [matchType, method, same, similar, note]] of Object.entries(JSON.parse(fs.readFileSync(f, 'utf8')))) {
