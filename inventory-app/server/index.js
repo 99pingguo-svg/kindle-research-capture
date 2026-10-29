@@ -167,7 +167,7 @@ export function createApp({ dataDir, token = '' } = {}) {
     return { ...pkg, photos: pkg.photos.map((ph) => ({ ...ph, url: `/files/products/${params.id}/${ph.work}` })) };
   });
   route('PUT', '/api/products/:id/size-estimate', ({ params, body, actor }) => full(store.setSizeEstimate(params.id, actor, body?.estimate ?? null)));
-  route('PUT', '/api/products/:id/market', ({ params, body, actor }) => full(store.setMarket(params.id, actor, body?.market ?? null)));
+  route('PUT', '/api/products/:id/market', ({ params, body, actor }) => full(store.setMarket(params.id, actor, body?.market ?? null, body?.site || 'mercari')));
   route('PUT', '/api/products/:id/amazon', ({ params, body, actor }) => full(store.setAmazonInfo(params.id, actor, body?.amazon ?? null)));
   route('PUT', '/api/products/:id/research', ({ params, body, actor }) => full(store.setResearch(params.id, actor, body?.research ?? null)));
   route('POST', '/api/products/:id/text-candidates', ({ params, body, actor }) => full(store.upsertTextCandidates(params.id, actor, body?.items || [])));

@@ -4,7 +4,7 @@ import { h, clear, toast, showError, choose, sheet, yen } from './ui.js';
 import { api } from './api.js';
 import {
   state, setPref, on, FILTERS, matchesFilter, visibleProducts, applyProduct, loadAll, inDateRange, inPriceRange, inConds, matchCond, productsForCalendar,
-  priceRangeOn, dateRangeOn, NET_BANDS, SORTS, sortDef, DATE_KINDS, dateKindOf, groupDateField, currentView, applyView,
+  priceRangeOn, dateRangeOn, NET_BANDS, SORTS, sortDef, DATE_KINDS, dateKindOf, groupDateField, currentView, applyView, shownByClass, hidingOn,
 } from './state.js';
 import { pickDateRange, rangeLabel, fmtDay } from './calendar.js';
 import { openCamera } from './camera.js';
@@ -97,7 +97,7 @@ function renderUploadIndicator(st = uploads.status()) {
 function renderChips() {
   // Counts follow the other filters (期間・価格帯・絞り込み) so they match what a tap would show.
   const all = [...state.products.values()].filter((p) => inDateRange(p) && inPriceRange(p) && inConds(p));
-  const counts = Object.fromEntries(FILTERS.map((f) => [f.id, all.filter((p) => matchesFilter(p, f.id)).length]));
+  const counts = Object.fromEntries(FILTERS.map((f) => [f.id, all.filter((p) => matchesFilter(p, f.id) && shownByClass(p, f.id)).length]));
   clear(els.chips).append(
     ...FILTERS.filter((f) => counts[f.id] > 0 || ['all', 'shoot_plan', 'needs_photos', 'ready', state.prefs.filter].includes(f.id)).map((f) =>
       h('button', {
@@ -123,6 +123,7 @@ function renderToolbar(items = visibleProducts()) {
       '📅 ', dk.field !== 'itemDate' ? `${dk.label} ` : '', rangeLabel(state.prefs, dk.label)),
     h('button', { class: `btn small date-range ${priceRangeOn() ? 'on' : ''}`, onclick: openPriceRange, 'aria-label': 'Amazon価格で絞り込み' }, '💴 ', priceRangeLabel()),
     h('button', { class: `btn small date-range ${nConds ? 'on' : ''}`, onclick: openConds, 'aria-label': '種類・判断・サイズ・送料・相場などで絞り込み' }, '🔍 ', nConds ? `絞り込み ${nConds}` : '絞り込み'),
+    h('button', { class: `btn small date-range ${hidingOn() ? 'on' : ''}`, onclick: openShowHide, 'aria-label': '出品判断・出品先ごとに表示／非表示' }, '👁 ', hidingOn() ? `非表示 ${(state.prefs.hideDec || []).length + (state.prefs.hideTgt || []).length}` : '判断・出品先'),
     h('button', { class: 'btn small', onclick: openViews, 'aria-label': '保存した表示' }, '★ 表示'),
     h('span', { class: 'spacer' }),
     h('select', {
@@ -145,7 +146,7 @@ function renderToolbar(items = visibleProducts()) {
 /** Active conditions as removable chips, plus one tap to clear every filter. */
 function renderCondBar() {
   const conds = state.prefs.conds;
-  const any = conds.length || dateRangeOn() || priceRangeOn();
+  const any = conds.length || dateRangeOn() || priceRangeOn() || hidingOn();
   clear(els.condbar);
   if (!any) return;
   const dk = dateKindOf();
@@ -153,13 +154,14 @@ function renderCondBar() {
   els.condbar.append(...[
     dateRangeOn() && h('button', { class: 'cond-chip', onclick: () => setRange({ dateFrom: '', dateTo: '', dateNone: false }) }, `${dk.label} ${rangeLabel(state.prefs, dk.label)}`, h('span', { class: 'x' }, '✕')),
     priceRangeOn() && h('button', { class: 'cond-chip', onclick: () => setPriceRange({ priceMin: '', priceMax: '', priceUnknown: false }) }, `Amazon ${priceRangeLabel()}`, h('span', { class: 'x' }, '✕')),
+    hidingOn() && h('button', { class: 'cond-chip hide', onclick: () => setHidden([], []) }, `非表示: ${hiddenLabels(state.prefs).join('・')}`, h('span', { class: 'x' }, '✕')),
     ...conds.map((c) => h('button', { class: 'cond-chip', onclick: () => setConds(conds.filter((x) => x !== c)) }, condLabel(c), h('span', { class: 'x' }, '✕'))),
     h('button', { class: 'btn small ghost', onclick: clearAllFilters }, 'すべて解除'),
   ].filter(Boolean));
 }
 
 function clearAllFilters() {
-  for (const [k, v] of Object.entries({ dateFrom: '', dateTo: '', dateNone: false, priceMin: '', priceMax: '', priceUnknown: false, conds: [] })) setPref(k, v);
+  for (const [k, v] of Object.entries({ dateFrom: '', dateTo: '', dateNone: false, priceMin: '', priceMax: '', priceUnknown: false, conds: [], hideDec: [], hideTgt: [] })) setPref(k, v);
   state.selected.clear();
   renderAll();
 }
@@ -206,6 +208,7 @@ function condLabel(c) {
     case 'band': return `送料${sh.bands?.find((x) => x.id === id)?.label.replace(/（.*/, '') || id}`;
     case 'method': return sh.methods?.find((x) => x.id === id)?.label || id;
     case 'market': return id === 'todo' ? '相場 未調査' : `相場 ${MATCH_LABEL[id]}`;
+    case 'ymarket': return id === 'todo' ? 'ヤフオク 未調査' : `ヤフオク ${MATCH_LABEL[id]}`;
     case 'net': return id === 'unknown' ? '手取り 不明' : `手取り ${NET_BANDS.find((x) => x.id === id)?.label || id}`;
     default: return c;
   }
@@ -223,7 +226,7 @@ function setConds(conds) {
  */
 function openConds() {
   const sh = state.meta.delivery || { sizeClasses: [], bands: [], methods: [], groups: [] };
-  const base = [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && inDateRange(p) && inPriceRange(p));
+  const base = [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && shownByClass(p) && inDateRange(p) && inPriceRange(p));
   sheet((close) => {
     const body = h('div');
     const render = () => {
@@ -250,19 +253,65 @@ function openConds() {
         h('h2', null, '🔍 絞り込み'),
         h('p', { class: 'muted small' }, '同じ見出しの中で複数選ぶと「どれか」、見出しをまたぐと「全部に当てはまる」ものを表示します。数字は選んだときの件数。'),
         ...section('種類', (state.meta.categories || []).map((c) => chip(`cat:${c}`)), '未設定の商品は商品名からの推定'),
-        ...section('出品判断', [chip('dec:undecided'), ...state.meta.decisions.filter((d) => d.id !== 'undecided').map((d) => chip(`dec:${d.id}`))]),
-        ...section('出品先', [...(state.meta.channels || []).map((ch) => chip(`tgt:${ch.id}`)), chip('tgt:none')]),
+        // 出品判断・出品先 are shown/hidden with 👁 (and old dec:/tgt: conditions still work).
         ...section('日付', Object.keys(DATE_COND).map((id) => chip(`date:${id}`))),
         ...section('写真', [chip('photo:has'), chip('photo:none')]),
         ...section('サイズ', sh.sizeClasses.map((c) => chip(`size:${c.id}`, c.label))),
         ...section('いちばん安いメルカリ便の送料', sh.bands.map((b) => chip(`band:${b.id}`, b.label))),
         ...sh.groups.flatMap((g) => section(`この方法で送れる（${g.label}）`, sh.methods.filter((m) => m.group === g.id).map((m) => chip(`method:${m.id}`)))),
         ...section('メルカリ相場（売り切れ）', [chip('market:same', '同じ商品の相場'), chip('market:similar', '似た商品の相場'), chip('market:none', '見つからず'), chip('market:todo', '未調査')]),
+        ...section('ヤフオク相場（落札）', [chip('ymarket:same', '同じ商品の相場'), chip('ymarket:similar', '似た商品の相場'), chip('ymarket:none', '見つからず'), chip('ymarket:todo', '未調査')]),
         ...section('メルカリでの手取り（仕入れ額は含まない）', [...NET_BANDS.map((b) => chip(`net:${b.id}`, b.label)), chip('net:unknown', '不明')],
           '相場（無ければ販売価格）−手数料10%−いちばん安いメルカリ便'),
         h('div', { class: 'actions sticky-actions' },
           h('button', { class: 'btn primary', onclick: () => { close(); toTop(); } }, `${shown}件を表示`),
           conds.length > 0 && h('button', { class: 'btn', onclick: () => { setConds([]); render(); } }, '絞り込みを解除')));
+    };
+    render();
+    return body;
+  });
+}
+
+const decLabel = (id) => (id === 'undecided' ? '未判断' : state.meta.decisions.find((d) => d.id === id)?.label || id);
+const tgtLabel = (id) => (id === 'none' ? '出品先なし' : channelName(id));
+const hiddenLabels = (v) => [...(v.hideDec || []).map(decLabel), ...(v.hideTgt || []).map(tgtLabel)];
+
+function setHidden(hideDec, hideTgt) {
+  setPref('hideDec', hideDec);
+  setPref('hideTgt', hideTgt);
+  state.selected.clear();
+  renderAll();
+}
+
+/** 👁 Show or hide whole classes: each 出品判断 and each 出品先 (several at once). */
+function openShowHide() {
+  sheet((close) => {
+    const body = h('div');
+    const all = [...state.products.values()].filter((p) => matchesFilter(p, 'all'));
+    const render = () => {
+      const hd = state.prefs.hideDec || [];
+      const ht = state.prefs.hideTgt || [];
+      const toggle = (list, id, key) => {
+        const next = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+        key === 'dec' ? setHidden(next, ht) : setHidden(hd, next);
+        render();
+      };
+      const btn = (shown, label, n, onclick) => h('button', { class: `show-toggle ${shown ? 'on' : ''}`, 'aria-pressed': String(shown), onclick },
+        h('span', { class: 'tick' }, shown ? '✓' : ''), label, h('span', { class: 'muted' }, ` ${n}`));
+      const decs = ['undecided', ...state.meta.decisions.filter((d) => d.id !== 'undecided').map((d) => d.id)];
+      const tgts = [...(state.meta.channels || []).map((c) => c.id), 'none'];
+      const tgtCount = (id) => all.filter((p) => (id === 'none' ? !(p.targets || []).length : (p.targets || []).includes(id))).length;
+      const shownNow = all.filter((p) => shownByClass(p, 'all')).length;
+      clear(body).append(
+        h('h2', null, '👁 表示する商品'),
+        h('p', { class: 'muted small' }, 'チェックを外した判断・出品先の商品を一覧から隠します（いくつでも）。出品先が複数ある商品は、どれか1つでも表示中なら出ます。上の「出さない」「→ジモティー」などのチップを選んだときは、その分は隠しません。'),
+        h('h3', { class: 'small', style: { margin: '12px 0 6px' } }, '出品判断'),
+        h('div', { class: 'show-grid' }, decs.map((id) => btn(!hd.includes(id), decLabel(id), all.filter((p) => p.decision === id).length, () => toggle(hd, id, 'dec')))),
+        h('h3', { class: 'small', style: { margin: '14px 0 6px' } }, '出品先'),
+        h('div', { class: 'show-grid' }, tgts.map((id) => btn(!ht.includes(id), tgtLabel(id), tgtCount(id), () => toggle(ht, id, 'tgt')))),
+        h('div', { class: 'actions sticky-actions' },
+          h('button', { class: 'btn primary', onclick: () => { close(); toTop(); } }, `${shownNow}件を表示`),
+          hidingOn() && h('button', { class: 'btn', onclick: () => { setHidden([], []); render(); } }, 'すべて表示')));
     };
     render();
     return body;
@@ -279,6 +328,7 @@ function viewSummary(v) {
   if (v.dateFrom || v.dateTo || v.dateNone) parts.push(`${dk.label} ${rangeLabel(v, dk.label)}`);
   if (v.priceUnknown) parts.push('Amazon価格なし');
   else if (v.priceMin !== '' && v.priceMin != null || v.priceMax !== '' && v.priceMax != null) parts.push(`Amazon ${yenOr(v.priceMin)}〜${yenOr(v.priceMax)}`);
+  if ((v.hideDec || []).length || (v.hideTgt || []).length) parts.push(`非表示: ${hiddenLabels(v).join('・')}`);
   for (const c of v.conds || []) parts.push(condLabel(c));
   parts.push(`${d.label} ${d.dir[v.desc ? 1 : 0]}`);
   return parts.join(' · ');
@@ -465,6 +515,11 @@ function badgesFor(p) {
   if (p.market?.checkedAt) {
     b.push(h('span', { class: `badge ${p.market.matchType === 'same' ? 'ok' : p.market.matchType === 'similar' ? 'info' : 'warn'}`, title: `メルカリ売り切れ ${p.market.count}件${p.market.low != null ? `（${yen(p.market.low)}〜${yen(p.market.high)}）` : ''}` },
       p.market.median != null ? `相場 ${yen(p.market.median)}（${MATCH_LABEL[p.market.matchType]}）` : '相場 見つからず'));
+  }
+  const y = p.market?.yahoo;
+  if (y?.checkedAt) {
+    b.push(h('span', { class: `badge ${y.matchType === 'same' ? 'ok' : y.matchType === 'similar' ? 'info' : 'warn'}`, title: `ヤフオク落札 ${y.count}件${y.low != null ? `（${yen(y.low)}〜${yen(y.high)}）` : ''}` },
+      y.median != null ? `ヤフオク ${yen(y.median)}（${MATCH_LABEL[y.matchType]}）` : 'ヤフオク 見つからず'));
   }
   if (p.net?.net != null) {
     const v = p.net.net;
@@ -653,11 +708,17 @@ function rowEl(p, idx, run) {
         title: '購入ページを開く（別ウィンドウ）', 'aria-label': `${p.name || p.id} の購入ページを開く`,
         onclick: (e) => e.stopPropagation(),
       }, '🔗'),
+      // One tap to the sold / closed listings on each site (別ウィンドウ).
       p.market?.soldUrl && h('a', {
-        class: 'icon-btn link', href: p.market.soldUrl, target: '_blank', rel: 'noopener noreferrer',
-        title: 'メルカリで売り切れを検索（別ウィンドウ）', 'aria-label': `${p.name || p.id} をメルカリの売り切れで検索`,
+        class: 'icon-btn link site mercari', href: p.market.soldUrl, target: '_blank', rel: 'noopener noreferrer',
+        title: 'メルカリの売り切れを検索（別ウィンドウ）', 'aria-label': `${p.name || p.id} をメルカリの売り切れで検索`,
         onclick: (e) => e.stopPropagation(),
-      }, '🔎')));
+      }, h('span', { class: 'ic' }, '🔎'), h('span', { class: 'cap' }, 'メルカリ')),
+      p.market?.yahooUrl && h('a', {
+        class: 'icon-btn link site yahoo', href: p.market.yahooUrl, target: '_blank', rel: 'noopener noreferrer',
+        title: 'ヤフオクの落札相場を検索（別ウィンドウ）', 'aria-label': `${p.name || p.id} をヤフオクの落札相場で検索`,
+        onclick: (e) => e.stopPropagation(),
+      }, h('span', { class: 'ic' }, '🔨'), h('span', { class: 'cap' }, 'ヤフオク'))));
 }
 
 /** Date chips on a row: 注文 / 到着 when known, else the undistinguished date. The grouped-by date is already in the heading. */

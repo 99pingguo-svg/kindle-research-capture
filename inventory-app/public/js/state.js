@@ -13,6 +13,8 @@ const defaults = {
   dateTo: '',
   dateNone: false,
   conds: [],
+  hideDec: [],
+  hideTgt: [],
   camAutoNext: true,
   camRequestAi: true,
   camKeepTag: false,
@@ -184,6 +186,7 @@ export const SORTS = [
   { id: 'amazon', label: 'Amazon価格', desc: true, dir: ['安い順', '高い順'], value: (p) => p.research?.amazonPrice ?? null },
   { id: 'net', label: 'メルカリ手取り', desc: true, dir: ['少ない順', '多い順'], value: (p) => p.net?.net ?? null },
   { id: 'market', label: 'メルカリ相場', desc: true, dir: ['安い順', '高い順'], value: (p) => p.market?.median ?? null },
+  { id: 'ymarket', label: 'ヤフオク相場', desc: true, dir: ['安い順', '高い順'], value: (p) => p.market?.yahoo?.median ?? null },
   { id: 'ship', label: '送料', desc: false, dir: ['安い順', '高い順'], value: (p) => p.ship?.cheapest?.price ?? null },
   { id: 'size', label: 'サイズ（3辺合計）', desc: false, dir: ['小さい順', '大きい順'], value: (p) => p.ship?.dims?.sum ?? null },
   { id: 'category', label: '種類', desc: false, dir: ['一覧の順', '逆順'], value: (p) => { const i = (state.meta?.categories || []).indexOf(p.category); return i < 0 ? null : i; } },
@@ -244,6 +247,7 @@ export function matchCond(p, cond) {
     case 'band': return s.band === id;
     case 'method': return (s.options || []).some((o) => o.id === id);
     case 'market': return id === 'todo' ? !p.market?.checkedAt : p.market?.matchType === id;
+    case 'ymarket': return id === 'todo' ? !p.market?.yahoo?.checkedAt : p.market?.yahoo?.matchType === id;
     case 'net': {
       if (id === 'unknown') return p.net?.net == null;
       const b = NET_BANDS.find((x) => x.id === id);
@@ -252,6 +256,24 @@ export function matchCond(p, cond) {
     default: return true;
   }
 }
+
+const DECISION_CHIPS = ['undecided', 'sell', 'draft', 'hold', 'no_sell', 'no_stock'];
+/**
+ * 👁 表示切替: hide whole 出品判断 / 出品先 classes. A product with several destinations stays
+ * while any of them is shown ('none' = no destination). A status chip that names the class itself
+ * (e.g. 出さない, →ジモティー) still shows it.
+ */
+export function shownByClass(p, f = state.prefs.filter) {
+  const hd = state.prefs.hideDec || [];
+  const ht = state.prefs.hideTgt || [];
+  if (hd.length && !DECISION_CHIPS.includes(f) && hd.includes(p.decision)) return false;
+  if (ht.length && !f.startsWith('to_')) {
+    const t = p.targets || [];
+    return t.length ? t.some((x) => !ht.includes(x)) : !ht.includes('none');
+  }
+  return true;
+}
+export const hidingOn = () => !!((state.prefs.hideDec || []).length || (state.prefs.hideTgt || []).length);
 
 /** Conditions of the same kind are alternatives (OR); different kinds must all hold (AND). */
 export function inConds(p, conds = state.prefs.conds) {
@@ -275,11 +297,11 @@ export const isDateSort = () => !!groupDateField();
 
 /** Products matching the status chip, search-free (before the date range), for calendar counts. */
 export function productsForCalendar() {
-  return [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && inPriceRange(p) && inConds(p));
+  return [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && shownByClass(p) && inPriceRange(p) && inConds(p));
 }
 
 /** The prefs that make up a saved view. */
-export const VIEW_KEYS = ['filter', 'sort', 'desc', 'dateKind', 'dateFrom', 'dateTo', 'dateNone', 'priceMin', 'priceMax', 'priceUnknown', 'conds'];
+export const VIEW_KEYS = ['filter', 'sort', 'desc', 'dateKind', 'dateFrom', 'dateTo', 'dateNone', 'priceMin', 'priceMax', 'priceUnknown', 'conds', 'hideDec', 'hideTgt'];
 export const currentView = () => Object.fromEntries(VIEW_KEYS.map((k) => [k, state.prefs[k] ?? defaults[k] ?? '']));
 export function applyView(view) {
   for (const k of VIEW_KEYS) setPref(k, k in view ? view[k] : defaults[k] ?? '');
@@ -304,7 +326,7 @@ function compareBy(def, desc) {
 
 export function visibleProducts() {
   const q = state.query.trim().toLowerCase().normalize('NFKC');
-  let items = [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && inDateRange(p) && inPriceRange(p) && inConds(p));
+  let items = [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && shownByClass(p) && inDateRange(p) && inPriceRange(p) && inConds(p));
   if (q) {
     const terms = q.split(/\s+/);
     items = items.filter((p) => {

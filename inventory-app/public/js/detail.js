@@ -463,6 +463,20 @@ function destinationCard(p) {
 
 const MATCH_TEXT = { same: '同じ商品', similar: '似た商品', none: '見つからず' };
 /** Official image, size and every way to send it, the Mercari sold market, and the Mercari-only net (no purchase cost). */
+/** One site's sold-price record: which kind of match, median and range, and the examples with links. */
+function marketBlock(m, empty) {
+  if (!m) return h('p', { class: 'muted small' }, empty);
+  return h('div', { class: 'small' },
+    h('div', null,
+      h('span', { class: `badge ${m.matchType === 'same' ? 'ok' : m.matchType === 'similar' ? 'info' : 'warn'}` }, MATCH_TEXT[m.matchType]),
+      m.median != null ? ` 中央値 ${yen(m.median)}（${m.count}件・${yen(m.low)}〜${yen(m.high)}）` : ' 売れた例なし',
+      h('span', { class: 'muted' }, `　${m.method === 'image' ? '画像で照合' : 'キーワード検索'}・${(m.checkedAt || '').slice(0, 10)}`)),
+    m.note && h('div', { class: 'muted' }, m.note),
+    m.examples?.length ? h('ul', { style: { margin: '6px 0', paddingLeft: '18px' } }, m.examples.map((e) => h('li', null,
+      e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener noreferrer' }, `${yen(e.price)} ${e.title || '（商品ページ）'}`) : `${yen(e.price)} ${e.title}`,
+      h('span', { class: 'muted' }, ` ${MATCH_TEXT[e.match] || ''}${e.soldAt ? `・${e.soldAt}` : ''}`)))) : null);
+}
+
 function marketCard(p) {
   const s = p.summary || {};
   const sh = s.ship || {};
@@ -475,7 +489,7 @@ function marketCard(p) {
   const row = (k, v) => v ? h('tr', null, h('td', { class: 'k' }, k), h('td', null, v)) : null;
   const d = sh.dims;
   return h('div', { class: 'card' },
-    h('h2', null, '📦 サイズ・送料・メルカリ相場'),
+    h('h2', null, '📦 サイズ・送料・相場'),
     h('div', { class: 'row', style: { gap: '10px', alignItems: 'flex-start' } },
       official && h('img', { src: official, alt: '公式画像', style: { width: '84px', height: '84px', objectFit: 'contain', background: '#fff', borderRadius: '8px', border: '1px solid var(--border)' } }),
       h('div', { class: 'small', style: { flex: 1 } },
@@ -492,19 +506,13 @@ function marketCard(p) {
         h('td', { class: 'k' }, (state.meta.delivery?.groups || []).find((g) => g.id === o.group)?.label || ''),
         h('td', null, `${o.label} ${yen(o.price)}`))))) : null,
     h('h3', { class: 'small', style: { margin: '12px 0 4px' } }, 'メルカリ相場（最近売れた価格）'),
-    m ? h('div', { class: 'small' },
-      h('div', null,
-        h('span', { class: `badge ${m.matchType === 'same' ? 'ok' : m.matchType === 'similar' ? 'info' : 'warn'}` }, MATCH_TEXT[m.matchType]),
-        m.median != null ? ` 中央値 ${yen(m.median)}（${m.count}件・${yen(m.low)}〜${yen(m.high)}）` : ' 売れた例なし',
-        h('span', { class: 'muted' }, `　${m.method === 'image' ? '画像検索' : 'キーワード検索'}・${(m.checkedAt || '').slice(0, 10)}`)),
-      m.note && h('div', { class: 'muted' }, m.note),
-      m.examples?.length ? h('ul', { style: { margin: '6px 0', paddingLeft: '18px' } }, m.examples.map((e) => h('li', null,
-        e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener noreferrer' }, `${yen(e.price)} ${e.title || '（商品ページ）'}`) : `${yen(e.price)} ${e.title}`,
-        h('span', { class: 'muted' }, ` ${MATCH_TEXT[e.match] || ''}${e.soldAt ? `・${e.soldAt}` : ''}`)))) : null)
-      : h('p', { class: 'muted small' }, '未調査。「この商品のメルカリ相場を調べて」と頼むと、画像検索（同じ商品）→ 無ければ似た商品で調べて記録します。'),
+    marketBlock(m, '未調査。「この商品のメルカリ相場を調べて」と頼むと、画像検索（同じ商品）→ 無ければ似た商品で調べて記録します。'),
+    h('h3', { class: 'small', style: { margin: '12px 0 4px' } }, 'ヤフオク相場（落札価格）'),
+    marketBlock(p.marketYahoo, '未調査。「ヤフオクの相場も調べて」と頼むと、落札済みから同じ商品（無ければ似た商品）を探して記録します。'),
     h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap', marginTop: '6px' } },
       link(mk.imageUrl, '🖼 画像で検索'),
       link(mk.soldUrl, '🔎 メルカリ売り切れ検索'),
+      link(mk.yahooUrl, '🔨 ヤフオク落札相場'),
       m?.searchUrl && m.searchUrl !== mk.soldUrl ? link(m.searchUrl, '🔎 調査に使った検索') : null),
     h('h3', { class: 'small', style: { margin: '12px 0 4px' } }, '新品をメルカリで売った場合の手取り（仕入れ額は含まない）'),
     net ? h('table', { class: 'facts' },

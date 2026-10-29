@@ -80,6 +80,7 @@ function newProduct(id, at, settings) {
     research: null,
     amazon: null,
     market: null,
+    marketYahoo: null,
     sizeEstimate: null,
     textCandidates: [],
     listing: {
@@ -108,13 +109,22 @@ function newProduct(id, at, settings) {
 /** Collects what a mutation did, for history and for the rev counter. */
 const MATCH_TYPES = ['same', 'similar', 'none'];
 /** Clean a market record; the median/low/high come from the sold examples of the stated match type. */
-export function normalizeMarket(m, actor) {
+// Links kept per site: only that site's own item / search pages.
+const SITE_URLS = {
+  mercari: { item: /^https:\/\/(jp\.mercari\.com|mercari-shops\.com|item\.mercari\.com)\//, search: /^https:\/\/(jp\.mercari\.com|lens\.google\.com|www\.google\.com)\// },
+  yahoo: { item: /^https:\/\/(page\.auctions\.yahoo\.co\.jp|auctions\.yahoo\.co\.jp)\//, search: /^https:\/\/(auctions\.yahoo\.co\.jp|lens\.google\.com|www\.google\.com)\// },
+};
+export const MARKET_SITES = Object.keys(SITE_URLS);
+
+export function normalizeMarket(m, actor, site = 'mercari') {
   if (!m) return null;
+  const urls = SITE_URLS[site];
+  if (!urls) throw new AppError(400, `相場のサイトが不正です: ${site}`);
   const matchType = MATCH_TYPES.includes(m.matchType) ? m.matchType : 'none';
   const examples = (Array.isArray(m.examples) ? m.examples : []).slice(0, 20).map((e) => ({
     title: String(e.title || '').slice(0, 120),
     price: Number.isFinite(Number(e.price)) ? Math.round(Number(e.price)) : null,
-    url: /^https:\/\/(jp\.mercari\.com|mercari-shops\.com|item\.mercari\.com)\//.test(e.url || '') ? e.url : '',
+    url: urls.item.test(e.url || '') ? e.url : '',
     match: MATCH_TYPES.slice(0, 2).includes(e.match) ? e.match : matchType === 'none' ? 'similar' : matchType,
     soldAt: String(e.soldAt || '').slice(0, 20),
     note: String(e.note || '').slice(0, 80),
@@ -125,7 +135,7 @@ export function normalizeMarket(m, actor) {
     matchType,
     method: ['image', 'keyword'].includes(m.method) ? m.method : 'keyword',
     query: String(m.query || '').slice(0, 100),
-    searchUrl: /^https:\/\/(jp\.mercari\.com|lens\.google\.com|www\.google\.com)\//.test(m.searchUrl || '') ? m.searchUrl : '',
+    searchUrl: urls.search.test(m.searchUrl || '') ? m.searchUrl : '',
     examples,
     median: mid,
     low: basis[0] ?? null,
@@ -1052,11 +1062,13 @@ export class Store extends EventEmitter {
    * Recently sold prices on Mercari for the same item (found by image search) or, failing that, similar items.
    * Research, not a listing field: anyone may record it; the user decides prices.
    */
-  setMarket(id, actor, market) {
+  setMarket(id, actor, market, site = 'mercari') {
     return this.mutate(id, actor, 'market', (p, ctx) => {
-      const m = normalizeMarket(market, actor);
-      p.market = m;
-      ctx.note(m ? `メルカリ相場を記録（${m.matchType === 'same' ? '同じ商品' : m.matchType === 'similar' ? '似た商品' : '見つからず'}${m.median != null ? `・中央値 ${yen(m.median)}・${m.count}件` : ''}）` : 'メルカリ相場の記録を削除');
+      const m = normalizeMarket(market, actor, site);
+      if (site === 'yahoo') p.marketYahoo = m;
+      else p.market = m;
+      const name = site === 'yahoo' ? 'ヤフオク相場' : 'メルカリ相場';
+      ctx.note(m ? `${name}を記録（${m.matchType === 'same' ? '同じ商品' : m.matchType === 'similar' ? '似た商品' : '見つからず'}${m.median != null ? `・中央値 ${yen(m.median)}・${m.count}件` : ''}）` : `${name}の記録を削除`);
     });
   }
 

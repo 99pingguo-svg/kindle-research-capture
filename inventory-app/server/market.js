@@ -20,6 +20,10 @@ export function marketKeyword(p) {
 export const mercariSoldUrl = (keyword) =>
   `https://jp.mercari.com/search?keyword=${encodeURIComponent(keyword)}&status=sold_out&sort=created_time&order=desc`;
 
+/** Yahoo!オークション 落札相場 (closed auctions, readable without signing in). */
+export const yahooClosedUrl = (keyword) =>
+  `https://auctions.yahoo.co.jp/closedsearch/closedsearch?p=${encodeURIComponent(keyword)}&va=${encodeURIComponent(keyword)}&b=1&n=50`;
+
 /** Image search with the official (Amazon) photo — the basic way to find the very same item. */
 export const imageSearchUrl = (imageUrl) => (imageUrl ? `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(imageUrl)}` : '');
 
@@ -40,18 +44,24 @@ export function mercariNet(p, ship = shippingOf(p.amazon, p.sizeEstimate)) {
   };
 }
 
+const stats = (m) => ({
+  matchType: m?.matchType || null,
+  median: m?.median ?? null,
+  low: m?.low ?? null,
+  high: m?.high ?? null,
+  count: m?.count ?? 0,
+  checkedAt: m?.checkedAt || null,
+});
+
 export function marketBrief(p) {
   const kw = marketKeyword(p);
-  const m = p.market;
+  const ykw = p.marketYahoo?.query || kw;
   return {
     keyword: kw,
     soldUrl: mercariSoldUrl(kw),
+    yahooUrl: yahooClosedUrl(ykw),
     imageUrl: imageSearchUrl(p.amazon?.image),
-    matchType: m?.matchType || null,
-    median: m?.median ?? null,
-    low: m?.low ?? null,
-    high: m?.high ?? null,
-    count: m?.count ?? 0,
-    checkedAt: m?.checkedAt || null,
+    ...stats(p.market),
+    yahoo: stats(p.marketYahoo),
   };
 }

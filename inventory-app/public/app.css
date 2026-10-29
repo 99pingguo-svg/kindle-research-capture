@@ -408,3 +408,21 @@ code, .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 
 /* ---------- lighter list ---------- */
 .list-more { display: block; width: 100%; margin: 8px 0 90px; padding: 14px; border: 1px dashed var(--border); border-radius: 12px; background: none; color: var(--muted); font-size: 13px; }
+
+/* ---------- 👁 show / hide ---------- */
+.show-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+.show-toggle {
+  display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 10px; border-radius: 10px; text-align: left;
+  border: 1px dashed var(--border); background: var(--bg); color: var(--muted); text-decoration: line-through; font-size: 14px;
+}
+.show-toggle.on { border: 1px solid var(--accent); background: var(--accent-weak); color: var(--text); text-decoration: none; font-weight: 600; }
+.show-toggle .tick { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid currentColor; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; flex: none; }
+.show-toggle.on .tick { background: var(--accent); border-color: var(--accent); color: #fff; }
+.cond-chip.hide { border-style: dashed; }
+
+/* one-tap search links (メルカリ / ヤフオク) */
+.icon-btn.site { flex-direction: column; gap: 0; line-height: 1; height: 50px; }
+.icon-btn.site .ic { font-size: 17px; }
+.icon-btn.site .cap { font-size: 9.5px; font-weight: 700; margin-top: 3px; letter-spacing: -.02em; }
+.icon-btn.site.mercari .cap { color: #e0303a; }
+.icon-btn.site.yahoo .cap { color: #7b2fd0; }
