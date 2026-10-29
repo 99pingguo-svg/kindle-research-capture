@@ -6,7 +6,8 @@
 // 決め方（メルカリで Claude が判定済みの 51商品・約600候補で確かめた基準）:
 //   同じ商品 = 公式画像とほぼ同じ写真（dHash 距離 10 以下）、または ローカルAIが「同じ」かつ距離 12 以下
 //              → この条件では既存の判定と 100% 一致。AIの「同じ」だけだと半分は似た商品だったので使わない。
-//   似た商品 = それ以外で ローカルAIが「同じ／似た」と答えたもの
+//   似た商品 = それ以外で ローカルAIが「同じ／似た」と答え、Amazon価格の1.2倍以下・距離30以下のもの
+//              （Claude が選んだ似た商品は 92件中90件がこの範囲。AIが余分に拾う高い別物を落とす）
 //   ヤフオクの中古等は、新品の例が2件以上あれば除く。Amazon価格の5倍を超える例（まとめ売り等）も除く。
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,8 +20,7 @@ const opt = (k) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : nu
 const SITE = opt('--site') || 'yahoo';
 const MODEL = opt('--model') || 'qwen3.5:4b';
 const SCAN = path.join(DATA, 'imports', SITE === 'mercari' ? 'market-scan' : `${SITE}-scan`);
-export const SAME_DIST = 10;
-export const SAME_DIST_WITH_AI = 12;
+import { SAME_DIST, SAME_DIST_WITH_AI, SIMILAR_PRICE_CAP, SIMILAR_MAX_DIST } from './judge-rules.js';
 
 const ai = {};
 for (const f of (opt('--results') || '').split(',').filter(Boolean)) {
@@ -46,7 +46,7 @@ for (const id of Object.keys(byId).sort()) {
     const d = it.dist ?? 99;
     if (it.price > cap) return;
     if (d <= SAME_DIST || (lab === 'same' && d <= SAME_DIST_WITH_AI)) same.push(i);
-    else if (lab === 'same' || lab === 'similar') similar.push(i);
+    else if ((lab === 'same' || lab === 'similar') && d <= SIMILAR_MAX_DIST && (!scan.amazonPrice || it.price <= scan.amazonPrice * SIMILAR_PRICE_CAP)) similar.push(i);
   });
   // Prefer new items (we would sell new) when there are enough of them.
   const preferNew = (idx) => {
