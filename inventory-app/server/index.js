@@ -15,7 +15,7 @@ import { AppError, nowIso } from './util.js';
 import { readBody, parseMultipart } from './multipart.js';
 import { summary, readiness, lint, channelPackage, suggestedTargets, bulkPrice } from './rules.js';
 import { writeZip } from './zip.js';
-import { exportEntries, productsCsv } from './export.js';
+import { exportEntries, productsCsv, officialEntries, officialStats } from './export.js';
 import { createMcpHandler, matchesFilter } from './mcp.js';
 import * as mercari from './adapters/mercari.js';
 import * as schema from './schema.js';
@@ -290,6 +290,17 @@ export function createApp({ dataDir, token = '' } = {}) {
     if (query.ids) list = list.filter((p) => query.ids.split(',').includes(p.id));
     res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="products-${stamp()}.csv"` });
     res.end(productsCsv(list));
+  });
+  // Official images of products that have nothing but official images (参考用). ?ids= limits it to those products.
+  const officialList = (query) => {
+    const list = store.list({ includeTrash: false });
+    return query.ids ? list.filter((p) => query.ids.split(',').includes(p.id)) : list;
+  };
+  route('GET', '/api/export/official-stats', ({ query }) => officialStats(store, officialList(query)));
+  route('GET', '/api/export/official.zip', async ({ res, query }) => {
+    res.writeHead(200, { 'content-type': 'application/zip', 'content-disposition': `attachment; filename="official-images-${stamp()}.zip"` });
+    await writeZip(res, officialEntries(store, officialList(query)));
+    res.end();
   });
   route('GET', '/api/export.zip', async ({ res, query }) => {
     let list = store.list({ includeTrash: false });

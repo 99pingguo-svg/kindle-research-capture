@@ -582,3 +582,21 @@ test('saved list views are validated and kept in settings', async () => {
   assert.throws(() => store.updateSettings({ listViews: [{ name: '', view: {} }] }), /名前が空/);
   assert.throws(() => store.updateSettings({ listViews: 'x' }), /配列/);
 });
+
+test('official-image ZIP: only products whose photos are all official, one folder each, with an index', async () => {
+  const { officialEntries, officialStats } = await import('../server/export.js');
+  const store = new Store(tmp());
+  const a = store.create({ name: 'Only official' }).product.id;
+  const b = store.create({ name: 'Shot already' }).product.id;
+  store.create({ name: 'No photos' });
+  photo(store, a, 'claude', { kind: 'reference' });
+  photo(store, a, 'claude', { kind: 'reference' });
+  photo(store, b, 'claude', { kind: 'reference' });
+  photo(store, b, 'user');
+  const entries = officialEntries(store, store.list());
+  const names = entries.map((e) => e.name);
+  assert.equal(names[0], '公式画像/一覧.csv');
+  assert.deepEqual(names.slice(1), [`公式画像/${a}_Only_official/01.jpg`, `公式画像/${a}_Only_official/02.jpg`]);
+  assert.match(entries[0].data, new RegExp(`${a},Only official,`));
+  assert.deepEqual({ ...officialStats(store, store.list()), bytes: 0 }, { products: 1, images: 2, bytes: 0 });
+});

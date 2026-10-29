@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { listingText } from './store.js';
-import { listingPhotos, statusOf } from './rules.js';
+import { listingPhotos, statusOf, livePhotos } from './rules.js';
 import { safeSegment } from './util.js';
 import { guessCategory } from './category.js';
 
@@ -74,4 +74,49 @@ export function exportEntries(store, products, { photos = true } = {}) {
     });
   }
   return entries.filter((e) => !e.file || fs.existsSync(e.file));
+}
+
+/** Products whose photos are all official (reference) images — nothing shot or generated yet. */
+export const officialOnly = (p) => {
+  const live = livePhotos(p);
+  return live.length > 0 && live.every((ph) => ph.kind === 'reference');
+};
+
+/**
+ * ZIP of the official images of official-only products, one folder per product
+ * ("<id>_<商品名>/01.jpg …") plus 一覧.csv to find them again.
+ */
+export function officialEntries(store, products) {
+  const rows = [['ID', '商品名', '種類', 'Amazon価格', '枚数', 'フォルダ', '購入ページ']];
+  const entries = [];
+  for (const p of products.filter(officialOnly)) {
+    const folder = `${p.id}_${safeSegment(p.name || '名称未設定').slice(0, 30)}`;
+    const photos = livePhotos(p).filter((ph) => fs.existsSync(path.join(store.dir(p.id), ph.files.original)));
+    photos.forEach((ph, i) => {
+      const ext = path.extname(ph.files.original) || '.jpg';
+      entries.push({ name: `公式画像/${folder}/${String(i + 1).padStart(2, '0')}${ext}`, file: path.join(store.dir(p.id), ph.files.original) });
+    });
+    const url = p.links?.find((l) => l.type === 'purchase')?.url || p.links?.[0]?.url || '';
+    rows.push([p.id, p.name, p.category || guessCategory(p.name), p.research?.amazonPrice ?? p.amazon?.price ?? '', photos.length, folder, url]);
+  }
+  const csv = '\ufeff' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+  return [{ name: '公式画像/一覧.csv', data: csv }, ...entries];
+}
+
+/** Size of that ZIP before downloading it. */
+export function officialStats(store, products) {
+  const list = products.filter(officialOnly);
+  let images = 0;
+  let bytes = 0;
+  for (const p of list) {
+    for (const ph of livePhotos(p)) {
+      try {
+        bytes += fs.statSync(path.join(store.dir(p.id), ph.files.original)).size;
+        images++;
+      } catch {
+        /* missing file: left out of the ZIP too */
+      }
+    }
+  }
+  return { products: list.length, images, bytes };
 }

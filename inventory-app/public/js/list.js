@@ -732,11 +732,41 @@ async function mainMenu() {
     { label: '💾 状態の保存・ロールバック', value: '#/snapshots' },
     { label: '📋 商品リストを一括登録', value: '#/import' },
     { label: '📅 日付を一括反映（既存商品）', value: '#/dates' },
+    { label: '🖼 公式画像を ZIP でダウンロード', value: 'official' },
     { label: '⚙️ 設定・AI接続・書き出し', value: '#/settings' },
     { label: '↻ 再読み込み', value: 'reload' },
   ]);
   if (v === 'reload') {
     await loadAll().catch(showError);
     toast('更新しました');
-  } else if (v) location.hash = v;
+  } else if (v === 'official') openOfficialZip();
+  else if (v) location.hash = v;
+}
+
+/** Official images of the products that have nothing else yet, as one ZIP (all of them, or those in the current list). */
+async function openOfficialZip() {
+  const only = (p) => !p.trashedAt && !p.counts.actual && !p.counts.generated && p.counts.reference > 0;
+  const here = visibleProducts().filter(only).map((p) => p.id);
+  const narrowed = here.length !== [...state.products.values()].filter(only).length;
+  let all;
+  let mine = null;
+  try {
+    [all, mine] = await Promise.all([api.get('/api/export/official-stats'), narrowed && here.length ? api.get(`/api/export/official-stats?ids=${here.join(',')}`) : null]);
+  } catch (e) {
+    return showError(e);
+  }
+  const mb = (b) => (b >= 1e9 ? `${(b / 1e9).toFixed(1)}GB` : `${Math.max(1, Math.round(b / 1e6))}MB`);
+  const label = (s) => `${s.products}商品・${s.images}枚・約${mb(s.bytes)}`;
+  sheet((close) => {
+    // Let the download start before the sheet goes away.
+    const later = () => setTimeout(() => close(), 300);
+    return h('div', null,
+      h('h2', null, '🖼 公式画像をまとめてダウンロード'),
+      h('p', { class: 'muted small' }, '公式画像しか入っていない商品（撮影・生成した画像がまだ無いもの）の公式画像を、商品ごとのフォルダ（ID_商品名）に分けた ZIP にします。一覧.csv（ID・商品名・種類・Amazon価格・購入ページ）付き。'),
+      all.products ? h('div', { class: 'actions' },
+        mine && h('a', { class: 'btn primary', href: `/api/export/official.zip?ids=${here.join(',')}`, download: '', onclick: later }, `今の一覧の分だけ（${label(mine)}）`),
+        h('a', { class: `btn ${mine ? '' : 'primary'}`, href: '/api/export/official.zip', download: '', onclick: later }, `全部（${label(all)}）`),
+        h('button', { class: 'btn ghost', onclick: () => close() }, 'キャンセル')) : h('p', null, '該当する商品はありません。'),
+      h('p', { class: 'muted small' }, '大きいので Wi-Fi でのダウンロードがおすすめです。iPhone では「ファイル」アプリの「ダウンロード」に入ります。'));
+  });
 }
