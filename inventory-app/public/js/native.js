@@ -100,8 +100,9 @@ export function watchNativeReturn() {
 /** One-time setup: two iPhone shortcuts (open Camera / send the photos taken since the shoot started). */
 export async function openNativeSetup() {
   let key = '';
+  let ticket = '';
   try {
-    key = (await api.get('/api/native-shoot/key')).key;
+    ({ key, ticket } = await api.get('/api/native-shoot/key'));
   } catch (e) {
     return showError(e);
   }
@@ -117,7 +118,7 @@ export async function openNativeSetup() {
     h('p', { class: 'small' }, 'iPhone の「カメラ」アプリで撮るので、フォトグラフスタイル（ローズゴールド等）や 17 Pro のカメラ機能がそのまま使えます。iPhone でこの画面を開き、下の2つを押すと「ショートカット」アプリに追加できます（自動設定）。'),
     h('div', { class: 'actions' },
       h('a', { class: 'btn primary', href: '/api/native-shoot/shortcut/camera' }, `① 「${names.camera}」を追加`),
-      h('a', { class: 'btn primary', href: '/api/native-shoot/shortcut/send' }, `② 「${names.send}」を追加`)),
+      h('a', { class: 'btn primary', href: `/api/native-shoot/shortcut/send?ticket=${encodeURIComponent(ticket)}` }, `② 「${names.send}」を追加`)),
     h('p', { class: 'muted small' }, '「台帳に送る」は最新の写真（スクリーンショット以外・最大20枚）を送ります。撮影を始める前の写真はMacが撮影日時を見て取り込みません。同じ写真が二重に入ることもありません。'),
     h('details', null, h('summary', { class: 'small' }, '手で作る場合の手順'),
     h('h3', null, '① 台帳カメラ（カメラを開く）'),

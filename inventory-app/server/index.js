@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import zlib from 'node:zlib';
-import { X509Certificate, timingSafeEqual, createHash } from 'node:crypto';
+import { X509Certificate, timingSafeEqual, createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Store, isUser } from './store.js';
 import { shippingMeta } from './shipping.js';
@@ -181,9 +181,16 @@ export function createApp({ dataDir, token = '' } = {}) {
   });
   route('DELETE', '/api/native-shoot', ({ actor }) => store.clearNativeShoot(actor) ?? { active: false });
   // The two iPhone shortcuts as signed files (the send one carries the upload key). Opened from the app on the iPhone.
-  route('GET', '/api/native-shoot/shortcut/:which', async ({ params, req, res }) => {
+  // A browser link cannot carry x-actor, so the key-bearing file needs a one-time ticket that only the user's key request hands out.
+  const shortcutTickets = new Map(); // ticket -> expiry
+  route('GET', '/api/native-shoot/shortcut/:which', async ({ params, req, res, query }) => {
     const name = { camera: '台帳カメラ', send: '台帳に送る' }[params.which];
     if (!name) throw new AppError(404, 'not found');
+    if (params.which === 'send') {
+      const exp = shortcutTickets.get(String(query.ticket || ''));
+      shortcutTickets.delete(String(query.ticket || ''));
+      if (!exp || exp < Date.now()) throw new AppError(403, '設定画面を開き直してから押してください（引換券の期限切れ）');
+    }
     const host = String(req.headers['x-forwarded-host'] || req.headers.host || '');
     if (!/^[a-z0-9.:-]+$/i.test(host)) throw new AppError(400, 'ホスト名が不正です');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-shortcut-'));
@@ -200,7 +207,10 @@ export function createApp({ dataDir, token = '' } = {}) {
   });
   route('GET', '/api/native-shoot/key', ({ actor, query }) => {
     if (!isUser(actor)) throw new AppError(403, 'ユーザーのみ');
-    return { key: store.uploadKey({ rotate: query.rotate === '1' }) };
+    const ticket = randomBytes(16).toString('base64url');
+    for (const [t, exp] of shortcutTickets) if (exp < Date.now()) shortcutTickets.delete(t);
+    shortcutTickets.set(ticket, Date.now() + 5 * 60_000);
+    return { key: store.uploadKey({ rotate: query.rotate === '1' }), ticket };
   });
   // Body = the photo itself (JPEG / HEIC / PNG). Display and list sizes are made here with sips.
   route('POST', '/api/native-shoot/photos', async ({ req }) => {

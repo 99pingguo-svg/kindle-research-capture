@@ -216,3 +216,20 @@ test('native camera: the shortcut key can only read the target and send photos t
     for (const s of [lan, local]) { s.closeAllConnections(); s.close(); }
   }
 });
+
+test('native camera: the key-bearing shortcut needs a one-time ticket from the user', async () => {
+  const app = createApp({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-ticket-')), token: 'secret-123' });
+  const local = http.createServer(app.trustedHandler);
+  await new Promise((r) => local.listen(0, '127.0.0.1', r));
+  const at = (p, init = {}) => fetch(`http://127.0.0.1:${local.address().port}${p}`, init);
+  try {
+    assert.equal((await at('/api/native-shoot/shortcut/send')).status, 403);
+    assert.equal((await at('/api/native-shoot/key', { headers: { 'x-actor': 'claude' } })).status, 403);
+    const { ticket } = await (await at('/api/native-shoot/key', { headers: { 'x-actor': 'user' } })).json();
+    assert.ok(ticket);
+    assert.equal((await at(`/api/native-shoot/shortcut/send?ticket=wrong`)).status, 403);
+  } finally {
+    local.closeAllConnections();
+    local.close();
+  }
+});
