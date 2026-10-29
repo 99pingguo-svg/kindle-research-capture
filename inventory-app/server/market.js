@@ -30,21 +30,43 @@ export const rakumaSoldUrl = (keyword) => `https://fril.jp/s?query=${encodeURICo
 /** Image search with the official (Amazon) photo — the basic way to find the very same item. */
 export const imageSearchUrl = (imageUrl) => (imageUrl ? `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(imageUrl)}` : '');
 
-/** Price basis: the sold median if researched, else the price the user set. */
+const SITE_NAMES = { mercari: 'メルカリ', yahoo: 'ヤフオク', rakuma: 'ラクマ' };
+const siteRecords = (p) => [['mercari', p.market], ['rakuma', p.marketRakuma], ['yahoo', p.marketYahoo]];
+
+/**
+ * Price basis, best first: a sold median of the very same item (メルカリ → ラクマ → ヤフオク), then a median of similar
+ * items (same order), then the price the user set. Similar-only is shown as 参考 (reference).
+ */
 export function mercariNet(p, ship = shippingOf(p.amazon, p.sizeEstimate)) {
-  const m = p.market;
-  const basis = m?.median != null ? { kind: 'market', price: m.median } : p.listing?.price != null ? { kind: 'listing', price: p.listing.price } : null;
+  const pick = (type) => siteRecords(p).find(([, m]) => m?.matchType === type && m.median != null);
+  const hit = pick('same') || pick('similar');
+  const basis = hit
+    ? { kind: 'market', price: hit[1].median, site: hit[0], matchType: hit[1].matchType, count: hit[1].count }
+    : p.listing?.price != null ? { kind: 'listing', price: p.listing.price } : null;
   if (!basis) return null;
   const fee = Math.floor(basis.price * MERCARI_FEE_RATE);
   const shipPrice = ship.cheapest?.price ?? null;
   return {
     basis: basis.kind,
+    site: basis.site || null,
+    siteLabel: basis.site ? SITE_NAMES[basis.site] : '',
+    matchType: basis.matchType || null,
+    count: basis.count ?? null,
+    reference: basis.matchType === 'similar',
     price: basis.price,
     fee,
     ship: shipPrice,
     shipLabel: ship.cheapest?.label || '',
     net: shipPrice == null ? null : basis.price - fee - shipPrice,
   };
+}
+
+/** The one sold item to open from the list: same/similar as recorded, price closest to the median. */
+function refItem(m) {
+  const pool = (m?.examples || []).filter((e) => e.url && e.match === m.matchType);
+  if (!pool.length) return null;
+  const e = pool.reduce((a, b) => (Math.abs(b.price - m.median) < Math.abs(a.price - m.median) ? b : a));
+  return { url: e.url, price: e.price, match: e.match };
 }
 
 const stats = (m) => ({
@@ -54,6 +76,7 @@ const stats = (m) => ({
   high: m?.high ?? null,
   count: m?.count ?? 0,
   checkedAt: m?.checkedAt || null,
+  ref: refItem(m),
 });
 
 export function marketBrief(p) {

@@ -165,6 +165,10 @@ a.icon-btn { text-decoration: none; }
 .seg.decisions { display: flex; max-width: 100%; }
 .seg.decisions button { flex: 1 1 auto; white-space: nowrap; padding: 0 4px; font-size: 11.5px; }
 .seg.targets button { font-size: 13px; white-space: nowrap; padding-left: 10px; padding-right: 10px; }
+/* Five or more destinations: a 3-column grid (thin lines from the 1px gap) so the row never overflows on a phone. */
+.seg.targets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--border); max-width: 330px; }
+.seg.targets button { background: var(--card); font-size: 12px; padding: 0 4px; overflow: hidden; text-overflow: ellipsis; }
+.seg.targets button + button { border-left: none; }
 .seg.targets button.on { background: var(--info); color: #fff; }
 .seg.targets button.suggested { outline: 1.5px dashed var(--info); outline-offset: -3px; color: var(--info); }
 .seg button.on.hold { background: var(--warn); color: #fff; }
@@ -428,6 +432,9 @@ code, .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 }
 .mk-link .v { font-weight: 600; font-size: 11px; color: var(--text); font-variant-numeric: tabular-nums; }
 .mk-link .go { font-size: 10.5px; font-weight: 500; color: var(--muted); }
+.mk-link .v small { font-size: 9.5px; font-weight: 500; color: var(--muted); margin-left: 2px; }
+.mk-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 12px 0 4px; }
+.mk-head .btn { font-weight: 500; }
 .mk-link.mercari { color: #d7263d; }
 .mk-link.yahoo { color: #7b2fd0; }
 .mk-link.rakuma { color: #b0006f; }

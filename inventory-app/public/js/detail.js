@@ -433,7 +433,7 @@ function candidateSheet(p, def, input) {
 const CHANNEL_DEFS = () => state.meta.channels || [];
 const chLabel = (id) => CHANNEL_DEFS().find((c) => c.id === id)?.label || id;
 
-/** Where to offer it (メルカリ／ジモティー／フリマ) and what the price research says. */
+/** Where to offer it (メルカリ／ジモティー／ヤフオク／ラクマ／フリマ) and what the price research says. */
 function destinationCard(p) {
   const r = p.research;
   const targets = p.targets || [];
@@ -507,24 +507,23 @@ function marketCard(p) {
       h('table', { class: 'facts' }, sh.options.map((o) => h('tr', null,
         h('td', { class: 'k' }, (state.meta.delivery?.groups || []).find((g) => g.id === o.group)?.label || ''),
         h('td', null, `${o.label} ${yen(o.price)}`))))) : null,
-    h('h3', { class: 'small', style: { margin: '12px 0 4px' } }, 'メルカリ相場（最近売れた価格）'),
-    marketBlock(m, '未調査。「この商品のメルカリ相場を調べて」と頼むと、画像検索（同じ商品）→ 無ければ似た商品で調べて記録します。'),
-    h('h3', { class: 'small', style: { margin: '12px 0 4px' } }, 'ヤフオク相場（落札価格）'),
-    marketBlock(p.marketYahoo, '未調査。「ヤフオクの相場も調べて」と頼むと、落札済みから同じ商品（無ければ似た商品）を探して記録します。'),
-    h('h3', { class: 'small', style: { margin: '12px 0 4px' } }, 'ラクマ相場（売り切れ）'),
-    marketBlock(p.marketRakuma, '未調査。「ラクマの相場も調べて」と頼むと、売り切れから同じ商品（無ければ似た商品）を探して記録します。'),
-    h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap', marginTop: '6px' } },
-      link(mk.imageUrl, '🖼 画像で検索'),
-      link(mk.soldUrl, '🔎 メルカリ売り切れ検索'),
-      link(mk.yahooUrl, '🔨 ヤフオク落札相場'),
-      link(mk.rakumaUrl, '🛍 ラクマ売り切れ検索'),
-      m?.searchUrl && m.searchUrl !== mk.soldUrl ? link(m.searchUrl, '🔎 調査に使った検索') : null),
+    // Each site: the recorded result (sold items open one by one) and, separately, its sold-items list.
+    [['メルカリ相場（最近売れた価格）', m, mk.soldUrl, '売り切れ一覧', '未調査。「この商品のメルカリ相場を調べて」と頼むと、画像検索（同じ商品）→ 無ければ似た商品で調べて記録します。'],
+      ['ヤフオク相場（落札価格）', p.marketYahoo, mk.yahooUrl, '落札相場一覧', '未調査。「ヤフオクの相場も調べて」と頼むと、落札済みから同じ商品（無ければ似た商品）を探して記録します。'],
+      ['ラクマ相場（売り切れ）', p.marketRakuma, mk.rakumaUrl, '売り切れ一覧', '未調査。「ラクマの相場も調べて」と頼むと、売り切れから同じ商品（無ければ似た商品）を探して記録します。'],
+    ].map(([title, rec, listUrl, listLabel, empty]) => [
+      h('h3', { class: 'small mk-head' }, title, h('span', { class: 'spacer' }),
+        rec?.searchUrl && rec.searchUrl !== listUrl ? link(rec.searchUrl, '🔎 調査に使った検索') : null,
+        link(listUrl, `📋 ${listLabel} ↗`)),
+      marketBlock(rec, empty)]),
+    h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap', marginTop: '6px' } }, link(mk.imageUrl, '🖼 画像で検索')),
     h('h3', { class: 'small', style: { margin: '12px 0 4px' } }, '新品をメルカリで売った場合の手取り（仕入れ額は含まない）'),
+    net?.reference && h('p', { class: 'small', style: { margin: '0 0 4px', color: 'var(--warn)' } }, `同じ商品の売れた例が無いため、${net.siteLabel}で売れた似た商品${net.count ? `${net.count}件` : ''}の中央値から出した参考値です。`),
     net ? h('table', { class: 'facts' },
-      row(net.basis === 'market' ? '販売額（相場の中央値）' : '販売額（設定した販売価格）', yen(net.price)),
+      row(net.basis === 'market' ? `販売額（${net.siteLabel}・${net.matchType === 'same' ? '同じ商品' : '似た商品'}の中央値）` : '販売額（設定した販売価格）', yen(net.price)),
       row('販売手数料 10%', `− ${yen(net.fee)}`),
       row('送料', net.ship != null ? `− ${yen(net.ship)}（${net.shipLabel}）` : 'サイズ不明のため計算できません'),
-      row('手取り', net.net != null ? h('b', { style: { color: net.net <= 0 ? 'var(--danger)' : net.net < 500 ? 'var(--warn)' : 'var(--ok)' } }, yen(net.net)) : '—'))
+      row(net.reference ? '参考手取り' : '手取り', net.net != null ? h('b', { style: { color: net.net <= 0 ? 'var(--danger)' : net.net < 500 ? 'var(--warn)' : 'var(--ok)' } }, yen(net.net)) : '—'))
       : h('p', { class: 'muted small' }, '相場か販売価格が入ると計算します。'));
 }
 

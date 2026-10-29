@@ -526,10 +526,13 @@ function badgesFor(p) {
       y.median != null ? `${name} ${yen(y.median)}（${MATCH_LABEL[y.matchType]}）` : `${name} 見つからず`));
   }
   if (p.net?.net != null) {
-    const v = p.net.net;
-    b.push(h('span', { class: `badge ${v <= 0 ? 'danger' : v < 500 ? 'warn' : 'ok'}`, title: `${p.net.basis === 'market' ? '相場' : '販売価格'} ${yen(p.net.price)} − 手数料 ${yen(p.net.fee)} − 送料 ${yen(p.net.ship)}（${p.net.shipLabel}）` },
-      `手取り ${yen(v)}${p.net.basis === 'listing' ? '（販売価格）' : ''}`));
+    const n = p.net;
+    const v = n.net;
+    const from = n.basis === 'market' ? `${n.siteLabel}の${n.matchType === 'same' ? '同じ商品' : '似た商品'}の相場` : '販売価格';
+    b.push(h('span', { class: `badge ${v <= 0 ? 'danger' : v < 500 ? 'warn' : 'ok'}`, title: `${from} ${yen(n.price)} − 手数料 ${yen(n.fee)} − 送料 ${yen(n.ship)}（${n.shipLabel}）` },
+      `${n.reference ? '参考手取り' : '手取り'} ${yen(v)}${n.basis === 'listing' ? '（販売価格）' : n.site !== 'mercari' ? `（${n.siteLabel}）` : ''}`));
   }
+
   if (p.counts.generated) b.push(h('span', { class: 'badge' }, `生成 ${p.counts.generated}`));
   if (p.counts.listing) b.push(h('span', { class: 'badge' }, `出品用 ${p.counts.listing}`));
   for (const [ch, st] of Object.entries(p.channels || {})) {
@@ -674,7 +677,7 @@ function groupHead(run, d) {
     }, d || '種類なし', h('span', { class: 'n' }, `${groups.get(d)}件`));
 }
 
-/** Sites whose sold prices are researched, and their one-tap searches (別ウィンドウ). */
+/** Sites whose sold prices are researched. From the list one tap opens the sold item nearest the median (else the search). */
 const SITES = [
   { id: 'mercari', label: 'メルカリ', what: '売り切れ', url: (m) => m.soldUrl, stats: (m) => m },
   { id: 'yahoo', label: 'ヤフオク', what: '落札相場', url: (m) => m.yahooUrl, stats: (m) => m.yahoo },
@@ -685,11 +688,16 @@ function marketLinks(p) {
   if (!m) return null;
   return h('div', { class: 'mk-links' }, SITES.map((s) => {
     const st = s.stats(m);
-    return s.url(m) && h('a', {
-      class: `mk-link ${s.id}`, href: s.url(m), target: '_blank', rel: 'noopener noreferrer',
-      title: `${s.label}の${s.what}を検索（別ウィンドウ）`, 'aria-label': `${p.name || p.id} を${s.label}の${s.what}で検索`,
+    const ref = st?.ref;
+    const kind = ref ? (ref.match === 'same' ? '同じ商品' : '似た商品') : '';
+    const href = ref?.url || s.url(m);
+    return href && h('a', {
+      class: `mk-link ${s.id} ${ref ? 'item' : ''}`, href, target: '_blank', rel: 'noopener noreferrer',
+      title: ref ? `${s.label}で売れた${kind}（${yen(ref.price)}）を開く（別ウィンドウ）` : `${s.label}の${s.what}を検索（別ウィンドウ）`,
+      'aria-label': ref ? `${p.name || p.id} の${s.label}の参考商品を開く` : `${p.name || p.id} を${s.label}の${s.what}で検索`,
       onclick: (e) => e.stopPropagation(),
-    }, `${s.label} ↗`, st?.median != null ? h('span', { class: 'v' }, yen(st.median)) : h('span', { class: 'go' }, s.what));
+    }, `${s.label} ↗`,
+    st?.median != null ? h('span', { class: 'v' }, yen(st.median), ref?.match === 'similar' ? h('small', null, '似') : null) : h('span', { class: 'go' }, s.what));
   }));
 }
 

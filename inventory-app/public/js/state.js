@@ -108,6 +108,8 @@ export const FILTERS = [
   { id: 'draft', label: '下書き' },
   { id: 'to_mercari', label: '→メルカリ' },
   { id: 'to_jmty', label: '→ジモティー' },
+  { id: 'to_yahoo', label: '→ヤフオク' },
+  { id: 'to_rakuma', label: '→ラクマ' },
   { id: 'to_flea', label: '→フリマ' },
   { id: 'research_jmty', label: 'ジモティ候補' },
   { id: 'research_3000', label: '3000円以上' },
@@ -154,6 +156,8 @@ export function matchesFilter(sm, filter) {
     case 'trading': return active && sm.stage === 'trading';
     case 'to_mercari': return active && (sm.targets || []).includes('mercari');
     case 'to_jmty': return active && (sm.targets || []).includes('jmty');
+    case 'to_yahoo': return active && (sm.targets || []).includes('yahoo');
+    case 'to_rakuma': return active && (sm.targets || []).includes('rakuma');
     case 'to_flea': return active && (sm.targets || []).includes('flea');
     case 'research_jmty': return active && /ジモティ/.test(sm.research?.group || '');
     case 'research_3000': return active && /3000円以上/.test(sm.research?.group || '');

@@ -43,7 +43,7 @@ const s = {
   enumOf: (values, description) => ({ type: 'string', enum: values, description }),
 };
 
-const LIST_FILTERS = ['all', 'sell', 'draft', 'undecided', 'hold', 'no_sell', 'no_stock', 'needs_photos', 'shot_today', 'shoot_plan', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'trading', 'sold', 'to_mercari', 'to_jmty', 'to_flea', 'research_jmty', 'research_3000', 'research_2300', 'archived', 'trash'];
+const LIST_FILTERS = ['all', 'sell', 'draft', 'undecided', 'hold', 'no_sell', 'no_stock', 'needs_photos', 'shot_today', 'shoot_plan', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'trading', 'sold', 'to_mercari', 'to_jmty', 'to_yahoo', 'to_rakuma', 'to_flea', 'research_jmty', 'research_3000', 'research_2300', 'archived', 'trash'];
 
 function today() {
   const d = new Date();
@@ -78,6 +78,8 @@ export function matchesFilter(sm, filter) {
     case 'trading': return active && sm.stage === 'trading';
     case 'to_mercari': return active && (sm.targets || []).includes('mercari');
     case 'to_jmty': return active && (sm.targets || []).includes('jmty');
+    case 'to_yahoo': return active && (sm.targets || []).includes('yahoo');
+    case 'to_rakuma': return active && (sm.targets || []).includes('rakuma');
     case 'to_flea': return active && (sm.targets || []).includes('flea');
     case 'research_jmty': return active && /ジモティ/.test(sm.research?.group || '');
     case 'research_3000': return active && /3000円以上/.test(sm.research?.group || '');
@@ -500,7 +502,7 @@ result: pass=問題なし / needs_review=ユーザー確認が必要 / fail=修�
   });
 
   // ---- destinations: what each platform should receive ----
-  tool('channel_package', '出品先（mercari=メルカリ / jmty=ジモティー / flea=フリマ）に出す内容の完成形を返す。出品先ごとの原稿（override.<出品先>.title/description/price と出品先ごとの写真）があればそれを、無ければ共通の原稿を使う。写真は順番どおりの絶対パス。アップロード作業はこれだけを正本として読む。targeted=false はユーザーがその出品先を選んでいない商品（出品しない）。', {
+  tool('channel_package', '出品先（mercari=メルカリ / jmty=ジモティー / yahoo=ヤフオク / rakuma=ラクマ / flea=フリマ）に出す内容の完成形を返す。出品先ごとの原稿（override.<出品先>.title/description/price と出品先ごとの写真）があればそれを、無ければ共通の原稿を使う。写真は順番どおりの絶対パス。アップロード作業はこれだけを正本として読む。targeted=false はユーザーがその出品先を選んでいない商品（出品しない）。', {
     id: s.id,
     channel: s.enumOf(CHANNELS.map((c) => c.id), '出品先'),
   }, ['id', 'channel'], ({ id, channel }) => {

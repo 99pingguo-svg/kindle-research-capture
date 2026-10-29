@@ -1017,7 +1017,7 @@ export class Store extends EventEmitter {
 
   // ---------- destinations, per-destination photos, research, text candidates ----------
 
-  /** Where the user wants to offer the product (メルカリ／ジモティー／フリマ, any number). User-only. */
+  /** Where the user wants to offer the product (メルカリ／ジモティー／ヤフオク／ラクマ／フリマ, any number). User-only. */
   setTargets(id, actor, targets) {
     forbidAi(actor, '出品先の選択');
     const next = [...new Set(targets || [])];

@@ -166,7 +166,7 @@ export function photoUrl(p, ph, variant = 'thumb') {
 
 /** Compact record used by the list screen and by list_products. */
 /**
- * What one destination (メルカリ／ジモティー／フリマ) will receive: its own title/description/price/photos
+ * What one destination (メルカリ／ジモティー／ヤフオク／ラクマ／フリマ) will receive: its own title/description/price/photos
  * where the user set them, otherwise the common listing. This is what an uploader reads.
  */
 export function channelPackage(p, channel) {
@@ -195,7 +195,7 @@ export function channelPackage(p, channel) {
 }
 
 /** Price fields the bulk price tool may set. */
-export const PRICE_FIELDS = ['listing.price', 'override.mercari.price', 'override.jmty.price', 'override.flea.price'];
+export const PRICE_FIELDS = ['listing.price', 'override.mercari.price', 'override.jmty.price', 'override.yahoo.price', 'override.rakuma.price', 'override.flea.price'];
 
 /**
  * Bulk price for one product: a fixed amount, or a percentage of the recorded Amazon price (sale price included),
