@@ -5,7 +5,8 @@ import https from 'node:https';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import zlib from 'node:zlib';
 import { X509Certificate, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Store, isUser } from './store.js';
@@ -425,9 +426,18 @@ const SECURITY_HEADERS = {
   'x-frame-options': 'DENY',
 };
 
+const acceptsGzip = (res) => /\bgzip\b/.test(res.req?.headers['accept-encoding'] || '');
+
 function sendJson(res, status, value) {
   const body = JSON.stringify(value);
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  const headers = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
+  // The product list is ~1.5MB of JSON; gzip makes it about a tenth for the phone.
+  if (body.length > 2048 && acceptsGzip(res)) {
+    const gz = zlib.gzipSync(body, { level: 5 });
+    res.writeHead(status, { ...headers, 'content-encoding': 'gzip', vary: 'Accept-Encoding', 'content-length': gz.length });
+    return res.end(gz);
+  }
+  res.writeHead(status, headers);
   res.end(body);
 }
 
@@ -435,16 +445,81 @@ function serveDataFile(req, res, dataDir, rel) {
   const safe = path.normalize(decodeURIComponent(rel)).replace(/^(\.\.[/\\])+/, '');
   if (!/^(products[/\\][^/\\]+[/\\]photos|outbox)[/\\]/.test(safe)) throw new AppError(404, 'not found');
   const file = path.join(dataDir, safe);
-  if (!file.startsWith(dataDir + path.sep) || !fs.existsSync(file)) throw new AppError(404, 'not found');
-  pipeFile(res, file, { 'content-type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'cache-control': safe.startsWith('outbox') ? 'no-store' : 'private, max-age=31536000, immutable' });
+  if (!file.startsWith(dataDir + path.sep)) throw new AppError(404, 'not found');
+  const headers = { 'content-type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'cache-control': safe.startsWith('outbox') ? 'no-store' : 'private, max-age=31536000, immutable' };
+  // List-size thumbnails (x.mini.jpg) are made from x.thumb.jpg the first time they are asked for.
+  if (!fs.existsSync(file) && /\.mini\.jpg$/.test(file)) {
+    const thumb = file.replace(/\.mini\.jpg$/, '.thumb.jpg');
+    if (!fs.existsSync(thumb)) throw new AppError(404, 'not found');
+    return makeMini(thumb, file).then((ok) => pipeFile(res, ok ? file : thumb, headers));
+  }
+  if (!fs.existsSync(file)) throw new AppError(404, 'not found');
+  pipeFile(res, file, headers);
 }
 
+// 256px on the long side: sharp at 3x for the 72px list thumbnail, about a third of the 400px thumb.
+const MINI_PX = 256;
+const miniJobs = new Map();
+let miniRunning = 0;
+const miniWaiting = [];
+function makeMini(src, dest) {
+  if (miniJobs.has(dest)) return miniJobs.get(dest);
+  const job = new Promise((resolve) => {
+    const run = () => {
+      miniRunning++;
+      const tmp = `${dest}.${process.pid}.tmp.jpg`;
+      execFile('sips', ['-Z', String(MINI_PX), '-s', 'format', 'jpeg', '-s', 'formatOptions', '78', src, '--out', tmp], { timeout: 15000 }, (err) => {
+        let ok = false;
+        try {
+          if (!err && fs.statSync(tmp).size > 0) {
+            fs.renameSync(tmp, dest);
+            ok = true;
+          }
+        } catch {
+          /* fall back to the thumb */
+        }
+        if (!ok) fs.rmSync(tmp, { force: true });
+        miniRunning--;
+        miniJobs.delete(dest);
+        resolve(ok);
+        miniWaiting.shift()?.();
+      });
+    };
+    // A few at a time so the first list view does not start dozens of sips at once.
+    if (miniRunning < 3) run();
+    else miniWaiting.push(run);
+  });
+  miniJobs.set(dest, job);
+  return job;
+}
+
+// App files: always revalidated (so a new version shows up at once) but answered with 304 when
+// unchanged, and gzipped once per version.
+const staticCache = new Map(); // file -> { tag, raw, gz }
+const COMPRESSIBLE = new Set(['.html', '.js', '.css', '.json', '.webmanifest', '.svg']);
 function serveStatic(req, res, pathname) {
   let rel = pathname === '/' ? '/index.html' : pathname;
   let file = path.join(PUBLIC, path.normalize(rel).replace(/^(\.\.[/\\])+/, ''));
   if (!file.startsWith(PUBLIC) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(PUBLIC, 'index.html');
   if (!fs.existsSync(file)) throw new AppError(404, 'not found');
-  pipeFile(res, file, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' });
+  const st = fs.statSync(file);
+  const tag = `W/"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"`;
+  const headers = { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache', etag: tag, vary: 'Accept-Encoding' };
+  if (req.headers['if-none-match'] === tag) {
+    res.writeHead(304, headers);
+    return res.end();
+  }
+  if (!COMPRESSIBLE.has(path.extname(file))) return pipeFile(res, file, headers);
+  let c = staticCache.get(file);
+  if (!c || c.tag !== tag) {
+    const raw = fs.readFileSync(file);
+    c = { tag, raw, gz: zlib.gzipSync(raw, { level: 9 }) };
+    staticCache.set(file, c);
+  }
+  const gz = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+  const body = gz ? c.gz : c.raw;
+  res.writeHead(200, { ...headers, ...(gz ? { 'content-encoding': 'gzip' } : {}), 'content-length': body.length });
+  res.end(body);
 }
 
 function pipeFile(res, file, headers) {

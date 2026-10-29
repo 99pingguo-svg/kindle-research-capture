@@ -128,7 +128,6 @@ a.icon-btn { text-decoration: none; }
 .item {
   background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
   display: grid; grid-template-columns: 72px 1fr auto; gap: 10px; padding: 10px; align-items: start;
-  content-visibility: auto; contain-intrinsic-size: auto 120px;
 }
 .item.selected { outline: 2px solid var(--accent); }
 .item.active { border-color: var(--accent); }
@@ -406,3 +405,6 @@ code, .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 .sticky-actions { position: sticky; bottom: 0; background: var(--card); padding-top: 10px; margin-top: 12px; }
 .seg.wide { display: flex; }
 .seg.wide button.on { background: var(--accent); color: #fff; font-weight: 700; }
+
+/* ---------- lighter list ---------- */
+.list-more { display: block; width: 100%; margin: 8px 0 90px; padding: 14px; border: 1px dashed var(--border); border-radius: 12px; background: none; color: var(--muted); font-size: 13px; }

@@ -51,8 +51,8 @@ function onServerEvent(ev) {
 
 async function boot() {
   try {
-    state.meta = await api.get('/api/meta');
-    await loadAll();
+    // Settings and the product list in parallel (the list does not need the settings to load).
+    await Promise.all([api.get('/api/meta').then((m) => (state.meta = m)), loadAll()]);
   } catch (e) {
     document.getElementById('list-pane').textContent = `サーバーに接続できません: ${e.message}`;
     return;

@@ -16,7 +16,7 @@ export function mountList() {
   const pane = document.getElementById('list-pane');
   const search = h('input', {
     type: 'search', placeholder: '商品名・型番・ブランド・JAN・ID', value: state.query, enterkeyhint: 'search',
-    oninput: (e) => { state.query = e.target.value; renderItems(); renderChips(); },
+    oninput: (e) => { state.query = e.target.value; scheduleRender(); },
   });
   els = {
     upload: h('span'),
@@ -41,7 +41,7 @@ export function mountList() {
   // Group headings stick just below the (variable-height) sticky header.
   const topbar = pane.querySelector('.topbar');
   new ResizeObserver(() => pane.style.setProperty('--topbar-h', `${topbar.offsetHeight}px`)).observe(topbar);
-  on('list', renderAll);
+  on('list', scheduleRender);
   on('uploads', renderUploadIndicator);
   on('uploaded', (ev) => {
     if (ev.summary) state.products.set(ev.productId, ev.summary);
@@ -53,11 +53,24 @@ export function mountList() {
 
 function renderAll() {
   if (!els) return;
+  // Filter and sort once per redraw; the toolbar count, the rows and the camera button share it.
+  const items = visibleProducts();
   renderChips();
-  renderToolbar();
-  renderItems();
-  renderFab();
+  renderToolbar(items);
+  renderItems(items);
+  renderFab(items);
   renderBulk();
+}
+
+// Typing and bursts of live updates redraw once per frame instead of once per event.
+let renderQueued = false;
+function scheduleRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    renderAll();
+  });
 }
 
 /** Back to the first result. (Scrolling the list itself to the top would leave it under the sticky header.) */
@@ -98,8 +111,8 @@ function renderChips() {
       }, f.label, h('span', { class: 'n' }, counts[f.id]))));
 }
 
-function renderToolbar() {
-  const n = visibleProducts().length;
+function renderToolbar(items = visibleProducts()) {
+  const n = items.length;
   const dk = dateKindOf();
   const def = sortDef();
   const desc = !!state.prefs.desc;
@@ -516,10 +529,27 @@ function decisionSeg(p) {
     }, l)));
 }
 
-function renderItems() {
-  const items = visibleProducts();
+// Rows are drawn a chunk at a time as the list scrolls: drawing all ~470 rows (and loading every
+// thumbnail) at once made each search, sort and update slow on the phone.
+const FIRST_ROWS = 20;
+const MORE_ROWS = 40;
+let listRun = null; // the list being shown: items, headings, how many rows are drawn
+let moreObserver = null;
+const mini = (u) => u && u.replace(/\.thumb\.jpg$/, '.mini.jpg'); // 256px list-size thumbnail
+
+function listViewKey() {
+  const pr = state.prefs;
+  return JSON.stringify([pr.filter, pr.sort, pr.desc, pr.dateKind, pr.dateFrom, pr.dateTo, pr.dateNone, pr.priceMin, pr.priceMax, pr.priceUnknown, pr.conds, state.query, state.selectMode]);
+}
+
+function renderItems(items = visibleProducts()) {
+  const viewKey = listViewKey();
+  // Same view (a live update, a decision tap…): keep at least as many rows so the scroll position stays.
+  const keep = listRun && listRun.viewKey === viewKey ? listRun.shown : 0;
   clear(els.list);
+  moreObserver?.disconnect();
   if (!items.length) {
+    listRun = null;
     els.list.append(h('div', { class: 'empty' },
       state.products.size ? '該当する商品はありません' : h('div', null,
         h('p', null, 'まだ商品がありません'),
@@ -528,71 +558,106 @@ function renderItems() {
           h('button', { class: 'btn', onclick: newAndShoot }, '📷 撮影から登録')))));
     return;
   }
-  const frag = document.createDocumentFragment();
-  const ids = items.map((p) => p.id);
-  // Headings: by day when sorted by a date, by 種類 when sorted by 種類.
+  // Headings: by day when sorted by a date, by 種類 when sorted by 種類 (counts cover the whole list).
   const gField = groupDateField();
-  const gKind = gField ? DATE_KINDS.find((k) => k.field === gField) : null;
   const byCat = sortDef().id === 'category';
   const keyOf = gField ? (p) => p[gField] || '' : byCat ? (p) => p.category || '' : null;
   const groups = keyOf ? new Map() : null;
   if (groups) for (const p of items) groups.set(keyOf(p), (groups.get(keyOf(p)) || 0) + 1);
-  let lastKey = null;
-  items.forEach((p, idx) => {
-    if (groups && keyOf(p) !== lastKey) {
-      lastKey = keyOf(p);
-      const d = lastKey;
-      frag.append(gField
-        ? h('button', {
-          class: 'date-head',
-          title: d ? `タップでこの${gKind.label}だけ表示` : `${gKind.label}のない商品だけ表示`,
-          onclick: () => { setPref('dateKind', gField); setRange(d ? { dateFrom: d, dateTo: d, dateNone: false } : { dateFrom: '', dateTo: '', dateNone: true }); },
-        }, d ? `${gField === 'itemDate' ? '' : `${gKind.label} `}${fmtDay(d)}` : `${gKind.label}なし`, h('span', { class: 'n' }, `${groups.get(d)}件`))
-        : h('button', {
-          class: 'date-head', title: 'タップでこの種類だけ表示',
-          onclick: () => setConds([...state.prefs.conds.filter((c) => kindOf(c) !== 'cat'), `cat:${d}`]),
-        }, d || '種類なし', h('span', { class: 'n' }, `${groups.get(d)}件`)));
+  listRun = { items, ids: items.map((p) => p.id), gField, gKind: gField ? DATE_KINDS.find((k) => k.field === gField) : null, keyOf, groups, lastKey: null, shown: 0, viewKey };
+  appendRows(Math.max(FIRST_ROWS, keep));
+}
+
+function appendRows(n) {
+  const run = listRun;
+  if (!run) return;
+  const frag = document.createDocumentFragment();
+  const end = Math.min(run.items.length, run.shown + n);
+  for (let idx = run.shown; idx < end; idx++) {
+    const p = run.items[idx];
+    if (run.groups && run.keyOf(p) !== run.lastKey) {
+      run.lastKey = run.keyOf(p);
+      frag.append(groupHead(run, run.lastKey));
     }
-    const selected = state.selected.has(p.id);
-    const open = () => {
-      if (state.selectMode) {
-        selected ? state.selected.delete(p.id) : state.selected.add(p.id);
-        renderItems();
-        renderBulk();
-      } else location.hash = `#/p/${p.id}`;
-    };
-    frag.append(h('article', { class: `item ${selected ? 'selected' : ''} ${state.detailId === p.id ? 'active' : ''}`, dataset: { id: p.id } },
-      h('div', { class: 'thumb', style: p.thumb ? { backgroundImage: `url("${p.thumb}")` } : null, onclick: open },
-        state.selectMode ? h('div', { class: 'select-check' }, selected ? '✓' : '') : !p.thumb && '📦',
-        p.thumbIsReference && !state.selectMode && h('div', { class: 'ref-badge' }, '公式画像'),
-        p.official && !state.selectMode && h('div', { class: 'official-inset', title: '公式画像（Amazon）', style: { backgroundImage: `url("${p.official}")` } })),
-      h('div', { class: 'item-main', onclick: open },
-        h('div', { class: 'item-title' }, h('span', { class: 'pid' }, p.id), p.name || h('span', { class: 'muted' }, '名称未設定')),
-        h('div', { class: 'item-sub' },
-          rowDates(p, gField),
-          h('span', { class: `item-cat ${p.categoryGuessed ? 'guess' : ''}`, title: p.categoryGuessed ? '商品名からの推定（詳細画面で設定できます）' : '種類' }, p.category, p.categoryGuessed ? '?' : ''),
-          [p.brand, p.model, p.location && `📍${p.location}`].filter(Boolean).join(' · ')),
-        h('div', { class: 'badges' }, badgesFor(p)),
-        issuesFor(p),
-        !state.selectMode && !p.trashedAt && decisionSeg(p),
-        !state.selectMode && !p.trashedAt && targetSeg(p)),
-      h('div', { class: 'item-side' },
-        !p.trashedAt && h('button', {
-          class: 'icon-btn cam', 'aria-label': `${p.name || p.id} を撮影`,
-          onclick: (e) => { e.stopPropagation(); openCamera({ ids, index: idx }); },
-        }, '📷'),
-        p.sourceUrl && h('a', {
-          class: 'icon-btn link', href: p.sourceUrl, target: '_blank', rel: 'noopener noreferrer',
-          title: '購入ページを開く（別ウィンドウ）', 'aria-label': `${p.name || p.id} の購入ページを開く`,
-          onclick: (e) => e.stopPropagation(),
-        }, '🔗'),
-        p.market?.soldUrl && h('a', {
-          class: 'icon-btn link', href: p.market.soldUrl, target: '_blank', rel: 'noopener noreferrer',
-          title: 'メルカリで売り切れを検索（別ウィンドウ）', 'aria-label': `${p.name || p.id} をメルカリの売り切れで検索`,
-          onclick: (e) => e.stopPropagation(),
-        }, '🔎'))));
-  });
+    frag.append(rowEl(p, idx, run));
+  }
+  run.shown = end;
+  els.list.querySelector('.list-more')?.remove();
   els.list.append(frag);
+  if (end >= run.items.length) return;
+  const more = h('button', { class: 'list-more', onclick: () => appendRows(MORE_ROWS) }, `続きを表示（残り ${run.items.length - end}件）`);
+  els.list.append(more);
+  moreObserver ||= new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) appendRows(MORE_ROWS);
+  }, { root: scrollRoot(), rootMargin: '1200px 0px' });
+  moreObserver.observe(more);
+}
+
+/** The element the list scrolls in (the pane on wide screens), or null for the page itself. */
+function scrollRoot() {
+  for (let el = els.list.parentElement; el && el !== document.body; el = el.parentElement) {
+    if (/(auto|scroll)/.test(getComputedStyle(el).overflowY)) return el;
+  }
+  return null;
+}
+
+function groupHead(run, d) {
+  const { gField, gKind, groups } = run;
+  return gField
+    ? h('button', {
+      class: 'date-head',
+      title: d ? `タップでこの${gKind.label}だけ表示` : `${gKind.label}のない商品だけ表示`,
+      onclick: () => { setPref('dateKind', gField); setRange(d ? { dateFrom: d, dateTo: d, dateNone: false } : { dateFrom: '', dateTo: '', dateNone: true }); },
+    }, d ? `${gField === 'itemDate' ? '' : `${gKind.label} `}${fmtDay(d)}` : `${gKind.label}なし`, h('span', { class: 'n' }, `${groups.get(d)}件`))
+    : h('button', {
+      class: 'date-head', title: 'タップでこの種類だけ表示',
+      onclick: () => setConds([...state.prefs.conds.filter((c) => kindOf(c) !== 'cat'), `cat:${d}`]),
+    }, d || '種類なし', h('span', { class: 'n' }, `${groups.get(d)}件`));
+}
+
+function rowEl(p, idx, run) {
+  const selected = state.selected.has(p.id);
+  const open = (e) => {
+    if (!state.selectMode) return void (location.hash = `#/p/${p.id}`);
+    // Toggle just this row instead of redrawing the list.
+    const on = !state.selected.has(p.id);
+    on ? state.selected.add(p.id) : state.selected.delete(p.id);
+    const row = e.currentTarget.closest('.item');
+    row.classList.toggle('selected', on);
+    const check = row.querySelector('.select-check');
+    if (check) check.textContent = on ? '✓' : '';
+    renderBulk();
+  };
+  return h('article', { class: `item ${selected ? 'selected' : ''} ${state.detailId === p.id ? 'active' : ''}`, dataset: { id: p.id } },
+    h('div', { class: 'thumb', style: p.thumb ? { backgroundImage: `url("${mini(p.thumb)}")` } : null, onclick: open },
+      state.selectMode ? h('div', { class: 'select-check' }, selected ? '✓' : '') : !p.thumb && '📦',
+      p.thumbIsReference && !state.selectMode && h('div', { class: 'ref-badge' }, '公式画像'),
+      p.official && !state.selectMode && h('div', { class: 'official-inset', title: '公式画像（Amazon）', style: { backgroundImage: `url("${mini(p.official)}")` } })),
+    h('div', { class: 'item-main', onclick: open },
+      h('div', { class: 'item-title' }, h('span', { class: 'pid' }, p.id), p.name || h('span', { class: 'muted' }, '名称未設定')),
+      h('div', { class: 'item-sub' },
+        rowDates(p, run.gField),
+        h('span', { class: `item-cat ${p.categoryGuessed ? 'guess' : ''}`, title: p.categoryGuessed ? '商品名からの推定（詳細画面で設定できます）' : '種類' }, p.category, p.categoryGuessed ? '?' : ''),
+        [p.brand, p.model, p.location && `📍${p.location}`].filter(Boolean).join(' · ')),
+      h('div', { class: 'badges' }, badgesFor(p)),
+      issuesFor(p),
+      !state.selectMode && !p.trashedAt && decisionSeg(p),
+      !state.selectMode && !p.trashedAt && targetSeg(p)),
+    h('div', { class: 'item-side' },
+      !p.trashedAt && h('button', {
+        class: 'icon-btn cam', 'aria-label': `${p.name || p.id} を撮影`,
+        onclick: (e) => { e.stopPropagation(); openCamera({ ids: run.ids, index: idx }); },
+      }, '📷'),
+      p.sourceUrl && h('a', {
+        class: 'icon-btn link', href: p.sourceUrl, target: '_blank', rel: 'noopener noreferrer',
+        title: '購入ページを開く（別ウィンドウ）', 'aria-label': `${p.name || p.id} の購入ページを開く`,
+        onclick: (e) => e.stopPropagation(),
+      }, '🔗'),
+      p.market?.soldUrl && h('a', {
+        class: 'icon-btn link', href: p.market.soldUrl, target: '_blank', rel: 'noopener noreferrer',
+        title: 'メルカリで売り切れを検索（別ウィンドウ）', 'aria-label': `${p.name || p.id} をメルカリの売り切れで検索`,
+        onclick: (e) => e.stopPropagation(),
+      }, '🔎')));
 }
 
 /** Date chips on a row: 注文 / 到着 when known, else the undistinguished date. The grouped-by date is already in the heading. */
@@ -607,10 +672,10 @@ function rowDates(p, grouped) {
   return out;
 }
 
-function renderFab() {
+function renderFab(items = visibleProducts()) {
   clear(els.fab);
   if (state.selectMode) return;
-  const ids = visibleProducts().filter((p) => !p.trashedAt).map((p) => p.id);
+  const ids = items.filter((p) => !p.trashedAt).map((p) => p.id);
   els.fab.append(
     h('button', { class: 'btn primary big', disabled: !ids.length, onclick: () => openCamera({ ids, index: 0 }) }, `📷 撮影モード（${ids.length}件）`));
 }

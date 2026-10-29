@@ -25,6 +25,7 @@
 - QC（画像QC: 画質・写真間の整合性・違和感チェックを含む）は Claude Opus 5.5（`claude-opus-5-5`）で実施し、`save_qc_result` の `model` に記録する。サーバーは設定 `imageQcModels` 以外のモデルの QC を拒否する。
 
 ## 開発
+- 軽さのための作り: 一覧は20件ずつ描画（スクロールで追加・更新時は位置を保つ）、一覧のサムネは `x.mini.jpg`（256px、初回要求時に `sips` で作成）、JSON と JS/CSS は gzip・ETag で 304。行に `content-visibility` を付けない（再描画で位置がずれる）。
 - テスト: `npm test`（node:test）。UI は `npm run demo` → `INVENTORY_DATA=./demo-data npm start`。
 - ユーザー確定（locks）と AI 提案（proposals）、ユーザー専用操作（`forbidAi`）の境界を崩さないこと。
 - メルカリの画面構造（セレクタ等）をアプリ本体に入れないこと。

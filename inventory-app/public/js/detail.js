@@ -470,7 +470,7 @@ function marketCard(p) {
   const net = s.net;
   const m = p.market;
   const a = p.amazon;
-  const official = s.official || (s.thumbIsReference ? s.thumb : null);
+  const official = (s.official || (s.thumbIsReference ? s.thumb : null))?.replace(/\.thumb\.jpg$/, '.mini.jpg'); // shown at 84px
   const link = (href, label) => href ? h('a', { class: 'btn small', href, target: '_blank', rel: 'noopener noreferrer' }, label) : null;
   const row = (k, v) => v ? h('tr', null, h('td', { class: 'k' }, k), h('td', null, v)) : null;
   const d = sh.dims;

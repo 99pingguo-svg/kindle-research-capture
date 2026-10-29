@@ -286,16 +286,19 @@ export function applyView(view) {
   state.selected.clear();
 }
 
+const jaCollator = new Intl.Collator('ja');
 function compareBy(def, desc) {
+  // Names need Japanese collation; dates, IDs and timestamps sort correctly (and much faster) as plain strings.
+  const textCmp = def.id === 'name' ? jaCollator.compare : (x, y) => (x < y ? -1 : x > y ? 1 : 0);
   return (a, b) => {
     const get = def.date ? (p) => p[def.date] || null : def.text || def.value;
     const va = get(a);
     const vb = get(b);
     if ((va == null) !== (vb == null)) return va == null ? 1 : -1; // missing last
     let c = 0;
-    if (va != null) c = typeof va === 'number' ? va - vb : String(va).localeCompare(String(vb), 'ja');
+    if (va != null) c = typeof va === 'number' ? va - vb : textCmp(String(va), String(vb));
     if (c) return desc ? -c : c;
-    return desc && def.date ? b.id.localeCompare(a.id) : a.id.localeCompare(b.id);
+    return desc && def.date ? (b.id < a.id ? -1 : 1) : a.id < b.id ? -1 : 1;
   };
 }
 

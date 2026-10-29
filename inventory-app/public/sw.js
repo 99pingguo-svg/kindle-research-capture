@@ -24,7 +24,7 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   if (url.pathname.startsWith('/api/') || url.pathname === '/mcp') return;
   // Thumbnails are immutable: cache-first so the list works offline.
-  if (url.pathname.startsWith('/files/products/') && url.pathname.includes('.thumb.')) {
+  if (url.pathname.startsWith('/files/products/') && (url.pathname.includes('.thumb.') || url.pathname.includes('.mini.'))) {
     e.respondWith(
       caches.open(THUMBS).then(async (c) => {
         const hit = await c.match(e.request);
