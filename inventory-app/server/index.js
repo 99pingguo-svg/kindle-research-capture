@@ -195,11 +195,15 @@ export function createApp({ dataDir, token = '' } = {}) {
   });
   route('GET', '/api/studio', () => ({ available: studio.available(), pending: studio.pending(), on: store.settings.autoStudio !== false }));
   route('POST', '/api/studio/run', ({ body }) => ({ queued: studio.backfill(Array.isArray(body?.productIds) ? body.productIds.map(String) : null) }));
-  // ユーザーに頼まれて、指定の商品に出品先を既定（緑）として入れる。
-  route('POST', '/api/default-targets', ({ body }) => {
-    const ids = Array.isArray(body?.ids) ? body.ids.map(String) : [];
-    for (const id of ids) store.markDefaultTarget(id, String(body.channel || ''), String(body.reason || 'ユーザーの依頼'));
-    return { ok: true, count: ids.length };
+  // 指定の商品に出品先を既定（緑）として入れる。手で外した出品先を上書きできるのはユーザー本人の操作だけ（AIは空いている所に足すだけ）。
+  route('POST', '/api/default-targets', ({ body, actor }) => {
+    const ids = [...new Set(Array.isArray(body?.ids) ? body.ids.map(String) : [])];
+    if (ids.length > 1000) throw new AppError(400, '一度に1000件まで');
+    const reason = String(body?.reason || '依頼').replace(/\s+/g, ' ').slice(0, 80);
+    let changed = 0;
+    const ch = String(body?.channel || '');
+    for (const id of ids) if (body?.remove ? store.unmarkDefaultTarget(id, actor, ch) : store.markDefaultTarget(id, actor, ch, reason)) changed++;
+    return { ok: true, count: ids.length, changed };
   });
   route('POST', '/api/studio/redo', ({ body }) => ({ queued: studio.redo(Array.isArray(body?.productIds) ? body.productIds.map(String) : null) }));
   route('PUT', '/api/native-shoot', ({ body, actor }) => {
@@ -518,7 +522,26 @@ export function createApp({ dataDir, token = '' } = {}) {
     }
   }
 
+  // The token-free Mac listener must not be usable by other web pages open on this Mac:
+  // a foreign Host name (DNS rebinding) is refused, and so is a change sent from another site (CSRF).
+  const LOCAL_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i;
+  const okHost = (h) => LOCAL_HOST.test(h) || /\.ts\.net(:\d+)?$/i.test(h);
+  function crossSite(req) {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return false;
+    if (req.headers['sec-fetch-site'] === 'cross-site') return true;
+    const origin = req.headers.origin;
+    if (!origin || origin === 'null') return !!origin;
+    try {
+      return new URL(origin).host.toLowerCase() !== String(req.headers.host || '').toLowerCase();
+    } catch {
+      return true;
+    }
+  }
   function trustedHandler(req, res) {
+    if (!okHost(String(req.headers.host || '')) || crossSite(req)) {
+      for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
+      return sendJson(res, 403, { error: 'このMacの画面以外からの操作は受け付けません' });
+    }
     trustedRequests.add(req);
     return handler(req, res);
   }
