@@ -17,6 +17,7 @@ import { readBody, parseMultipart } from './multipart.js';
 import { summary, readiness, lint, channelPackage, suggestedTargets, bulkPrice } from './rules.js';
 import { writeZip } from './zip.js';
 import { createStudio } from './studio.js';
+import { createCodeReader } from './codes.js';
 import { createDefaults } from './defaults.js';
 import { exportEntries, productsCsv, officialEntries, officialStats } from './export.js';
 import { createMcpHandler, matchesFilter } from './mcp.js';
@@ -45,6 +46,7 @@ export function createApp({ dataDir, token = '' } = {}) {
 
   // Auto-finishing of newly shot photos (white background / crop / colour), one at a time in the background.
   const studio = createStudio(store);
+  const codes = createCodeReader(store);
   createDefaults(store);
   const routes = [];
   const route = (method, pattern, handler) => {
@@ -159,7 +161,7 @@ export function createApp({ dataDir, token = '' } = {}) {
       edit = null;
     }
     const { photo, duplicate } = store.addPhoto(params.id, actor, { ...fields, edit, replaceInListing: fields.replaceInListing === 'true' }, files);
-    if (!duplicate) studio.enqueue(params.id, photo);
+    if (!duplicate) { studio.enqueue(params.id, photo); codes.enqueue(params.id, photo); }
     return { photo, duplicate, product: sm(store.get(params.id)) };
   });
   // ---- 純正カメラ連携: アプリで撮影対象を決め → iPhone の「カメラ」で撮影 → ショートカットが撮った写真を送る ----
@@ -205,6 +207,9 @@ export function createApp({ dataDir, token = '' } = {}) {
     for (const id of ids) if (body?.remove ? store.unmarkDefaultTarget(id, actor, ch) : store.markDefaultTarget(id, actor, ch, reason)) changed++;
     return { ok: true, count: ids.length, changed };
   });
+  // 写真から Amazon 管理番号（FNSKU）を読む: 今ある写真をまとめて（新しい写真は届くたびに自動）。
+  route('POST', '/api/codes/backfill', () => ({ queued: codes.backfill() }));
+  route('GET', '/api/codes', () => ({ pending: codes.pending() }));
   route('POST', '/api/studio/redo', ({ body }) => ({ queued: studio.redo(Array.isArray(body?.productIds) ? body.productIds.map(String) : null) }));
   route('PUT', '/api/native-shoot', ({ body, actor }) => {
     store.setNativeShoot(actor, String(body?.productId || ''));
@@ -254,7 +259,7 @@ export function createApp({ dataDir, token = '' } = {}) {
     // The shortcut sends the latest photos; only those taken after the shoot started belong to this product.
     if (files.takenAt && files.takenAt < new Date(Date.parse(ns.since) - 60_000)) return { ok: true, skipped: '撮影開始より前の写真' };
     const { photo, duplicate } = store.addPhoto(ns.productId, 'user', { kind: 'actual', source: 'native', clientId: `native:${digest}`, width: files.width, height: files.height, takenAt: files.takenAt?.toISOString() || null }, files);
-    if (!duplicate) studio.enqueue(ns.productId, photo);
+    if (!duplicate) { studio.enqueue(ns.productId, photo); codes.enqueue(ns.productId, photo); }
     return { ok: true, productId: ns.productId, photoId: photo.id, duplicate };
   });
   route('PATCH', '/api/products/:id/photos/:pid', ({ params, body, actor }) => full(store.updatePhoto(params.id, actor, params.pid, body)));

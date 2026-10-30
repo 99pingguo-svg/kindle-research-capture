@@ -172,6 +172,8 @@ export const FIELDS = [
   { path: 'brand', label: 'メーカー／ブランド', type: 'text', group: 'basic' },
   { path: 'model', label: '型番', type: 'text', group: 'basic' },
   { path: 'jan', label: 'JAN等', type: 'text', group: 'basic' },
+  // Amazon の倉庫ラベル（X00…10桁）。写真の文字・バーコードから自動で読む。検索・📷で使う。
+  { path: 'fnsku', label: 'Amazon管理番号（FNSKU）', type: 'text', group: 'basic', meta: true },
   { path: 'quantity', label: '数量', type: 'int', group: 'basic' },
   { path: 'color', label: '色', type: 'text', group: 'basic' },
   { path: 'conditionNote', label: '商品状態メモ', type: 'textarea', group: 'basic' },

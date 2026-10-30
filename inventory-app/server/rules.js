@@ -247,6 +247,7 @@ export function summary(p, settings) {
     brand: p.brand,
     model: p.model,
     jan: p.jan,
+    fnsku: p.fnsku || '',
     quantity: p.quantity,
     location: p.location,
     notes: p.notes,

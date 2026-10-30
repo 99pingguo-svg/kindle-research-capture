@@ -58,3 +58,15 @@ test('ocr: barcode equal to the JAN wins; otherwise the product whose name is pr
   assert.deepEqual(ocrCandidates([a, b, c], { lines }).map((r) => r.p.id), ['a']);
   assert.equal(ocrCandidates([a, b, c], { lines, barcodes: ['4901234567894'] })[0].p.id, 'b');
 });
+
+test('FNSKU: 写真の文字・バーコードの X00… を拾い、検索と📷候補で使う', async () => {
+  const { fnskusIn } = await import('../public/js/search.js');
+  assert.deepEqual(fnskusIn('X001EKB04P (GP-131) Made in China'), ['X001EKB04P']);
+  assert.deepEqual(fnskusIn('XO01EKB04P'), ['X001EKB04P']); // O read for 0
+  assert.deepEqual(fnskusIn('ASIN B0HFCZGB9C'), []);
+  const a = p({ id: 'a', name: '箱', fnsku: 'X001EKB04P' });
+  const b = p({ id: 'b', name: '別の箱' });
+  assert.equal(score(a, 'x001ekb04p'), 1);
+  assert.equal(ocrCandidates([b, a], { lines: [{ text: 'X001EKB04P' }], barcodes: [] })[0].p.id, 'a');
+  assert.equal(ocrCandidates([b, a], { lines: [], barcodes: ['X001EKB04P'] })[0].why, 'Amazon管理番号（FNSKU）一致');
+});

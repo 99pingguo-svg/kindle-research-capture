@@ -21,12 +21,19 @@ const cache = new WeakMap();
 function prepared(p) {
   let c = cache.get(p);
   if (!c) {
-    const hay = norm([p.id, p.name, p.brand, p.model, p.jan, p.notes, p.location, p.title, p.category, asinOf(p.sourceUrl)].join(' '));
+    const hay = norm([p.id, p.name, p.brand, p.model, p.jan, p.fnsku, p.notes, p.location, p.title, p.category, asinOf(p.sourceUrl)].join(' '));
     const name = norm([p.name, p.title].join(' '));
     c = { hay, grams: grams(hay), name, nameGrams: grams(name) };
     cache.set(p, c);
   }
   return c;
+}
+
+/** Amazon warehouse labels (FNSKU: X00 + 7 letters/digits) found in text. OCR often reads O for 0 in the X00 part. */
+export function fnskusIn(text) {
+  const out = new Set();
+  for (const m of String(text || '').toUpperCase().matchAll(/X[0O]{2}[0-9A-Z]{7}(?![0-9A-Z])/g)) out.add(`X00${m[0].slice(3)}`);
+  return [...out];
 }
 
 /** Search terms (normalised, empties dropped). */
@@ -111,10 +118,13 @@ export function ocrCandidates(products, { lines = [], barcodes = [] }, limit = 8
   const all = norm(lines.map((l) => l.text).join(' '));
   const allGrams = grams(all);
   const codes = new Set(barcodes.map((b) => String(b).replace(/\D/g, '')).filter((b) => b.length >= 8));
+  const fnskus = new Set(fnskusIn([...barcodes, ...lines.map((l) => l.text)].join(' ')));
   const out = [];
   for (const p of products) {
     const jan = String(p.jan || '').replace(/\D/g, '');
     if (jan && codes.has(jan)) { out.push({ p, score: 2, why: 'バーコード一致' }); continue; }
+    const fn = String(p.fnsku || '').toUpperCase();
+    if (fn && (fnskus.has(fn))) { out.push({ p, score: 2, why: 'Amazon管理番号（FNSKU）一致' }); continue; }
     const { nameGrams } = prepared(p);
     if (nameGrams.size < 2) continue;
     let hit = 0;

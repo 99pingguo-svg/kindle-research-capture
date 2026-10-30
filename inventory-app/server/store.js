@@ -52,6 +52,7 @@ function newProduct(id, at, settings) {
     brand: '',
     model: '',
     jan: '',
+    fnsku: '',
     quantity: 1,
     color: '',
     conditionNote: '',

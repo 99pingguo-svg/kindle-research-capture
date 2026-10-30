@@ -10,7 +10,7 @@ import { pickDateRange, rangeLabel, fmtDay } from './calendar.js';
 import { openCamera } from './camera.js';
 import * as uploads from './uploads.js';
 import { openNativeSetup, shootWithNativeCamera } from './native.js';
-import { ocrCandidates } from './search.js';
+import { ocrCandidates, fnskusIn } from './search.js';
 import { makeVariants } from './images.js';
 import { quickMemo, rememberSearchPhoto, addSearchPhoto } from './quick.js';
 
@@ -700,15 +700,30 @@ function searchByPhoto(searchInput) {
       t?.remove?.();
     }
     const cands = ocrCandidates([...state.products.values()].filter((p) => !p.trashedAt), res);
+    // An Amazon label (FNSKU) no product has yet: picking the product records it, so the label finds it next time.
+    const label = fnskusIn([...(res.barcodes || []), ...(res.lines || []).map((l) => l.text)].join(' '));
+    const newLabel = label.length === 1 && ![...state.products.values()].some((p) => (p.fnsku || '').toUpperCase() === label[0]) ? label[0] : '';
+    const pick = async (p) => {
+      addSearchPhoto(p.id).catch(showError);
+      if (newLabel && !p.fnsku) {
+        try {
+          applyProduct((await api.patch(`/api/products/${p.id}`, { set: { fnsku: newLabel } })).product);
+          toast(`Amazon管理番号 ${newLabel} を #${p.id} に登録しました`);
+        } catch (e) { showError(e); }
+      }
+      location.hash = `#/p/${p.id}`;
+    };
     const lines = (res.lines || []).filter((l) => l.text.length >= 2).slice(0, 14);
     const search = (q) => { searchInput.value = q; state.query = q; renderAll(); toTop(); };
     sheet((close) => h('div', { class: 'ocr-sheet' },
       h('h2', null, '📷 写真の文字で探す'),
+      newLabel && h('p', { class: 'small', style: { margin: '0 0 6px' } }, `Amazon管理番号 ${newLabel} はまだどの商品にも登録されていません。`,
+        cands.length ? '下から商品を選ぶと登録します。' : '番号で探すか、商品名の文字をタップしてください。'),
       !cands.length && !lines.length && !res.barcodes?.length && h('p', { class: 'muted' }, '文字が読み取れませんでした。商品名やバーコードが大きく写るように撮り直してください。'),
       cands.length > 0 && h('div', null,
         h('h3', null, 'この商品かも'),
         h('div', { class: 'ocr-cands' }, cands.map(({ p, why }) => h('button', {
-          class: 'ocr-cand', onclick: () => { close(); addSearchPhoto(p.id).catch(showError); location.hash = `#/p/${p.id}`; },
+          class: 'ocr-cand', onclick: () => { close(); pick(p); },
         },
         p.thumb ? h('img', { src: p.thumb, alt: '', loading: 'lazy' }) : h('span', { class: 'ocr-noimg' }, '📦'),
         h('span', { class: 'ocr-name' }, h('b', null, `#${p.id} `), p.name || ''),
