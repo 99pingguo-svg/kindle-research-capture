@@ -582,6 +582,25 @@ function targetSeg(p) {
     }, `${c.short || c.label.replace(/ー$/, '')}${!targets.includes(c.id) && suggested.includes(c.id) ? '＊' : ''}`)));
 }
 
+/** 開封チェック済み: one tap in the row. */
+function openCheck(p) {
+  const on = !!p.openCheckedAt;
+  return h('label', {
+    class: `open-check ${on ? 'on' : ''}`, title: on ? `開封チェック済み（${p.openCheckedAt.slice(0, 10)}）` : '開封して中身を確かめたらチェック',
+    onclick: (e) => e.stopPropagation(),
+  }, h('input', {
+    type: 'checkbox', checked: on,
+    onchange: async (e) => {
+      try {
+        applyProduct(await api.post(`/api/products/${p.id}/open-check`, { on: e.target.checked }));
+      } catch (err) {
+        e.target.checked = on;
+        showError(err);
+      }
+    },
+  }), '開封チェック済み');
+}
+
 function decisionSeg(p) {
   const opts = state.meta.decisions.filter((d) => d.id !== 'undecided').map((d) => [d.id, d.label]);
   return h('div', { class: 'seg decisions', style: { marginTop: '7px' } },
@@ -807,7 +826,7 @@ function rowEl(p, idx, run) {
         rowDates(p, run.gField),
         h('span', { class: `item-cat ${p.categoryGuessed ? 'guess' : ''}`, title: p.categoryGuessed ? '商品名からの推定（詳細画面で設定できます）' : '種類' }, p.category, p.categoryGuessed ? '?' : ''),
         [p.brand, p.model, p.location && `📍${p.location}`].filter(Boolean).join(' · ')),
-      h('div', { class: 'badges' }, badgesFor(p)),
+      h('div', { class: 'badges' }, badgesFor(p), !p.trashedAt && openCheck(p)),
       marketLinks(p),
       issuesFor(p),
       !state.selectMode && !p.trashedAt && decisionSeg(p),

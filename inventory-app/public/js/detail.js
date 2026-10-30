@@ -159,7 +159,9 @@ function topControls(p) {
           onchange: (e) => act(api.post(url('/stage'), { stage: e.target.value })),
         }, state.meta.stages.map((s) => h('option', { value: s.id, selected: p.stage === s.id }, s.label)))),
       h('label', { class: 'small', style: { display: 'flex', alignItems: 'center', gap: '4px' } },
-        h('input', { type: 'checkbox', checked: p.shootPlan, onchange: (e) => act(api.post(url('/shoot-plan'), { on: e.target.checked })) }), '撮影予定')));
+        h('input', { type: 'checkbox', checked: p.shootPlan, onchange: (e) => act(api.post(url('/shoot-plan'), { on: e.target.checked })) }), '撮影予定'),
+      h('label', { class: `small open-check ${p.openCheckedAt ? 'on' : ''}`, title: p.openCheckedAt ? `開封チェック済み（${p.openCheckedAt.slice(0, 10)}）` : '' },
+        h('input', { type: 'checkbox', checked: !!p.openCheckedAt, onchange: (e) => act(api.post(url('/open-check'), { on: e.target.checked })) }), '開封チェック済み')));
 }
 
 function readinessCard(p) {

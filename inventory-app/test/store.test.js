@@ -636,3 +636,13 @@ test('🔒確定のとき、出品先ごとの写真に使っている仕上げ�
   store.setChannelPhotos(id, 'user', 'jmty', [fin.id]);
   assert.throws(() => store.refinishPhoto(id, 'claude', fin.id, {}, { original: { buffer: JPEG } }), /🔒確定/);
 });
+
+test('開封チェック済み: ユーザーだけが付け外しでき、AIはできない', () => {
+  const store = new Store(tmp());
+  const id = store.create({ name: 'x' }).product.id;
+  store.setOpenChecked(id, 'user', true);
+  assert.ok(store.get(id).openCheckedAt);
+  assert.throws(() => store.setOpenChecked(id, 'claude', false), /ユーザーのみ/);
+  store.setOpenChecked(id, 'user', false);
+  assert.equal(store.get(id).openCheckedAt, null);
+});

@@ -105,6 +105,8 @@ export const FILTERS = [
   { id: 'shoot_plan', label: '撮影予定' },
   { id: 'needs_photos', label: '写真不足' },
   { id: 'shot_today', label: '今日撮影済み' },
+  { id: 'not_open_checked', label: '開封未チェック' },
+  { id: 'open_checked', label: '開封チェック済み' },
   { id: 'undecided', label: '未判断' },
   { id: 'sell', label: '出品予定' },
   { id: 'draft', label: '下書き' },
@@ -149,6 +151,8 @@ export function matchesFilter(sm, filter) {
     case 'needs_photos': return active && !['no_sell', 'no_stock'].includes(sm.decision) && sm.stage !== 'sold' && (sm.counts.actual + (sm.counts.generated || 0) === 0 || sm.openPhotoRequests.length > 0 || sm.stage === 'needs_photos');
     case 'shot_today': return active && isToday(sm.lastPhotoAt);
     case 'shoot_plan': return active && sm.shootPlan;
+    case 'open_checked': return active && !!sm.openCheckedAt;
+    case 'not_open_checked': return active && !sm.openCheckedAt && !['no_sell', 'no_stock'].includes(sm.decision);
     case 'ai_queue': return active && ['pending', 'processing'].includes(sm.ai.state);
     case 'review': return active && (sm.stage === 'needs_review' || sm.proposals > 0 || (sm.qc && sm.qc.result !== 'pass'));
     case 'qc_issue': return active && !!sm.qc && (sm.qc.result !== 'pass' || sm.qc.stale);

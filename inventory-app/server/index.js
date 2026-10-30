@@ -123,6 +123,7 @@ export function createApp({ dataDir, token = '' } = {}) {
   route('POST', '/api/products/:id/decision', ({ params, body, actor }) => full(store.setDecision(params.id, actor, body.decision)));
   route('POST', '/api/products/:id/stage', ({ params, body, actor }) => full(store.setStage(params.id, actor, body.stage, { note: body.note })));
   route('POST', '/api/products/:id/archive', ({ params, body, actor }) => full(store.setArchived(params.id, actor, body.archived !== false)));
+  route('POST', '/api/products/:id/open-check', ({ params, body, actor }) => full(store.setOpenChecked(params.id, actor, body?.on !== false)));
   route('POST', '/api/products/:id/shoot-plan', ({ params, body, actor }) => full(store.setShootPlan(params.id, actor, body.on !== false)));
   route('POST', '/api/products/:id/shoot-done', ({ params, body, actor }) => full(store.shootDone(params.id, actor, { requestAi: body?.requestAi !== false })));
   route('POST', '/api/products/:id/trash', ({ params, actor }) => full(store.trash(params.id, actor)));

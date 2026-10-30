@@ -482,3 +482,8 @@ code, .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 }
 .item.dec-no_sell::after { content: '出さない'; background: #ef4444; }
 .item.dec-no_stock::after { content: '在庫なし'; background: #64748b; }
+
+/* 開封チェック済み（一覧の行・詳細） */
+.open-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 8px 2px 4px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); cursor: pointer; min-height: 26px; }
+.open-check input { width: 16px; height: 16px; margin: 0; }
+.open-check.on { border-color: #0ea5e9; color: #0284c7; background: color-mix(in srgb, #0ea5e9 10%, var(--card)); font-weight: 700; }

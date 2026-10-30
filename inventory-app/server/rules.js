@@ -265,6 +265,7 @@ export function summary(p, settings) {
     archived: p.archived,
     trashedAt: p.trashedAt,
     shootPlan: p.shootPlan,
+    openCheckedAt: p.openCheckedAt || null,
     status: st,
     thumb: main ? photoUrl(p, main, 'thumb') : null,
     thumbIsReference: !!main && main.kind === 'reference',

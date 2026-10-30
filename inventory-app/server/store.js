@@ -71,6 +71,7 @@ function newProduct(id, at, settings) {
     archived: false,
     trashedAt: null,
     shootPlan: false,
+    openCheckedAt: null, // 開封して中身を確かめた日時（ユーザーのみ）
     lastPhotoAt: null,
     shotDoneAt: null,
     links: [],
@@ -576,6 +577,16 @@ export class Store extends EventEmitter {
       if (p.shootPlan === !!on) return;
       p.shootPlan = !!on;
       ctx.note(on ? '撮影予定に追加' : '撮影予定から外す');
+    });
+  }
+
+  /** 開封チェック済み: the user opened the package and checked the contents. Only the user can know, so only the user sets it. */
+  setOpenChecked(id, actor, on) {
+    forbidAi(actor, '開封チェック');
+    return this.mutate(id, actor, 'open_check', (p, ctx) => {
+      if (!!p.openCheckedAt === !!on) return;
+      p.openCheckedAt = on ? nowIso() : null;
+      ctx.note(on ? '開封チェック済みにした' : '開封チェックを外した');
     });
   }
 
