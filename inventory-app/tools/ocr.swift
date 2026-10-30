@@ -2,7 +2,8 @@
 // macOS Vision の文字認識（日本語・英語）とバーコード検出（JAN/EAN・QR など）。
 //
 // 使い方: ocr <入力画像>
-// 標準出力に JSON: {"ok":true,"lines":[{"text":"…","conf":0.98,"h":0.06}],"barcodes":["4901234567894"]}
+// 標準出力に JSON: {"ok":true,"lines":[{"text":"…","conf":0.98,"h":0.06,"box":[x,y,w,h]}],"barcodes":["4901234567894"],"barcodeBoxes":[{"value":"…","box":[x,y,w,h]}]}
+//   box は画像に対する割合（0〜1）、左上が原点。
 //   h = 文字の高さ（画像の高さに対する比）。大きい文字ほど商品名らしいので、並びは大きい順。
 // ビルド: swiftc -O tools/ocr.swift -o tools/bin/ocr
 import Foundation
@@ -41,11 +42,16 @@ for obs in text.results ?? [] {
     guard let best = obs.topCandidates(1).first else { continue }
     let s = best.string.trimmingCharacters(in: .whitespacesAndNewlines)
     if s.isEmpty { continue }
-    lines.append(["text": s, "conf": Double(best.confidence), "h": Double(obs.boundingBox.height)])
+    let b = obs.boundingBox // Vision: bottom-left origin → top-left for callers
+    lines.append(["text": s, "conf": Double(best.confidence), "h": Double(b.height), "box": [Double(b.minX), Double(1 - b.maxY), Double(b.width), Double(b.height)]])
 }
 lines.sort { ($0["h"] as! Double) > ($1["h"] as! Double) }
 var codes: [String] = []
+var codeBoxes: [[String: Any]] = []
 for b in barcodes.results ?? [] {
-    if let v = b.payloadStringValue, !codes.contains(v) { codes.append(v) }
+    guard let v = b.payloadStringValue else { continue }
+    if !codes.contains(v) { codes.append(v) }
+    let r = b.boundingBox
+    codeBoxes.append(["value": v, "box": [Double(r.minX), Double(1 - r.maxY), Double(r.width), Double(r.height)]])
 }
-emit(["ok": true, "lines": lines, "barcodes": codes])
+emit(["ok": true, "lines": lines, "barcodes": codes, "barcodeBoxes": codeBoxes])
