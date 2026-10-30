@@ -2,7 +2,8 @@
 // 被写体を切り抜き（macOS Vision の前景マスク＝iPhone の「被写体を持ち上げる」と同じ仕組み）→ 自動の色・明るさ補正 →
 // 白背景に置いて薄い影 → 被写体に合わせて正方形にトリミング → JPEG。
 //
-// 使い方: studio <入力画像> <出力.jpg> [--mode auto|studio|enhance] [--size 2048] [--pad 0.08] [--no-shadow]
+// 使い方: studio <入力画像> <出力.jpg> [--mode auto|studio|enhance] [--size 2048] [--pad 0.08] [--no-shadow] [--deshadow 0〜1]
+//   --deshadow: 商品の上に落ちた影（手・スマホ・物の影、片側だけ暗い）を明るく戻す強さ。文字や模様など小さな暗い部分は残す。
 //   auto（既定）: 被写体が画面の中に収まっていれば studio、はみ出し・大写し・被写体なしなら enhance
 //   studio : 切り抜き＋白背景＋正方形トリミング＋補正 / enhance: 色・明るさの補正だけ（構図はそのまま）
 // 標準出力に JSON: {"ok":true,"mode":"studio","coverage":0.31,"touchesEdge":false,"instances":1,"width":2048,"height":2048}
@@ -31,6 +32,7 @@ func opt(_ name: String) -> String? {
 let size = CGFloat(Double(opt("--size") ?? "") ?? 2048)
 let pad = CGFloat(Double(opt("--pad") ?? "") ?? 0.08)
 let mode = opt("--mode") ?? "auto"
+let deshadow = min(1, max(0, Double(opt("--deshadow") ?? "") ?? 0))
 let shadow = !args.contains("--no-shadow")
 args.removeAll { $0 == "--no-shadow" }
 guard args.count == 2 else { emit(["ok": false, "reason": "usage: studio <in> <out.jpg>"]) }
@@ -52,6 +54,72 @@ for f in src.autoAdjustmentFilters(options: [.redEye: false, .features: []]) {
 let vib = CIFilter.vibrance(); vib.inputImage = adjusted; vib.amount = 0.12
 adjusted = (vib.outputImage ?? adjusted).cropped(to: extent)
 
+/**
+ * Lift shadows cast on the product. Lighting is estimated from the product pixels only (dilate, then a wide
+ * normalised blur, so text and small dark details do not count as shadow); areas darker than the product's typical
+ * lighting are divided back up. Only ever brightens, at most ×4 (linear light: a shadow that looks half as bright is about a quarter of the light).
+ */
+var shadowScore = 0.0
+func liftShadows(_ img: CIImage, mask m: CIImage, strength: Double) -> CIImage {
+    let ext = img.extent
+    let long = Double(max(ext.width, ext.height))
+    let grey = CIFilter.colorMatrix()
+    grey.inputImage = img
+    let w = CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0)
+    grey.rVector = w; grey.gVector = w; grey.bVector = w; grey.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+    let lum = (grey.outputImage ?? img).cropped(to: ext)
+    let mul = CIFilter.multiplyCompositing()
+    mul.inputImage = lum; mul.backgroundImage = m
+    let masked = (mul.outputImage ?? lum).cropped(to: ext)
+    let dil = CIFilter.morphologyMaximum()
+    dil.inputImage = masked.clampedToExtent(); dil.radius = Float(long * 0.01)
+    let sigma = long * 0.015
+    let num = (dil.outputImage ?? masked).cropped(to: ext).clampedToExtent().applyingGaussianBlur(sigma: sigma).cropped(to: ext)
+    let mul2 = CIFilter.multiplyCompositing()
+    mul2.inputImage = num; mul2.backgroundImage = m
+    let numM = (mul2.outputImage ?? num).cropped(to: ext).clampedToExtent().applyingGaussianBlur(sigma: sigma).cropped(to: ext)
+    let den = m.clampedToExtent().applyingGaussianBlur(sigma: sigma).cropped(to: ext)
+    let div = CIFilter.divideBlendMode()
+    div.inputImage = den; div.backgroundImage = numM
+    let illum = (div.outputImage ?? num).cropped(to: ext)
+    // Typical lighting on the product = masked average of the estimate, a little raised.
+    func avg(_ i: CIImage) -> Double {
+        let a = CIFilter.areaAverage(); a.inputImage = i; a.extent = ext
+        var px = [Float](repeating: 0, count: 4)
+        ctx.render(a.outputImage!, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        return Double(px[0])
+    }
+    let mulI = CIFilter.multiplyCompositing(); mulI.inputImage = illum; mulI.backgroundImage = m
+    let mArea = avg(m)
+    guard mArea > 0.001 else { return img }
+    let target = min(0.98, avg((mulI.outputImage ?? illum).cropped(to: ext)) / mArea * 1.12)
+    // Shadow score: share of the product lit at under 45% of its typical light (≈ two thirds as bright to the eye).
+    let n = 128
+    let toSmall = CGAffineTransform(translationX: -ext.minX, y: -ext.minY).scaledBy(x: CGFloat(n) / ext.width, y: CGFloat(n) / ext.height)
+    var il = [Float](repeating: 0, count: n * n), mk = [Float](repeating: 0, count: n * n)
+    ctx.render(illum.transformed(by: toSmall), toBitmap: &il, rowBytes: n * 4, bounds: CGRect(x: 0, y: 0, width: n, height: n), format: .Rf, colorSpace: nil)
+    ctx.render(m.transformed(by: toSmall), toBitmap: &mk, rowBytes: n * 4, bounds: CGRect(x: 0, y: 0, width: n, height: n), format: .Rf, colorSpace: nil)
+    var inside = 0, dark = 0
+    for i in 0..<(n * n) where mk[i] > 0.5 { inside += 1; if Double(il[i]) < target * 0.45 { dark += 1 } }
+    shadowScore = inside > 0 ? (Double(dark) / Double(inside) * 1000).rounded() / 1000 : 0
+    if strength <= 0 { return img }
+    // ratio = illum / target, clamped to [0.5, 1], then eased by strength: 1 - s·(1 − ratio).
+    let k = CGFloat(strength / target)
+    let ratio = CIFilter.colorMatrix()
+    ratio.inputImage = illum
+    ratio.rVector = CIVector(x: k, y: 0, z: 0, w: 0); ratio.gVector = CIVector(x: k, y: 0, z: 0, w: 0); ratio.bVector = CIVector(x: k, y: 0, z: 0, w: 0)
+    ratio.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+    let b = CGFloat(1 - strength)
+    ratio.biasVector = CIVector(x: b, y: b, z: b, w: 0)
+    let clamp = CIFilter.colorClamp()
+    clamp.inputImage = ratio.outputImage
+    clamp.minComponents = CIVector(x: CGFloat(1 - strength * 0.75), y: CGFloat(1 - strength * 0.75), z: CGFloat(1 - strength * 0.75), w: 1)
+    clamp.maxComponents = CIVector(x: 1, y: 1, z: 1, w: 1)
+    let lift = CIFilter.divideBlendMode()
+    lift.inputImage = (clamp.outputImage ?? illum).cropped(to: ext); lift.backgroundImage = img
+    return (lift.outputImage ?? img).cropped(to: ext)
+}
+
 guard let srgb = CGColorSpace(name: CGColorSpace.sRGB) else { emit(["ok": false, "reason": "色空間"]) }
 func save(_ img: CIImage) {
     do {
@@ -61,9 +129,10 @@ func save(_ img: CIImage) {
 /** Colour only, framing kept (long side at most `size`). */
 func enhanceOnly(_ why: String, _ extra: [String: Any] = [:]) -> Never {
     let k = min(1, size / max(extent.width, extent.height))
-    let img = adjusted.transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY)).transformed(by: CGAffineTransform(scaleX: k, y: k))
+    let lit = liftShadows(adjusted, mask: CIImage(color: .white).cropped(to: extent), strength: deshadow)
+    let img = lit.transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY)).transformed(by: CGAffineTransform(scaleX: k, y: k))
     save(img)
-    emit(extra.merging(["ok": true, "mode": "enhance", "why": why, "width": Int(img.extent.width), "height": Int(img.extent.height)]) { a, _ in a })
+    emit(extra.merging(["ok": true, "mode": "enhance", "why": why, "deshadow": deshadow, "shadowScore": shadowScore, "width": Int(img.extent.width), "height": Int(img.extent.height)]) { a, _ in a })
 }
 if mode == "enhance" { enhanceOnly("指定") }
 
@@ -120,7 +189,7 @@ if shadow {
     base = blend.outputImage?.cropped(to: extent) ?? white
 }
 let cut = CIFilter.blendWithMask()
-cut.inputImage = adjusted; cut.backgroundImage = base; cut.maskImage = mask
+cut.inputImage = liftShadows(adjusted, mask: mask, strength: deshadow); cut.backgroundImage = base; cut.maskImage = mask
 guard var out = cut.outputImage?.cropped(to: extent) else { emit(["ok": false, "reason": "合成に失敗"]) }
 
 // 4) Square crop around the subject with some air; beyond the photo it is just more white.
@@ -132,4 +201,4 @@ let scale = min(1, size / side)
 out = out.transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY)).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
 
 save(out)
-emit(["ok": true, "mode": "studio", "background": lightProduct ? "grey" : "white", "whiteRatio": (whiteRatio * 100).rounded() / 100, "coverage": cov, "touchesEdge": touchesEdge, "instances": obs.allInstances.count, "width": Int(out.extent.width), "height": Int(out.extent.height)])
+emit(["ok": true, "mode": "studio", "deshadow": deshadow, "shadowScore": shadowScore, "background": lightProduct ? "grey" : "white", "whiteRatio": (whiteRatio * 100).rounded() / 100, "coverage": cov, "touchesEdge": touchesEdge, "instances": obs.allInstances.count, "width": Int(out.extent.width), "height": Int(out.extent.height)])

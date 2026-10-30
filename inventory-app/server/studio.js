@@ -1,5 +1,6 @@
 // 撮った写真の自動仕上げ（Mac 上・無料）。新しい現物写真が届くたびに順番に処理する。
-//  1) tools/bin/studio（macOS Vision の切り抜き＋Core Image の自動補正）で 白背景・正方形トリミング・色補正
+//  1) tools/bin/studio（macOS Vision の切り抜き＋Core Image の自動補正）で 白背景・正方形トリミング・色補正・商品に落ちた影を明るく
+//     （影消しの強さは設定 studioDeshadow、既定 0.6。黒い商品は黒のまま。小さな軽量AIは影の有無を見分けられなかったので数値処理で行う）
 //     被写体が画面からはみ出す／大写し／見つからない写真は色・明るさの補正だけ（構図はそのまま）
 //  2) 白背景にした写真はローカルAI（Ollama の視覚モデル）が元写真と見比べ、商品が欠けていたら補正だけの版に切り替える
 //     （白っぽい商品は白に溶けないよう薄いグレーの背景。判定は tools/studio.swift）
@@ -16,6 +17,7 @@ const TOOL = path.join(ROOT, 'tools', 'bin', 'studio');
 const OLLAMA = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
 const QC_MODEL = process.env.STUDIO_QC_MODEL || 'qwen3.5:4b';
 const ACTOR = 'claude';
+const DESHADOW = 0.6;
 
 const run = (cmd, args, timeout = 120000) => new Promise((resolve, reject) => execFile(cmd, args, { timeout }, (e, out) => (e && !out ? reject(e) : resolve(String(out)))));
 
@@ -59,13 +61,14 @@ export function createStudio(store) {
     try {
       const src = path.join(dir, ph.files.original);
       const out = path.join(tmp, 'out.jpg');
-      let info = JSON.parse((await run(TOOL, [src, out])).trim().split('\n').pop() || '{}');
+      const ds = ['--deshadow', String(store.settings.studioDeshadow ?? DESHADOW)];
+      let info = JSON.parse((await run(TOOL, [src, out, ...ds])).trim().split('\n').pop() || '{}');
       if (!info.ok) return;
       let qc = null;
       if (info.mode === 'studio') {
         const orig = path.join(dir, ph.files.work || ph.files.original);
         qc = (await localQc(orig, out, tmp)) ?? (await localQc(orig, out, tmp));
-        if (qc && !qc.ok) info = { ...JSON.parse((await run(TOOL, [src, out, '--mode', 'enhance'])).trim().split('\n').pop() || '{}'), why: `白背景にすると欠ける（${qc.reason}）` };
+        if (qc && !qc.ok) info = { ...JSON.parse((await run(TOOL, [src, out, '--mode', 'enhance', ...ds])).trim().split('\n').pop() || '{}'), why: `白背景にすると欠ける（${qc.reason}）` };
         if (!info.ok) return;
       }
       const thumb = path.join(tmp, 'thumb.jpg');
@@ -78,8 +81,8 @@ export function createStudio(store) {
         source: 'studio',
         derivedFrom: ph.id,
         tag: ph.tag || '',
-        note: info.mode === 'studio' ? 'AI仕上げ（白背景・トリミング・色補正）' : `AI仕上げ（色・明るさ補正のみ: ${info.why || ''}）`,
-        edit: { auto: info.mode, why: info.why || '', qc },
+        note: info.mode === 'studio' ? 'AI仕上げ（白背景・トリミング・色補正・影を明るく）' : `AI仕上げ（色・明るさ補正・影を明るく: ${info.why || ''}）`,
+        edit: { auto: info.mode, why: info.why || '', qc, deshadow: info.deshadow, shadowScore: info.shadowScore },
         width: info.width,
         height: info.height,
         clientId: `studio:${ph.id}`,

@@ -6,6 +6,7 @@ import { openCamera } from './camera.js';
 import { makeVariants, fetchBitmap, renderEdit, editToVariants, DEFAULT_EDIT } from './images.js';
 import * as uploads from './uploads.js';
 import { shootWithNativeCamera } from './native.js';
+import { quickMemo, searchPhotoFor, addSearchPhoto } from './quick.js';
 
 let pane;
 let photoTab = 'actual';
@@ -17,12 +18,23 @@ const fileUrl = (p, ph, v = 'thumb') => `/files/products/${p.id}/${ph.files[v] |
 
 export function mountDetail() {
   pane = document.getElementById('detail-pane');
-  on('detail', () => renderDetail());
+  on('detail', scheduleDetail);
   on('uploaded', (ev) => {
     if (ev.productId === state.detailId) reload();
   });
   on('uploads', () => {
-    if (state.detailId) renderDetail();
+    if (state.detailId) scheduleDetail();
+  });
+}
+
+// Bursts of live updates (AI edits, upload progress, finished photos) redraw the page once per frame, not once per event.
+let detailQueued = false;
+function scheduleDetail() {
+  if (detailQueued) return;
+  detailQueued = true;
+  requestAnimationFrame(() => {
+    detailQueued = false;
+    renderDetail();
   });
 }
 
@@ -128,7 +140,12 @@ function topControls(p) {
           class: `${v} ${p.decision === v ? 'on' : ''}`,
           onclick: () => act(api.post(url('/decision'), { decision: p.decision === v ? 'undecided' : v })),
         }, l))),
+      h('button', { class: 'icon-btn', 'aria-label': 'メモを書く', title: 'メモ（音声入力も可）', onclick: () => quickMemo(p.id, p.notes || '') }, '📝'),
       h('button', { class: 'icon-btn cam', 'aria-label': '撮影', onclick: () => openCamera({ ids: [p.id] }) }, '📷')),
+    searchPhotoFor(p.id) && h('div', { class: 'search-photo-bar' },
+      h('img', { src: searchPhotoFor(p.id).thumbUrl, alt: '' }),
+      h('span', { class: 'small' }, '📷検索に使った写真'),
+      h('button', { class: 'btn small primary', onclick: () => addSearchPhoto(p.id).then(() => renderDetail()).catch(showError) }, 'この商品の写真にする')),
     h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginTop: '10px', flexWrap: 'wrap' } },
       h('label', { class: 'quick-date', title: '日付（注文・購入・到着）' }, '📅',
         h('input', { type: 'date', value: p.itemDate || '', 'aria-label': '日付（注文・購入・到着）', onchange: (e) => act(api.patch(url(), { set: { itemDate: e.target.value || '' } }), e.target.value ? '日付を保存しました' : '日付を消しました') })),

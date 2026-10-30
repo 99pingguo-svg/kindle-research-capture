@@ -12,6 +12,7 @@ import * as uploads from './uploads.js';
 import { openNativeSetup, shootWithNativeCamera } from './native.js';
 import { ocrCandidates } from './search.js';
 import { makeVariants } from './images.js';
+import { quickMemo, rememberSearchPhoto, addSearchPhoto } from './quick.js';
 
 let els = null;
 
@@ -686,8 +687,10 @@ function searchByPhoto(searchInput) {
     let res;
     const t = toast('文字を読み取っています…', { ms: 20000 });
     try {
-      const { work } = await makeVariants(file);
-      const r = await fetch('/api/ocr', { method: 'POST', headers: { 'x-actor': 'user', 'content-type': 'image/jpeg' }, body: work, credentials: 'same-origin' });
+      const v = await makeVariants(file);
+      // Kept for a while: the photo becomes the product's photo once the product is known.
+      rememberSearchPhoto(file, v);
+      const r = await fetch('/api/ocr', { method: 'POST', headers: { 'x-actor': 'user', 'content-type': 'image/jpeg' }, body: v.work, credentials: 'same-origin' });
       res = await r.json();
       if (!r.ok) throw new Error(res?.error || `HTTP ${r.status}`);
     } catch (e) {
@@ -704,7 +707,7 @@ function searchByPhoto(searchInput) {
       cands.length > 0 && h('div', null,
         h('h3', null, 'この商品かも'),
         h('div', { class: 'ocr-cands' }, cands.map(({ p, why }) => h('button', {
-          class: 'ocr-cand', onclick: () => { close(); location.hash = `#/p/${p.id}`; },
+          class: 'ocr-cand', onclick: () => { close(); addSearchPhoto(p.id).catch(showError); location.hash = `#/p/${p.id}`; },
         },
         p.thumb ? h('img', { src: p.thumb, alt: '', loading: 'lazy' }) : h('span', { class: 'ocr-noimg' }, '📦'),
         h('span', { class: 'ocr-name' }, h('b', null, `#${p.id} `), p.name || ''),
@@ -800,6 +803,10 @@ function rowEl(p, idx, run) {
         class: 'icon-btn link native', 'aria-label': `${p.name || p.id} を純正カメラで撮る`, title: 'iPhone の「カメラ」アプリで撮る（スタイル等そのまま）',
         onclick: (e) => { e.stopPropagation(); shootWithNativeCamera(p.id, { ids: run.ids, index: idx }); },
       }, '📸'),
+      h('button', {
+        class: 'icon-btn link memo', 'aria-label': `${p.name || p.id} のメモを書く`, title: 'メモ（音声入力も可）',
+        onclick: (e) => { e.stopPropagation(); quickMemo(p.id, p.notes || ''); },
+      }, '📝'),
       p.sourceUrl && h('a', {
         class: 'icon-btn link', href: p.sourceUrl, target: '_blank', rel: 'noopener noreferrer',
         title: '購入ページを開く（別ウィンドウ）', 'aria-label': `${p.name || p.id} の購入ページを開く`,

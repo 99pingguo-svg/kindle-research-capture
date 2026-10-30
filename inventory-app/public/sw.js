@@ -1,9 +1,9 @@
 // Service worker: app shell works offline (photos queue in IndexedDB until the Mac is reachable).
-const SHELL = 'daicho-shell-v7';
+const SHELL = 'daicho-shell-v8';
 const THUMBS = 'daicho-thumbs-v1';
 const SHELL_FILES = [
   '/', '/index.html', '/app.css', '/manifest.webmanifest',
-  '/js/main.js', '/js/api.js', '/js/state.js', '/js/ui.js', '/js/list.js', '/js/detail.js', '/js/camera.js', '/js/images.js', '/js/uploads.js', '/js/pages.js', '/js/calendar.js', '/js/native.js', '/js/search.js',
+  '/js/main.js', '/js/api.js', '/js/state.js', '/js/ui.js', '/js/list.js', '/js/detail.js', '/js/camera.js', '/js/images.js', '/js/uploads.js', '/js/pages.js', '/js/calendar.js', '/js/native.js', '/js/search.js', '/js/quick.js',
   '/icons/icon-180.png', '/icons/icon-192.png',
 ];
 

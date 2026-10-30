@@ -454,3 +454,10 @@ code, .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 .ocr-cand .ocr-name { font-size: 14px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .ocr-lines { display: flex; flex-wrap: wrap; gap: 6px; }
 .ocr-lines .chip { white-space: normal; text-align: left; max-width: 100%; }
+
+/* ワンタッチのメモ・📷検索の写真 */
+.memo-text { width: 100%; box-sizing: border-box; font-size: 16px; line-height: 1.5; border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: var(--card); color: inherit; resize: vertical; }
+.search-photo-bar { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 6px; border: 1px dashed var(--accent); border-radius: 10px; }
+.search-photo-bar img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; }
+.search-photo-bar .small { flex: 1; }
+.memo-sheet h2 .small { display: block; margin-top: 2px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

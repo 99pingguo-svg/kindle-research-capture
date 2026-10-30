@@ -23,7 +23,7 @@ function prepared(p) {
   if (!c) {
     const hay = norm([p.id, p.name, p.brand, p.model, p.jan, p.notes, p.location, p.title, p.category, asinOf(p.sourceUrl)].join(' '));
     const name = norm([p.name, p.title].join(' '));
-    c = { hay, name, nameGrams: grams(name) };
+    c = { hay, grams: grams(hay), name, nameGrams: grams(name) };
     cache.set(p, c);
   }
   return c;
@@ -67,10 +67,17 @@ function longestShared(t, s) {
 }
 
 /** How well one term matches: 1 = contained, below 1 = close, 0 = not at all. */
-function termScore(t, hay) {
+function termScore(t, hay, hayGrams) {
   if (hay.includes(t)) return 1;
   if (t.length < FUZZY_MIN || /^[0-9a-z]+$/.test(t) && /\d/.test(t)) return 0;
-  const d = nearestEdit(t, hay, allowedErrors(t.length));
+  // Cheap pre-check: each wrong letter breaks at most two 2-letter pieces, and a shared piece of 5+ letters keeps 4.
+  const tg = grams(t);
+  let shared = 0;
+  for (const g of tg) if (hayGrams.has(g)) shared++;
+  const errs = allowedErrors(t.length);
+  const editPossible = shared >= tg.size - 2 * errs;
+  if (!editPossible && (t.length < PIECE_MIN_TERM || shared < PIECE_MIN - 1)) return 0;
+  const d = editPossible ? nearestEdit(t, hay, errs) : Infinity;
   if (d !== Infinity) return 1 - d / t.length;
   if (t.length < PIECE_MIN_TERM) return 0;
   const piece = longestShared(t, hay);
@@ -79,11 +86,11 @@ function termScore(t, hay) {
 
 /** 1 = every term is contained; below 1 = close (some terms are 1–2 characters off); 0 = no match. */
 export function searchScore(p, terms) {
-  const { hay } = prepared(p);
+  const { hay, grams: hg } = prepared(p);
   let sum = 0;
   let misses = 0;
   for (const t of terms) {
-    const s = termScore(t, hay);
+    const s = termScore(t, hay, hg);
     if (!s) misses++;
     sum += s;
   }
