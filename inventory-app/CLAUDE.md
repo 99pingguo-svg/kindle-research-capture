@@ -14,6 +14,7 @@
 - 出品判断は 出品／下書き／保留／出さない／在庫なし（ユーザーのみ）。「下書き」はメルカリへ下書き保存までで公開しない。
 - 日付は 注文日・購入日（`orderDate`）／到着日（`arrivalDate`）／区別しない日付（`itemDate`）。種類は `category`（`server/category.js` の一覧。未設定は商品名から推定）。これらは整理用なので変更しても QC はやり直しにならない（FIELDS の `meta`）。
 - 一覧の絞り込みは 状態チップ＋📅期間＋💴価格帯＋🔍条件（同じ見出しは OR、見出し間は AND）、並び順はキー＋向き。「保存した表示」は設定 `listViews`（ユーザーのみ・全端末共通）。
+- 検索（`public/js/search.js`）: 全角半角・カナ/ひらがな・空白・記号・長音・フォ/ホ を無視した部分一致。含まれる語＝一致（選んだ並び順）、5文字以上で1〜2文字違い・長い語の大きな一部・3語以上で1語欠け＝「近い候補」（一致の後ろ・近い順）。数字の語（ID・JAN）は打った通りだけ。📷＝写真の文字とバーコードを Mac で読む（`POST /api/ocr` → `tools/bin/ocr`＝macOS Vision・日英、写真は保存しない。ビルド `npm run build:ocr`）→ JAN 一致・商品名の重なりで候補を出す。
 - 純正カメラ連携: アプリで撮影対象を決める（`PUT /api/native-shoot`、ユーザーのみ）→ iPhone の「カメラ」で撮影 → ショートカット「台帳に送る」が撮影開始後の写真を `POST /api/native-shoot/photos`（合言葉 `x-upload-key`、この2口だけ有効）へ送り、サーバーが sips で work/thumb を作る。画面は `public/js/native.js`。ショートカットは `tools/make_shortcuts.py` が作り `shortcuts sign` で署名、`GET /api/native-shoot/shortcut/camera|send` で配る（send は合言葉入り）。撮影開始前の写真は EXIF の撮影日時で除外。
 - 撮った写真の自動仕上げ（`server/studio.js`、設定 `autoStudio`）: 届いた現物写真ごとに `tools/bin/studio`（macOS Vision の切り抜き＋自動補正。ビルド `npm run build:studio`）で白背景・正方形・色補正（白っぽい商品は薄いグレー背景、はみ出し・大写しは色補正のみ）→ ローカルAI（Ollama qwen3.5:4b）が欠けを確認 → 編集写真（source=studio）として追加し出品用で元写真と入れ替え（🔒確定時は入れ替えない）。未処理分は `POST /api/studio/run`。
 - 写真の種類: actual（ユーザー撮影の現物）・generated（注記入りのAI紹介画像。出品用に選べるが現物ではない）・reference（参考。出品不可）。

@@ -10,13 +10,15 @@ import { pickDateRange, rangeLabel, fmtDay } from './calendar.js';
 import { openCamera } from './camera.js';
 import * as uploads from './uploads.js';
 import { openNativeSetup, shootWithNativeCamera } from './native.js';
+import { ocrCandidates } from './search.js';
+import { makeVariants } from './images.js';
 
 let els = null;
 
 export function mountList() {
   const pane = document.getElementById('list-pane');
   const search = h('input', {
-    type: 'search', placeholder: '商品名・型番・ブランド・JAN・ID', value: state.query, enterkeyhint: 'search',
+    type: 'search', placeholder: '商品名・型番・JAN（一部・ひらがなOK）', value: state.query, enterkeyhint: 'search',
     oninput: (e) => { state.query = e.target.value; scheduleRender(); },
   });
   els = {
@@ -36,7 +38,8 @@ export function mountList() {
         els.conn, els.upload,
         h('button', { class: 'icon-btn', 'aria-label': '追加', onclick: addMenu }, '＋'),
         h('button', { class: 'icon-btn', 'aria-label': 'メニュー', onclick: mainMenu }, '⋯')),
-      h('div', { class: 'search' }, search),
+      h('div', { class: 'search' }, search,
+        h('button', { class: 'icon-btn search-cam', 'aria-label': '写真の文字・バーコードで探す', title: '写真の文字・バーコードで探す', onclick: () => searchByPhoto(search) }, '📷')),
       els.chips, els.toolbar, els.condbar),
     els.list, els.fab, els.bulk);
   // Group headings stick just below the (variable-height) sticky header.
@@ -119,7 +122,7 @@ function renderToolbar(items = visibleProducts()) {
   const desc = !!state.prefs.desc;
   const nConds = state.prefs.conds.length;
   clear(els.toolbar).append(
-    h('span', { class: 'count' }, `${n}件`),
+    h('span', { class: 'count' }, `${n}件`, state.nearIds.size ? h('small', null, `（うち近い候補${state.nearIds.size}）`) : null),
     h('button', { class: `btn small date-range ${dateRangeOn() ? 'on' : ''}`, onclick: openRange, 'aria-label': `${dk.label}で絞り込み` },
       '📅 ', dk.field !== 'itemDate' ? `${dk.label} ` : '', rangeLabel(state.prefs, dk.label)),
     h('button', { class: `btn small date-range ${priceRangeOn() ? 'on' : ''}`, onclick: openPriceRange, 'aria-label': 'Amazon価格で絞り込み' }, '💴 ', priceRangeLabel()),
@@ -628,7 +631,8 @@ function renderItems(items = visibleProducts()) {
   const keyOf = gField ? (p) => p[gField] || '' : byCat ? (p) => p.category || '' : null;
   const groups = keyOf ? new Map() : null;
   if (groups) for (const p of items) groups.set(keyOf(p), (groups.get(keyOf(p)) || 0) + 1);
-  listRun = { items, ids: items.map((p) => p.id), gField, gKind: gField ? DATE_KINDS.find((k) => k.field === gField) : null, keyOf, groups, lastKey: null, shown: 0, viewKey };
+  const nearFrom = state.nearIds.size ? items.findIndex((p) => state.nearIds.has(p.id)) : -1;
+  listRun = { items, nearFrom, ids: items.map((p) => p.id), gField, gKind: gField ? DATE_KINDS.find((k) => k.field === gField) : null, keyOf, groups, lastKey: null, shown: 0, viewKey };
   appendRows(Math.max(FIRST_ROWS, keep));
 }
 
@@ -639,6 +643,10 @@ function appendRows(n) {
   const end = Math.min(run.items.length, run.shown + n);
   for (let idx = run.shown; idx < end; idx++) {
     const p = run.items[idx];
+    if (idx === run.nearFrom) {
+      run.groups = null; // close matches are ordered by closeness, so no date / 種類 headings among them
+      frag.append(h('div', { class: 'date-head near-head' }, '近い候補（部分一致・表記ゆれ）', h('span', { class: 'n' }, `${state.nearIds.size}件`)));
+    }
     if (run.groups && run.keyOf(p) !== run.lastKey) {
       run.lastKey = run.keyOf(p);
       frag.append(groupHead(run, run.lastKey));
@@ -663,6 +671,56 @@ function scrollRoot() {
     if (/(auto|scroll)/.test(getComputedStyle(el).overflowY)) return el;
   }
   return null;
+}
+
+/**
+ * 📷 Photograph a box, label or barcode → the Mac reads the text (macOS Vision, free, nothing leaves the Mac)
+ * → likely products to open, and the recognised lines to search with.
+ */
+function searchByPhoto(searchInput) {
+  const picker = h('input', { type: 'file', accept: 'image/*', capture: 'environment', style: { display: 'none' } });
+  picker.onchange = async () => {
+    const file = picker.files?.[0];
+    picker.remove();
+    if (!file) return;
+    let res;
+    const t = toast('文字を読み取っています…', { ms: 20000 });
+    try {
+      const { work } = await makeVariants(file);
+      const r = await fetch('/api/ocr', { method: 'POST', headers: { 'x-actor': 'user', 'content-type': 'image/jpeg' }, body: work, credentials: 'same-origin' });
+      res = await r.json();
+      if (!r.ok) throw new Error(res?.error || `HTTP ${r.status}`);
+    } catch (e) {
+      return showError(e);
+    } finally {
+      t?.remove?.();
+    }
+    const cands = ocrCandidates([...state.products.values()].filter((p) => !p.trashedAt), res);
+    const lines = (res.lines || []).filter((l) => l.text.length >= 2).slice(0, 14);
+    const search = (q) => { searchInput.value = q; state.query = q; renderAll(); toTop(); };
+    sheet((close) => h('div', { class: 'ocr-sheet' },
+      h('h2', null, '📷 写真の文字で探す'),
+      !cands.length && !lines.length && !res.barcodes?.length && h('p', { class: 'muted' }, '文字が読み取れませんでした。商品名やバーコードが大きく写るように撮り直してください。'),
+      cands.length > 0 && h('div', null,
+        h('h3', null, 'この商品かも'),
+        h('div', { class: 'ocr-cands' }, cands.map(({ p, why }) => h('button', {
+          class: 'ocr-cand', onclick: () => { close(); location.hash = `#/p/${p.id}`; },
+        },
+        p.thumb ? h('img', { src: p.thumb, alt: '', loading: 'lazy' }) : h('span', { class: 'ocr-noimg' }, '📦'),
+        h('span', { class: 'ocr-name' }, h('b', null, `#${p.id} `), p.name || ''),
+        h('span', { class: 'muted small' }, why))))),
+      res.barcodes?.length > 0 && h('div', null,
+        h('h3', null, 'バーコード'),
+        h('div', { class: 'ocr-lines' }, res.barcodes.map((b) => h('button', { class: 'chip', onclick: () => { close(); search(b); } }, b)))),
+      lines.length > 0 && h('div', null,
+        h('h3', null, '読み取った文字（タップで検索）'),
+        h('div', { class: 'ocr-lines' }, lines.map((l) => h('button', { class: 'chip', onclick: () => { close(); search(l.text); } }, l.text)))),
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn', onclick: () => { close(); searchByPhoto(searchInput); } }, '📷 撮り直す'),
+        h('button', { class: 'btn ghost', onclick: () => close() }, '閉じる'))));
+  };
+  document.body.append(picker);
+  picker.click();
 }
 
 function groupHead(run, d) {

@@ -175,6 +175,24 @@ export function createApp({ dataDir, token = '' } = {}) {
   };
   route('GET', '/api/native-shoot', () => shootInfo());
   // 自動仕上げ: 状況と、まだ仕上げていない写真の処理（商品を指定できる）
+  // 写真の文字・バーコードを読む（検索用。tools/bin/ocr＝macOS Vision、外部送信なし）。本文 = 画像そのもの。写真は保存しない。
+  route('POST', '/api/ocr', async ({ req }) => {
+    const tool = path.join(ROOT, 'tools', 'bin', 'ocr');
+    if (!fs.existsSync(tool)) throw new AppError(503, '文字認識の道具がありません（npm run build:ocr）');
+    const buf = await readBody(req, 20 * 1024 * 1024);
+    if (buf.length < 1000) throw new AppError(400, '画像データがありません');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-ocr-'));
+    const file = path.join(dir, 'in.jpg');
+    try {
+      fs.writeFileSync(file, buf);
+      const out = await new Promise((resolve, reject) => execFile(tool, [file], { timeout: 30000 }, (e, so) => (e && !so ? reject(e) : resolve(String(so)))));
+      const r = JSON.parse(out);
+      if (!r.ok) throw new AppError(422, r.error || '文字を読み取れませんでした');
+      return { lines: r.lines, barcodes: r.barcodes };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
   route('GET', '/api/studio', () => ({ available: studio.available(), pending: studio.pending(), on: store.settings.autoStudio !== false }));
   route('POST', '/api/studio/run', ({ body }) => ({ queued: studio.backfill(Array.isArray(body?.productIds) ? body.productIds.map(String) : null) }));
   route('PUT', '/api/native-shoot', ({ body, actor }) => {
@@ -472,8 +490,8 @@ export function createApp({ dataDir, token = '' } = {}) {
         const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
         let body;
         const isMultipart = (req.headers['content-type'] || '').startsWith('multipart/');
-        // Raw photos (from the iPhone shortcut) are read by their route, not as JSON.
-        const isRaw = url.pathname === '/api/native-shoot/photos';
+        // Raw photos (the iPhone shortcut, 📷 search) are read by their route, not as JSON.
+        const isRaw = url.pathname === '/api/native-shoot/photos' || url.pathname === '/api/ocr';
         if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !isMultipart && !isRaw) {
           const raw = await readBody(req, 2 * 1024 * 1024);
           body = raw.length ? JSON.parse(raw.toString('utf8')) : {};

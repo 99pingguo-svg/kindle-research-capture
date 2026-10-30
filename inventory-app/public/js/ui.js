@@ -36,6 +36,7 @@ export function toast(message, { error = false, ms = 2600 } = {}) {
   const t = h('div', { class: 'toast' + (error ? ' error' : '') }, message);
   root.append(t);
   setTimeout(() => t.remove(), error ? Math.max(ms, 5000) : ms);
+  return t;
 }
 
 export function showError(e) {

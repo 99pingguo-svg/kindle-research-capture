@@ -1,5 +1,6 @@
 // Shared client state + a tiny change bus.
 import { api } from './api.js';
+import { termsOf, searchScore } from './search.js';
 
 const PREFS_KEY = 'daicho.prefs';
 const PREFS_VERSION = 3;
@@ -44,6 +45,7 @@ export const state = {
   meta: null,
   products: new Map(), // id -> summary
   query: '',
+  nearIds: new Set(), // search results that only partly match (shown after the real matches)
   selectMode: false,
   selected: new Set(),
   detail: null, // full product currently open
@@ -335,15 +337,19 @@ function compareBy(def, desc) {
 }
 
 export function visibleProducts() {
-  const q = state.query.trim().toLowerCase().normalize('NFKC');
+  const terms = termsOf(state.query);
   let items = [...state.products.values()].filter((p) => matchesFilter(p, state.prefs.filter) && shownByClass(p) && inDateRange(p) && inPriceRange(p) && inConds(p));
-  if (q) {
-    const terms = q.split(/\s+/);
-    items = items.filter((p) => {
-      const hay = [p.id, p.name, p.brand, p.model, p.jan, p.notes, p.location, p.title, p.category].join(' ').toLowerCase().normalize('NFKC');
-      return terms.every((t) => hay.includes(t));
-    });
+  state.nearIds = new Set();
+  const cmp = compareBy(sortDef(), !!state.prefs.desc);
+  if (!terms.length) return items.sort(cmp);
+  // Real matches in the chosen order, then close ones (partial / misspelt) best first.
+  const score = new Map();
+  for (const p of items) {
+    const s = searchScore(p, terms);
+    if (s) score.set(p, s);
   }
-  items.sort(compareBy(sortDef(), !!state.prefs.desc));
-  return items;
+  const exact = items.filter((p) => score.get(p) === 1).sort(cmp);
+  const near = items.filter((p) => score.get(p) < 1).sort((a, b) => score.get(b) - score.get(a) || cmp(a, b));
+  state.nearIds = new Set(near.map((p) => p.id));
+  return exact.concat(near);
 }

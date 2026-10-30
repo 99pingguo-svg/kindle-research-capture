@@ -15,6 +15,7 @@
     "backup": "node scripts/backup.js",
     "demo": "node scripts/seed-demo.js",
     "icons": "node scripts/make-icons.js",
-    "build:studio": "mkdir -p tools/bin && swiftc -O tools/studio.swift -o tools/bin/studio"
+    "build:studio": "mkdir -p tools/bin && swiftc -O tools/studio.swift -o tools/bin/studio",
+    "build:ocr": "mkdir -p tools/bin && swiftc -O tools/ocr.swift -o tools/bin/ocr"
   }
 }
