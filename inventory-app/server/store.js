@@ -1063,7 +1063,8 @@ export class Store extends EventEmitter {
       const ordered = CHANNEL_IDS.filter((c) => c === channel || (p.targets || []).includes(c));
       ctx.note(`${channelLabel(channel)}を既定として${has ? '緑に' : '追加'}（${reason}）`);
       if (!has) ctx.changes.push({ path: 'targets', label: '出品先', from: (p.targets || []).map(channelLabel).join('・') || 'なし', to: ordered.map(channelLabel).join('・') });
-      p.targetDefaults = { ...p.targetDefaults, [channel]: { at: nowIso(), reason, rule: 'request', by: actor } };
+      // `added` only when this call ticked it: a box the user had ticked (now just green) can never be taken away by unmark.
+      p.targetDefaults = { ...p.targetDefaults, [channel]: { at: nowIso(), reason, rule: 'request', by: actor, ...(has ? {} : { added: true }) } };
       if (p.targetsManual?.[channel]) {
         const { [channel]: _, ...rest } = p.targetsManual;
         p.targetsManual = rest;
@@ -1077,7 +1078,7 @@ export class Store extends EventEmitter {
   unmarkDefaultTarget(id, actor, channel) {
     const cur = this.get(id);
     const d = cur.targetDefaults?.[channel];
-    if (d?.rule !== 'request' || d.by !== actor || cur.targetsManual?.[channel] || !(cur.targets || []).includes(channel)) return false;
+    if (d?.rule !== 'request' || !d.added || d.by !== actor || cur.targetsManual?.[channel] || !(cur.targets || []).includes(channel)) return false;
     this.mutate(id, actor, 'targets', (p, ctx) => {
       const next = p.targets.filter((c) => c !== channel);
       ctx.note(`${channelLabel(channel)}の既定を取り消し`);

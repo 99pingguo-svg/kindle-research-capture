@@ -63,3 +63,21 @@ test('手取りのおすすめ: よいサイトを緑で入れ、相場が変わ
   await tick();
   assert.deepEqual(store.get(id).targets, ['rakuma']);
 });
+
+test('依頼で緑にした出品先: ユーザーが入れた分はAIが取り消せない、手で外した分はAIが戻せない', () => {
+  const store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-')));
+  const a = store.create({ name: 'a' }).product.id;
+  store.setTargets(a, 'user', ['flea']); // ticked by hand
+  assert.equal(store.markDefaultTarget(a, 'claude', 'flea', 'test'), true); // turns green only
+  assert.equal(store.unmarkDefaultTarget(a, 'claude', 'flea'), false);
+  assert.deepEqual(store.get(a).targets, ['flea']);
+  const b = store.create({ name: 'b' }).product.id;
+  store.setTargets(b, 'user', ['flea']);
+  store.setTargets(b, 'user', []); // cleared by hand
+  assert.equal(store.markDefaultTarget(b, 'claude', 'flea', 'test'), false);
+  assert.deepEqual(store.get(b).targets, []);
+  const c = store.create({ name: 'c' }).product.id;
+  assert.equal(store.markDefaultTarget(c, 'claude', 'jmty', 'test'), true); // added by the request → can be undone
+  assert.equal(store.unmarkDefaultTarget(c, 'claude', 'jmty'), true);
+  assert.deepEqual(store.get(c).targets, []);
+});

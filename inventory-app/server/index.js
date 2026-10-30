@@ -525,7 +525,8 @@ export function createApp({ dataDir, token = '' } = {}) {
   // The token-free Mac listener must not be usable by other web pages open on this Mac:
   // a foreign Host name (DNS rebinding) is refused, and so is a change sent from another site (CSRF).
   const LOCAL_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i;
-  const okHost = (h) => LOCAL_HOST.test(h) || /\.ts\.net(:\d+)?$/i.test(h);
+  // (Tailscale reaches the app through the token-protected HTTPS listener, so this one needs only the Mac's own names.)
+  const okHost = (h) => LOCAL_HOST.test(h);
   function crossSite(req) {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return false;
     if (req.headers['sec-fetch-site'] === 'cross-site') return true;
