@@ -111,3 +111,11 @@ export function targetTitle(p, id, suggested = p.suggestedTargets || []) {
     !(p.targets || []).includes(id) && suggested.includes(id) && 'おすすめ（価格・大きさの調査から）',
   ].filter(Boolean).join('・');
 }
+
+/** 飲食料品にフリマを入れるときの確認。「チェックする」を選んだときだけ true。 */
+export async function confirmFoodFlea(name) {
+  const v = await choose(`「${name || 'この商品'}」は飲食料品です。フリマは飲料・食品の出店が禁止のことが多いです。それでもフリマにチェックしますか？`, [
+    { label: '確認した。フリマにチェックする', value: true, danger: true },
+  ]);
+  return v === true;
+}

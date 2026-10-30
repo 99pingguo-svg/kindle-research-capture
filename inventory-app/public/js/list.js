@@ -1,6 +1,6 @@
 // 商品一覧: the main screen. Decision, camera, status, issues and bulk actions are all
 // available per row so most work never needs the detail page.
-import { h, clear, toast, showError, choose, sheet, yen, targetTitle } from './ui.js';
+import { h, clear, toast, showError, choose, sheet, yen, targetTitle, confirmFoodFlea } from './ui.js';
 import { api } from './api.js';
 import {
   state, setPref, on, FILTERS, matchesFilter, visibleProducts, applyProduct, loadAll, inDateRange, inPriceRange, inConds, matchCond, productsForCalendar,
@@ -574,7 +574,10 @@ function targetSeg(p) {
         e.stopPropagation();
         try {
           const next = targets.includes(c.id) ? targets.filter((x) => x !== c.id) : [...targets, c.id];
-          applyProduct(await api.put(`/api/products/${p.id}/targets`, { targets: next }));
+          // 飲食料品のフリマは確認してから（押しただけでは入らない）
+          const needsOk = c.id === 'flea' && !targets.includes('flea') && p.isFood;
+          if (needsOk && !(await confirmFoodFlea(p.name))) return;
+          applyProduct(await api.put(`/api/products/${p.id}/targets`, { targets: next, ...(needsOk ? { confirmFoodFlea: true } : {}) }));
         } catch (err) {
           showError(err);
         }

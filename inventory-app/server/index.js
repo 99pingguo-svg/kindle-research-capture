@@ -267,7 +267,7 @@ export function createApp({ dataDir, token = '' } = {}) {
   route('DELETE', '/api/products/:id/photos/:pid', ({ params, actor }) => full(store.deletePhoto(params.id, actor, params.pid)));
   route('POST', '/api/products/:id/photos/:pid/restore', ({ params, actor }) => full(store.restorePhoto(params.id, actor, params.pid)));
   // ---- destinations (メルカリ／ジモティー／フリマ) ----
-  route('PUT', '/api/products/:id/targets', ({ params, body, actor }) => full(store.setTargets(params.id, actor, body?.targets || [])));
+  route('PUT', '/api/products/:id/targets', ({ params, body, actor }) => full(store.setTargets(params.id, actor, body?.targets || [], { confirmFoodFlea: body?.confirmFoodFlea === true })));
   route('PUT', '/api/products/:id/channel-photos/:channel', ({ params, body, actor }) => full(store.setChannelPhotos(params.id, actor, params.channel, body?.ids ?? null)));
   route('GET', '/api/products/:id/package/:channel', ({ params }) => {
     const pkg = channelPackage(store.get(params.id), params.channel);

@@ -4,12 +4,14 @@
 // 手取りのおすすめ（ユーザー指定 2026-10-30）: メルカリ・ヤフーフリマ・ラクマ・ヤフオクの手取り見込みを比べ、一番よいサイトと
 // 差が小さいサイト（設定 netDefault: margin 円以内 または ratio 以内）を出品先に入れる（画面では緑）。相場が変わって外れたら、
 // この規則が入れたものだけ外す。ユーザーが手で付け外ししたサイト（targetsManual）には触らない。
+// 飲食料品（server/food.js）にはフリマを入れず、すでに入っていれば手で入れたものも1回だけ外す（ユーザー指定 2026-10-30）。
 import { mercariNet, recommendedChannels } from './market.js';
+import { isFood } from './food.js';
 import { shippingOf } from './shipping.js';
 
 /** Why this product should get フリマ by default, or '' if it should not. */
 export function fleaReason(p, rule) {
-  if (!rule || rule.on === false || p.trashedAt) return '';
+  if (!rule || rule.on === false || p.trashedAt || isFood(p)) return '';
   const amazon = p.research?.amazonPrice ?? p.amazon?.price ?? null;
   if (amazon != null && amazon <= rule.amazonMax) return `Amazon ${amazon}円`;
   const net = mercariNet(p, shippingOf(p.amazon, p.sizeEstimate))?.net ?? null;
@@ -60,8 +62,21 @@ export function createDefaults(store) {
     return true;
   }
 
+  const FOOD_REASON = '飲食料品はフリマで禁止のことが多いため';
+  const foodDue = (p) => !p.foodFleaRuleAt && isFood(p);
+
   function sweep() {
     const all = store.list({ includeTrash: false });
+    const foods = all.filter(foodDue);
+    if (foods.some((p) => (p.targets || []).includes('flea'))) store.saveSnapshot('system', { label: `飲食料品 ${foods.length}件のフリマを外す前`, kind: 'before' });
+    for (const p of foods) {
+      try {
+        store.clearFoodFlea(p.id, FOOD_REASON);
+      } catch (e) {
+        console.error('defaults(food):', p.id, e.message);
+      }
+    }
+    if (foods.length) console.log(`出品先の既定: 飲食料品 ${foods.length}件のフリマを確認`);
     const due = all.filter((p) => !p.targetDefaults?.flea && !p.targetsManual?.flea && !(p.targets || []).includes('flea') && fleaReason(p, store.settings.fleaDefault));
     const netList = all.filter(netDue);
     if (due.length + netList.length >= 5) store.saveSnapshot('system', { label: `出品先の既定（フリマ ${due.length}件・手取り ${netList.length}件）の前`, kind: 'before' });
@@ -89,7 +104,7 @@ export function createDefaults(store) {
   // New Amazon prices or market results can make a product qualify later.
   store.on('change', (ev) => {
     if (ev.type === 'settings') return setImmediate(sweep);
-    if (ev.type === 'product' && ev.actor !== 'system') setImmediate(() => { try { checkNet(ev.id); check(ev.id); } catch (e) { console.error('defaults:', ev.id, e.message); } });
+    if (ev.type === 'product' && ev.actor !== 'system') setImmediate(() => { try { const q = store.products.get(ev.id); if (q && foodDue(q)) store.clearFoodFlea(ev.id, FOOD_REASON); checkNet(ev.id); check(ev.id); } catch (e) { console.error('defaults:', ev.id, e.message); } });
   });
   setImmediate(sweep);
   return { sweep };

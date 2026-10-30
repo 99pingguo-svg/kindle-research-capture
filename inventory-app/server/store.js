@@ -14,6 +14,7 @@ import {
   decisionLabel, PREPARE_DECISIONS, PHOTO_KINDS, PHOTO_KIND_IDS, LISTABLE_KINDS, CHANNEL_IDS, channelLabel,
 } from './schema.js';
 import { readiness, actualPhotos, listablePhotos, livePhotos, findDuplicates } from './rules.js';
+import { isFood } from './food.js';
 
 const VERSIONS_KEPT = 100;
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
@@ -1069,13 +1070,18 @@ export class Store extends EventEmitter {
   // ---------- destinations, per-destination photos, research, text candidates ----------
 
   /** Where the user wants to offer the product (メルカリ／ジモティー／ヤフオク／ラクマ／フリマ, any number). User-only. */
-  setTargets(id, actor, targets) {
+  setTargets(id, actor, targets, { confirmFoodFlea = false } = {}) {
     forbidAi(actor, '出品先の選択');
     const next = [...new Set(targets || [])];
     for (const t of next) if (!CHANNEL_IDS.includes(t)) throw new AppError(400, `出品先が不正: ${t}`);
     const ordered = CHANNEL_IDS.filter((c) => next.includes(c));
     return this.mutate(id, actor, 'targets', (p, ctx) => {
       if (same(ordered, p.targets || [])) return;
+      // 飲食料品のフリマは、確認ダイアログを通したときだけ（どの経路からでも）。
+      if (ordered.includes('flea') && !(p.targets || []).includes('flea') && isFood(p)) {
+        if (!confirmFoodFlea) throw new AppError(409, '飲食料品はフリマで禁止のことが多いので、商品ごとに確認してチェックしてください', 'food_flea_confirm');
+        p.foodFleaRuleAt = p.foodFleaRuleAt || nowIso(); // the one-time removal must not undo this confirmed choice
+      }
       ctx.changes.push({ path: 'targets', label: '出品先', from: (p.targets || []).map(channelLabel).join('・') || 'なし', to: ordered.map(channelLabel).join('・') || 'なし' });
       ctx.dirty = true;
       // A destination the user turned on/off by hand is never touched again by the defaults (server/defaults.js).
@@ -1103,6 +1109,7 @@ export class Store extends EventEmitter {
   markDefaultTarget(id, actor, channel, reason) {
     if (!CHANNEL_IDS.includes(channel)) throw new AppError(400, `出品先が不正: ${channel}`);
     const cur = this.get(id);
+    if (channel === 'flea' && isFood(cur)) return false; // 飲食料品のフリマは確認ダイアログからだけ
     // Only the user may re-add a destination they cleared by hand. (One they ticked by hand stays ticked; it only turns green.)
     if (!isUser(actor) && cur.targetsManual?.[channel] && !(cur.targets || []).includes(channel)) return false;
     if ((cur.targets || []).includes(channel) && cur.targetDefaults?.[channel] && !cur.targetsManual?.[channel]) return false;
@@ -1120,6 +1127,25 @@ export class Store extends EventEmitter {
       p.targets = ordered;
     });
     return true;
+  }
+
+  /**
+   * 飲食料品のフリマを外す（ユーザー指定の規則。商品ごとに1回、手で入れたものも含む）。
+   * これ以降にユーザーが確認ダイアログを通して入れたものには触らない（setTargets が foodFleaRuleAt を付ける）。
+   */
+  clearFoodFlea(id, reason) {
+    return this.mutate(id, 'system', 'targets', (p, ctx) => {
+      if (p.foodFleaRuleAt || !isFood(p)) return;
+      p.foodFleaRuleAt = nowIso();
+      ctx.dirty = true;
+      if (p.targetsManual?.flea) { const { flea: _m, ...rest } = p.targetsManual; p.targetsManual = rest; }
+      if (p.targetDefaults?.flea) { const { flea: _d, ...rest } = p.targetDefaults; p.targetDefaults = rest; }
+      if (!(p.targets || []).includes('flea')) return;
+      const next = p.targets.filter((c) => c !== 'flea');
+      ctx.note(`フリマを外す（${reason}）`);
+      ctx.changes.push({ path: 'targets', label: '出品先', from: p.targets.map(channelLabel).join('・'), to: next.map(channelLabel).join('・') || 'なし' });
+      p.targets = next;
+    });
   }
 
   /** Undo markDefaultTarget: only a destination this same actor added on request, untouched by the user since. */

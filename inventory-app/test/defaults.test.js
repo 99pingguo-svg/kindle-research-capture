@@ -81,3 +81,32 @@ test('依頼で緑にした出品先: ユーザーが入れた分はAIが取り�
   assert.equal(store.unmarkDefaultTarget(c, 'claude', 'jmty'), true);
   assert.deepEqual(store.get(c).targets, []);
 });
+
+test('飲食料品: フリマは手で入れたものも1回外し、既定で入れず、確認つきで入れたものは残す', async () => {
+  const store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-')));
+  const honey = store.create({ name: '国産アカシアはちみつ（300g）' }).product.id;
+  const sup = store.create({ name: 'プラセンタ サプリ 60粒' }).product.id;
+  const pet = store.create({ name: '犬用発酵ドリンク' }).product.id;
+  const towel = store.create({ name: 'タオル' }).product.id;
+  store.setResearch(sup, 'claude', { amazonPrice: 500 }); // cheap, but no default フリマ for food
+  store.products.get(honey).targets = ['mercari', 'flea'];
+  store.products.get(honey).targetsManual = { flea: 'by hand' };
+  store.products.get(pet).targets = ['flea'];
+  store.setTargets(towel, 'user', ['flea']);
+  const defaults = createDefaults(store);
+  await tick();
+  assert.deepEqual(store.get(honey).targets, ['mercari'], '手で入れたフリマも外す');
+  assert.deepEqual(store.get(pet).targets, []);
+  assert.deepEqual(store.get(sup).targets, []);
+  assert.deepEqual(store.get(towel).targets, ['flea'], '飲食料品以外はそのまま');
+
+  // Without the dialog's confirmation the server refuses; with it the choice stays, through later sweeps too.
+  assert.throws(() => store.setTargets(honey, 'user', ['mercari', 'flea']), /確認してチェック/);
+  store.setTargets(honey, 'user', ['mercari', 'flea'], { confirmFoodFlea: true });
+  defaults.sweep();
+  await tick();
+  assert.deepEqual(store.get(honey).targets, ['mercari', 'flea']);
+  assert.equal(store.markDefaultTarget(sup, 'user', 'flea', 'x'), false, '一括の既定でも入らない');
+  store.setTargets(honey, 'user', ['mercari']); // taking it off needs no confirmation
+  assert.deepEqual(store.get(honey).targets, ['mercari']);
+});

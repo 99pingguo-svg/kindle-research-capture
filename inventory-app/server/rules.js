@@ -3,6 +3,7 @@ import { MERCARI_LIMITS, CONFIRM_FIELDS, FIELD_MAP, stageLabel, decisionLabel, L
 import { shippingOf } from './shipping.js';
 import { guessCategory } from './category.js';
 import { mercariNet, marketBrief, channelNets } from './market.js';
+import { isFood } from './food.js';
 import { norm, normUrl, similarity } from './util.js';
 
 export const livePhotos = (p) => p.photos.filter((ph) => !ph.deletedAt);
@@ -255,6 +256,7 @@ export function summary(p, settings) {
     targets: p.targets || [],
     suggestedTargets: suggestedTargets(p),
     // 出品先のうち既定ルールが入れて、ユーザーがまだ触っていないもの（画面では緑）。手取り見込みはサイトごと（高い順）。
+    isFood: isFood(p),
     targetAuto: (p.targets || []).filter((c) => p.targetDefaults?.[c] && !p.targetsManual?.[c]),
     channelNets: channelNets(p, ship).map(({ channel, net, matchType }) => ({ channel, net, matchType })),
     prices: { common: p.listing.price ?? null, ...Object.fromEntries(Object.entries(p.override || {}).map(([c, o]) => [c, o.price ?? null])) },

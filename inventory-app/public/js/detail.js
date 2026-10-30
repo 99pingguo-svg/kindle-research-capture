@@ -1,5 +1,5 @@
 // 商品詳細
-import { h, clear, toast, showError, choose, sheet, fmtDate, yen, copyText, isAiActor, actorLabel, targetTitle } from './ui.js';
+import { h, clear, toast, showError, choose, sheet, fmtDate, yen, copyText, isAiActor, actorLabel, targetTitle, confirmFoodFlea } from './ui.js';
 import { api } from './api.js';
 import { state, on, applyProduct, emit } from './state.js';
 import { openCamera } from './camera.js';
@@ -464,7 +464,13 @@ function destinationCard(p) {
     h('div', { class: 'seg wide targets' }, CHANNEL_DEFS().map((c) => h('button', {
       class: `${targets.includes(c.id) ? 'on' : ''} ${(p.summary.targetAuto || []).includes(c.id) ? 'auto' : ''} ${!targets.includes(c.id) && suggested.includes(c.id) ? 'suggested' : ''}`,
       title: targetTitle(p.summary, c.id, suggested),
-      onclick: () => setTargets(targets.includes(c.id) ? targets.filter((x) => x !== c.id) : [...targets, c.id]),
+      onclick: async () => {
+        if (c.id === 'flea' && !targets.includes('flea') && p.summary.isFood) {
+          if (await confirmFoodFlea(p.name)) act(api.put(url('/targets'), { targets: [...targets, 'flea'], confirmFoodFlea: true }));
+          return;
+        }
+        setTargets(targets.includes(c.id) ? targets.filter((x) => x !== c.id) : [...targets, c.id]);
+      },
     }, c.label, !targets.includes(c.id) && suggested.includes(c.id) ? '＊' : ''))),
     (p.summary.channelNets || []).length > 0 && h('div', { class: 'small', style: { marginTop: '6px' } },
       '手取り見込み: ', (p.summary.channelNets || []).map((n, i) => h('span', { class: `net-pick ${(p.summary.targetAuto || []).includes(n.channel) ? 'auto' : ''}` },
