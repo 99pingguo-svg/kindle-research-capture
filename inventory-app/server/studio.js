@@ -122,6 +122,9 @@ export function createStudio(store) {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-studio-'));
     try {
       for (const x of photos) {
+        const now = store.get(productId); // re-read: the user may have locked or deleted meanwhile
+        if (now.locks.listingPhotos && now.listingPhotoIds.includes(x.id)) continue;
+        if (!now.photos.some((y) => y.id === x.id && !y.deletedAt)) continue;
         const out = path.join(tmp, `${x.id}.jpg`);
         const info = lastJson(await run(TOOL, [src, out, '--mode', 'studio', '--bg', x.edit.style || 'white', '--deshadow', String(store.settings.studioDeshadow ?? DESHADOW)]));
         if (!info.ok || info.mode !== 'studio') continue;
@@ -129,12 +132,16 @@ export function createStudio(store) {
         await run('sips', ['-Z', '400', '-s', 'format', 'jpeg', '-s', 'formatOptions', '82', out, '--out', thumb]);
         const buf = fs.readFileSync(out);
         const note = String(x.note || '').replace(/^AI仕上げ（[^・）]+/, `AI仕上げ（${STYLE_NOTE[info.background] || '白抜き'}`);
-        store.refinishPhoto(productId, ACTOR, x.id, {
+        try {
+          store.refinishPhoto(productId, ACTOR, x.id, {
           note: info.straightened ? note.replace('トリミング', `傾き${Math.abs(info.straightened)}°補正・トリミング`) : note,
           edit: { ...x.edit, v: VERSION, style: info.background, straightened: info.straightened, deshadow: info.deshadow, shadowScore: info.shadowScore },
           width: info.width,
           height: info.height,
-        }, { original: { buffer: buf }, work: { buffer: buf }, thumb: { buffer: fs.readFileSync(thumb) } });
+          }, { original: { buffer: buf }, work: { buffer: buf }, thumb: { buffer: fs.readFileSync(thumb) } });
+        } catch (e) {
+          if (e.code !== 'locked') throw e; // locked while the picture was being made: leave it
+        }
       }
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });

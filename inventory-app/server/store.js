@@ -756,6 +756,9 @@ export class Store extends EventEmitter {
   refinishPhoto(id, actor, photoId, meta, files) {
     const cur = this.get(id).photos.find((x) => x.id === photoId && !x.deletedAt);
     if (!cur || cur.source !== 'studio' || !cur.derivedFrom || isUser(cur.by)) throw new AppError(400, '作り直せるのはAI仕上げの写真だけです');
+    // A 🔒 listing (出品用写真の確定) is the user's: an AI may not change the picture of a photo in it.
+    const lockedFor = (p) => !isUser(actor) && p.locks?.listingPhotos && p.listingPhotoIds.includes(photoId);
+    if (lockedFor(this.get(id))) throw new AppError(403, '出品用写真が🔒確定されているので作り直しません', 'locked');
     const photosDir = path.join(this.dir(id), 'photos');
     const stamp = Date.now().toString(36);
     const names = {};
@@ -766,6 +769,7 @@ export class Store extends EventEmitter {
       names[v] = `photos/${name}`;
     }
     return this.mutate(id, actor, 'photo_edit', (p, ctx) => {
+      if (lockedFor(p)) throw new AppError(403, '出品用写真が🔒確定されているので作り直しません', 'locked');
       const ph = p.photos.find((x) => x.id === photoId);
       const old = { ...ph.files, replacedAt: nowIso() };
       ph.files = { ...ph.files, ...names };

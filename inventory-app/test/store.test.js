@@ -606,7 +606,7 @@ test('AI仕上げの作り直し: 同じ写真のまま画像だけ新しくな�
   const id = store.create({ name: 'x' }).product.id;
   const orig = photo(store, id);
   const fin = photo(store, id, 'claude', { source: 'studio', derivedFrom: orig.id, edit: { auto: 'studio', v: 2 } });
-  store.setListingPhotos(id, 'user', [fin.id]);
+  store.setListingPhotos(id, 'claude', [fin.id]);
   const before = store.get(id).photos.find((x) => x.id === fin.id).files.work;
   store.refinishPhoto(id, 'claude', fin.id, { edit: { auto: 'studio', v: 3 }, width: 10, height: 10 }, { original: { buffer: JPEG }, work: { buffer: JPEG }, thumb: { buffer: JPEG } });
   const after = store.get(id).photos.find((x) => x.id === fin.id);
@@ -615,4 +615,14 @@ test('AI仕上げの作り直し: 同じ写真のまま画像だけ新しくな�
   assert.deepEqual(store.get(id).listingPhotoIds, [fin.id]);
   assert.ok(fs.existsSync(path.join(store.dir(id), before)), '前の画像は消さない');
   assert.throws(() => store.refinishPhoto(id, 'claude', orig.id, {}, { original: { buffer: JPEG } }), /AI仕上げの写真だけ/);
+});
+
+test('🔒確定した出品用写真はAIが作り直せない', () => {
+  const store = new Store(tmp());
+  const id = store.create({ name: 'x' }).product.id;
+  const orig = photo(store, id);
+  const fin = photo(store, id, 'claude', { source: 'studio', derivedFrom: orig.id, edit: { auto: 'studio', v: 2 } });
+  store.setListingPhotos(id, 'user', [fin.id]); // arranging by hand locks them (🔒)
+  assert.ok(store.get(id).locks.listingPhotos);
+  assert.throws(() => store.refinishPhoto(id, 'claude', fin.id, {}, { original: { buffer: JPEG } }), /🔒確定/);
 });
