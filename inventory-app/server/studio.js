@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { photoInUse } from './store.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TOOL = path.join(ROOT, 'tools', 'bin', 'studio');
@@ -123,7 +124,7 @@ export function createStudio(store) {
     try {
       for (const x of photos) {
         const now = store.get(productId); // re-read: the user may have locked or deleted meanwhile
-        if (now.locks.listingPhotos && now.listingPhotoIds.includes(x.id)) continue;
+        if (now.locks.listingPhotos && photoInUse(now, x.id)) continue;
         if (!now.photos.some((y) => y.id === x.id && !y.deletedAt)) continue;
         const out = path.join(tmp, `${x.id}.jpg`);
         const info = lastJson(await run(TOOL, [src, out, '--mode', 'studio', '--bg', x.edit.style || 'white', '--deshadow', String(store.settings.studioDeshadow ?? DESHADOW)]));

@@ -20,6 +20,8 @@ const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'image/heif': 'heif', 'image/gif': 'gif' };
 
 export const isUser = (actor) => actor === 'user';
+/** The photo is one of the listing photos (common or a destination's own list). */
+export const photoInUse = (p, photoId) => p.listingPhotoIds.includes(photoId) || Object.values(p.channelPhotos || {}).some((ids) => (ids || []).includes(photoId));
 
 /**
  * A per-destination field must not let the AI route around the user's decisions on the common listing:
@@ -757,7 +759,8 @@ export class Store extends EventEmitter {
     const cur = this.get(id).photos.find((x) => x.id === photoId && !x.deletedAt);
     if (!cur || cur.source !== 'studio' || !cur.derivedFrom || isUser(cur.by)) throw new AppError(400, '作り直せるのはAI仕上げの写真だけです');
     // A 🔒 listing (出品用写真の確定) is the user's: an AI may not change the picture of a photo in it.
-    const lockedFor = (p) => !isUser(actor) && p.locks?.listingPhotos && p.listingPhotoIds.includes(photoId);
+    // (also when the photo is used in a destination's own photo list)
+    const lockedFor = (p) => !isUser(actor) && p.locks?.listingPhotos && photoInUse(p, photoId);
     if (lockedFor(this.get(id))) throw new AppError(403, '出品用写真が🔒確定されているので作り直しません', 'locked');
     const photosDir = path.join(this.dir(id), 'photos');
     const stamp = Date.now().toString(36);

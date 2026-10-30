@@ -626,3 +626,13 @@ test('🔒確定した出品用写真はAIが作り直せない', () => {
   assert.ok(store.get(id).locks.listingPhotos);
   assert.throws(() => store.refinishPhoto(id, 'claude', fin.id, {}, { original: { buffer: JPEG } }), /🔒確定/);
 });
+
+test('🔒確定のとき、出品先ごとの写真に使っている仕上げもAIは作り直せない', () => {
+  const store = new Store(tmp());
+  const id = store.create({ name: 'x' }).product.id;
+  const orig = photo(store, id);
+  const fin = photo(store, id, 'claude', { source: 'studio', derivedFrom: orig.id, edit: { auto: 'studio', v: 2 } });
+  store.setListingPhotos(id, 'user', [orig.id]); // locks; the finished one is not in the common list
+  store.setChannelPhotos(id, 'user', 'jmty', [fin.id]);
+  assert.throws(() => store.refinishPhoto(id, 'claude', fin.id, {}, { original: { buffer: JPEG } }), /🔒確定/);
+});
