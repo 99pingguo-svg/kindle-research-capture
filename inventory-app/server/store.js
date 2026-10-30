@@ -1048,6 +1048,27 @@ export class Store extends EventEmitter {
     });
   }
 
+  /**
+   * A destination the user asked to have added as a default (shown green): added if missing, and marked as a default
+   * even when it was already set or had been toggled by hand (the request itself comes from the user).
+   */
+  markDefaultTarget(id, channel, reason) {
+    if (!CHANNEL_IDS.includes(channel)) throw new AppError(400, `出品先が不正: ${channel}`);
+    return this.mutate(id, 'system', 'targets', (p, ctx) => {
+      const has = (p.targets || []).includes(channel);
+      if (has && p.targetDefaults?.[channel] && !p.targetsManual?.[channel]) return;
+      const ordered = CHANNEL_IDS.filter((c) => c === channel || (p.targets || []).includes(c));
+      ctx.note(`${channelLabel(channel)}を既定として${has ? '緑に' : '追加'}（${reason}）`);
+      if (!has) ctx.changes.push({ path: 'targets', label: '出品先', from: (p.targets || []).map(channelLabel).join('・') || 'なし', to: ordered.map(channelLabel).join('・') });
+      p.targetDefaults = { ...p.targetDefaults, [channel]: { at: nowIso(), reason, rule: 'request' } };
+      if (p.targetsManual?.[channel]) {
+        const { [channel]: _, ...rest } = p.targetsManual;
+        p.targetsManual = rest;
+      }
+      p.targets = ordered;
+    });
+  }
+
   /** Take back a destination the 手取り rule added (only while the user has not touched it). */
   removeDefaultTarget(id, channel, reason) {
     return this.mutate(id, 'system', 'targets', (p, ctx) => {
