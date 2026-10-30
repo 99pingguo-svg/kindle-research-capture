@@ -749,6 +749,35 @@ export class Store extends EventEmitter {
     });
   }
 
+  /**
+   * Redo an automatic finish in place: new image files for a photo the AI itself made from an original (source studio).
+   * The id stays, so the listing order is kept; new file names so no device shows a cached old picture.
+   */
+  refinishPhoto(id, actor, photoId, meta, files) {
+    const cur = this.get(id).photos.find((x) => x.id === photoId && !x.deletedAt);
+    if (!cur || cur.source !== 'studio' || !cur.derivedFrom || isUser(cur.by)) throw new AppError(400, '作り直せるのはAI仕上げの写真だけです');
+    const photosDir = path.join(this.dir(id), 'photos');
+    const stamp = Date.now().toString(36);
+    const names = {};
+    for (const v of ['original', 'work', 'thumb']) {
+      if (!files[v]?.buffer?.length) continue;
+      const name = `${photoId}.${stamp}.${v}.jpg`;
+      fs.writeFileSync(path.join(photosDir, name), files[v].buffer);
+      names[v] = `photos/${name}`;
+    }
+    return this.mutate(id, actor, 'photo_edit', (p, ctx) => {
+      const ph = p.photos.find((x) => x.id === photoId);
+      const old = { ...ph.files, replacedAt: nowIso() };
+      ph.files = { ...ph.files, ...names };
+      if (!names.work && names.original) ph.files.work = names.original;
+      if (!names.thumb) ph.files.thumb = ph.files.work;
+      Object.assign(ph, { note: meta.note ?? ph.note, edit: meta.edit ?? ph.edit, width: Number(meta.width) || ph.width, height: Number(meta.height) || ph.height, sha256: sha256(files.original.buffer) });
+      ctx.note('AI仕上げを作り直し');
+      ctx.bump();
+      ph.previousFiles = [...(ph.previousFiles || []), old].slice(-3); // kept on disk, not deleted
+    });
+  }
+
   deletePhoto(id, actor, photoId) {
     forbidAi(actor, '写真の削除');
     return this.mutate(id, actor, 'photo_delete', (p, ctx) => {

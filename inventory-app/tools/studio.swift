@@ -4,7 +4,8 @@
 //
 // 使い方: studio <入力画像> <出力.jpg> [--mode auto|studio|enhance] [--bg auto|white|grey] [--fill 0.72] [--size 2048] [--no-shadow] [--deshadow 0〜1]
 //   --bg: white＝白抜き / grey＝明るいグレーのスタジオ風グラデーション / auto＝白っぽい商品はグレー、それ以外は白
-//   --fill: 正方形の中で商品が占める大きさ（長い辺の割合）。商品は少し上寄せ、下に接地影。
+//   --fill: 正方形の中で商品が占める大きさ（長い辺の割合）。省略時は形で決める（細長い0.86・やや長い0.82・四角っぽい0.76）。
+//   傾き（四角い・細長い商品が1.5〜30°傾いていたらまっすぐに）も自動で直す。向きは写真の EXIF のまま。商品は少し上寄せ、下に接地影。
 //   --deshadow: 商品の上に落ちた影（手・スマホ・物の影、片側だけ暗い）を明るく戻す強さ。文字や模様など小さな暗い部分は残す。
 //   auto（既定）: 被写体が画面の中に収まっていれば studio、はみ出し・大写し・被写体なしなら enhance
 //   studio : 切り抜き＋白背景＋正方形トリミング＋補正 / enhance: 色・明るさの補正だけ（構図はそのまま）
@@ -32,7 +33,7 @@ func opt(_ name: String) -> String? {
     return v
 }
 let size = CGFloat(Double(opt("--size") ?? "") ?? 2048)
-let fill = CGFloat(min(0.95, max(0.4, Double(opt("--fill") ?? "") ?? 0.72)))
+let opt0Fill: CGFloat? = opt("--fill").flatMap { Double($0) }.map { CGFloat(min(0.95, max(0.4, $0))) }
 let bgOpt = opt("--bg") ?? "auto"
 _ = opt("--pad") // (old option, no longer used)
 let mode = opt("--mode") ?? "auto"
@@ -44,8 +45,12 @@ let inURL = URL(fileURLWithPath: args[0])
 let outURL = URL(fileURLWithPath: args[1])
 
 // Upright pixels (EXIF orientation applied), so the mask and the crop line up.
-guard let src = CIImage(contentsOf: inURL, options: [.applyOrientationProperty: true]) else { emit(["ok": false, "reason": "画像を読めません"]) }
+guard let src0 = CIImage(contentsOf: inURL, options: [.applyOrientationProperty: true]) else { emit(["ok": false, "reason": "画像を読めません"]) }
 let ctx = CIContext(options: [.useSoftwareRenderer: false])
+
+// (Turning by 90°/180° from the printed text was tried and dropped: on a remote full of digits it chose upside down.
+//  Photos already arrive upright from the camera's EXIF orientation.)
+let src = src0
 let extent = src.extent
 guard let cg = ctx.createCGImage(src, from: extent) else { emit(["ok": false, "reason": "画像を展開できません"]) }
 
@@ -149,7 +154,7 @@ let handler = VNImageRequestHandler(cgImage: cg, options: [:])
 do { try handler.perform([req]) } catch { emit(["ok": false, "reason": "切り抜きに失敗: \(error.localizedDescription)"]) }
 guard let obs = req.results?.first, !obs.allInstances.isEmpty else { enhanceOnly("被写体が見つからない") }
 guard let maskBuf = try? obs.generateScaledMaskForImage(forInstances: obs.allInstances, from: handler) else { enhanceOnly("マスクを作れない") }
-let mask = CIImage(cvPixelBuffer: maskBuf)
+var mask = CIImage(cvPixelBuffer: maskBuf)
 
 // Subject bounds and coverage from a small copy of the mask.
 let small = mask.transformed(by: CGAffineTransform(scaleX: 256 / extent.width, y: 256 / extent.height))
@@ -163,7 +168,7 @@ let coverage = Double(on) / 65536
 let cov = (coverage * 1000).rounded() / 1000
 // The bitmap is rendered top-down; CI coordinates start at the bottom.
 let sx = extent.width / 256, sy = extent.height / 256
-let box = CGRect(x: CGFloat(minX) * sx, y: extent.height - CGFloat(maxY + 1) * sy, width: CGFloat(maxX - minX + 1) * sx, height: CGFloat(maxY - minY + 1) * sy)
+var box = CGRect(x: CGFloat(minX) * sx, y: extent.height - CGFloat(maxY + 1) * sy, width: CGFloat(maxX - minX + 1) * sx, height: CGFloat(maxY - minY + 1) * sy)
 let touchesEdge = minX <= 1 || minY <= 1 || maxX >= 254 || maxY >= 254
 // Cutting out only works when the whole product is in the picture and not a close-up.
 if mode == "auto" {
@@ -188,11 +193,77 @@ let grey = bgOpt == "grey" || (bgOpt == "auto" && whiteRatio > 0.35)
 // Clean edge: pull the mask in a hair (drops the fringe of the old background), then soften it.
 let long = Double(max(extent.width, extent.height))
 let choke = CIFilter.morphologyMinimum(); choke.inputImage = mask.clampedToExtent(); choke.radius = Float(max(1, long * 0.0012))
-let edge = (choke.outputImage ?? mask).cropped(to: extent).clampedToExtent().applyingGaussianBlur(sigma: max(0.6, long * 0.0007)).cropped(to: extent)
-let product = liftShadows(adjusted, mask: mask, strength: deshadow)
+var edge = (choke.outputImage ?? mask).cropped(to: extent).clampedToExtent().applyingGaussianBlur(sigma: max(0.6, long * 0.0007)).cropped(to: extent)
+var product = liftShadows(adjusted, mask: mask, strength: deshadow)
+
+/**
+ * 傾き: the smallest rectangle around the product's outline (convex hull, rotating calipers). A boxy or long product
+ * that leans 1.5–30° is straightened. Round or irregular shapes (outline fills < 86% of that rectangle) are left as shot.
+ */
+func straightenAngle() -> (angle: Double, rectangular: Double) {
+    var pts: [CGPoint] = []
+    for y in 0..<256 {
+        var lo = -1, hi = -1
+        for x in 0..<256 where px[y * 256 + x] > 127 { if lo < 0 { lo = x }; hi = x }
+        if lo >= 0 {
+            let cy = extent.height - (CGFloat(y) + 0.5) * sy
+            pts.append(CGPoint(x: (CGFloat(lo) + 0.5) * sx, y: cy)); pts.append(CGPoint(x: (CGFloat(hi) + 0.5) * sx, y: cy))
+        }
+    }
+    guard pts.count >= 6 else { return (0, 0) }
+    // Monotone-chain convex hull.
+    let sorted = pts.sorted { $0.x == $1.x ? $0.y < $1.y : $0.x < $1.x }
+    func cross(_ o: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat { (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x) }
+    var lower: [CGPoint] = [], upper: [CGPoint] = []
+    for q in sorted { while lower.count >= 2 && cross(lower[lower.count - 2], lower[lower.count - 1], q) <= 0 { lower.removeLast() }; lower.append(q) }
+    for q in sorted.reversed() { while upper.count >= 2 && cross(upper[upper.count - 2], upper[upper.count - 1], q) <= 0 { upper.removeLast() }; upper.append(q) }
+    let hull = Array(lower.dropLast() + upper.dropLast())
+    guard hull.count >= 3 else { return (0, 0) }
+    var hullArea: CGFloat = 0
+    for i in 0..<hull.count { let a = hull[i], b = hull[(i + 1) % hull.count]; hullArea += a.x * b.y - b.x * a.y }
+    hullArea = abs(hullArea) / 2
+    var bestArea = CGFloat.infinity, bestAngle = 0.0
+    for i in 0..<hull.count {
+        let a = hull[i], b = hull[(i + 1) % hull.count]
+        let t = atan2(Double(b.y - a.y), Double(b.x - a.x))
+        let c = CGFloat(cos(t)), s = CGFloat(sin(t))
+        var x0 = CGFloat.infinity, x1 = -CGFloat.infinity, y0 = CGFloat.infinity, y1 = -CGFloat.infinity
+        for q in hull { let u = q.x * c + q.y * s, v = -q.x * s + q.y * c; x0 = min(x0, u); x1 = max(x1, u); y0 = min(y0, v); y1 = max(y1, v) }
+        let area = (x1 - x0) * (y1 - y0)
+        if area < bestArea { bestArea = area; bestAngle = t }
+    }
+    // Fold to (-45°, 45°]: the turn that brings the nearest rectangle side level.
+    var deg = bestAngle * 180 / .pi
+    while deg > 45 { deg -= 90 }
+    while deg <= -45 { deg += 90 }
+    return (deg, Double(hullArea / bestArea))
+}
+let (tilt, rectangular) = straightenAngle()
+var straightened = 0.0
+if abs(tilt) >= 1.5 && abs(tilt) <= 30 && rectangular >= 0.86 {
+    let c = CGPoint(x: extent.midX, y: extent.midY)
+    let r = CGAffineTransform(translationX: c.x, y: c.y).rotated(by: CGFloat(-tilt * .pi / 180)).translatedBy(x: -c.x, y: -c.y)
+    product = product.transformed(by: r); edge = edge.transformed(by: r); mask = mask.transformed(by: r)
+    // New bounds from the turned mask.
+    let me = mask.extent
+    let k = 256 / max(me.width, me.height)
+    var q = [UInt8](repeating: 0, count: 256 * 256)
+    ctx.render(mask.transformed(by: CGAffineTransform(translationX: -me.minX, y: -me.minY).concatenating(CGAffineTransform(scaleX: k, y: k))), toBitmap: &q, rowBytes: 256, bounds: CGRect(x: 0, y: 0, width: 256, height: 256), format: .L8, colorSpace: nil)
+    var a0 = 256, a1 = -1, b0 = 256, b1 = -1
+    for y in 0..<256 { for x in 0..<256 where q[y * 256 + x] > 127 { a0 = min(a0, x); a1 = max(a1, x); b0 = min(b0, y); b1 = max(b1, y) } }
+    if a1 >= 0 {
+        // (rendered top-down from the top of the rendered area)
+        let top = me.minY + 256 / k
+        box = CGRect(x: me.minX + CGFloat(a0) / k, y: top - CGFloat(b1 + 1) / k, width: CGFloat(a1 - a0 + 1) / k, height: CGFloat(b1 - b0 + 1) / k)
+        straightened = (tilt * 10).rounded() / 10
+    }
+}
 
 // 4) Square canvas: the product fills `fill` of it, sitting a little above centre so its shadow has room.
-let side = max(box.width, box.height) / fill
+// トリミング: long products fill more of the square, near-square ones a little less (they look heavy otherwise).
+let aspect = max(box.width, box.height) / max(1, min(box.width, box.height))
+let fillNow = opt0Fill ?? (aspect >= 2.2 ? 0.86 : aspect >= 1.4 ? 0.82 : 0.76)
+let side = max(box.width, box.height) / fillNow
 let crop = CGRect(x: box.midX - side / 2, y: box.midY - side / 2 - side * 0.03, width: side, height: side)
 func srgbColor(_ v: Double) -> CIColor { CIColor(red: v, green: v, blue: v, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)! }
 var bg: CIImage
@@ -226,4 +297,4 @@ let scale = min(1, size / side)
 out = out.transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY)).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
 
 save(out)
-emit(["ok": true, "mode": "studio", "deshadow": deshadow, "shadowScore": shadowScore, "background": grey ? "grey" : "white", "whiteRatio": (whiteRatio * 100).rounded() / 100, "coverage": cov, "touchesEdge": touchesEdge, "instances": obs.allInstances.count, "width": Int(out.extent.width), "height": Int(out.extent.height)])
+emit(["ok": true, "mode": "studio", "straightened": straightened, "rectangular": (rectangular * 100).rounded() / 100, "deshadow": deshadow, "shadowScore": shadowScore, "background": grey ? "grey" : "white", "whiteRatio": (whiteRatio * 100).rounded() / 100, "coverage": cov, "touchesEdge": touchesEdge, "instances": obs.allInstances.count, "width": Int(out.extent.width), "height": Int(out.extent.height)])

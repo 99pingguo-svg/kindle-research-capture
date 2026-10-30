@@ -470,3 +470,15 @@ code, .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 /* 手取りなどから自動で選んだ出品先は緑（ユーザーが選んだものは青） */
 .seg.targets button.on.auto { background: var(--ok); color: #fff; }
 .net-pick.auto { color: var(--ok); font-weight: 700; }
+
+/* 一覧の行の色: 出さない（薄い赤）・在庫なし（グレー）が優先、それ以外でフリマなら目に優しいオレンジの縁と淡い地 */
+.item { position: relative; }
+.item.flea { border-left: 5px solid #fdba74; background: color-mix(in srgb, #fb923c 7%, var(--card)); }
+.item.dec-no_sell { background: color-mix(in srgb, #f87171 15%, var(--card)); border-color: color-mix(in srgb, #f87171 45%, var(--border)); }
+.item.dec-no_stock { background: color-mix(in srgb, #94a3b8 24%, var(--card)); border-color: color-mix(in srgb, #94a3b8 55%, var(--border)); }
+.item.dec-no_stock .thumb { opacity: .7; }
+.item.dec-no_sell::after, .item.dec-no_stock::after {
+  position: absolute; top: 0; right: 0; padding: 1px 8px; border-radius: 0 var(--radius) 0 8px; font-size: 11px; font-weight: 700; color: #fff; pointer-events: none;
+}
+.item.dec-no_sell::after { content: '出さない'; background: #ef4444; }
+.item.dec-no_stock::after { content: '在庫なし'; background: #64748b; }

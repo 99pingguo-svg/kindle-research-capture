@@ -779,7 +779,9 @@ function rowEl(p, idx, run) {
     if (check) check.textContent = on ? '✓' : '';
     renderBulk();
   };
-  return h('article', { class: `item ${selected ? 'selected' : ''} ${state.detailId === p.id ? 'active' : ''}`, dataset: { id: p.id } },
+  // Whole-row colours: 出さない / 在庫なし first (even when フリマ is ticked), otherwise フリマ gets a soft orange edge.
+  const tone = ['no_sell', 'no_stock'].includes(p.decision) ? `dec-${p.decision}` : (p.targets || []).includes('flea') ? 'flea' : '';
+  return h('article', { class: `item ${tone} ${selected ? 'selected' : ''} ${state.detailId === p.id ? 'active' : ''}`, dataset: { id: p.id } },
     h('div', { class: 'thumb', style: p.thumb ? { backgroundImage: `url("${mini(p.thumb)}")` } : null, onclick: open },
       state.selectMode ? h('div', { class: 'select-check' }, selected ? '✓' : '') : !p.thumb && '📦',
       p.thumbIsReference && !state.selectMode && h('div', { class: 'ref-badge' }, '公式画像'),

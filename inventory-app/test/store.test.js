@@ -600,3 +600,19 @@ test('official-image ZIP: only products whose photos are all official, one folde
   assert.match(entries[0].data, new RegExp(`${a},Only official,`));
   assert.deepEqual({ ...officialStats(store, store.list()), bytes: 0 }, { products: 1, images: 2, bytes: 0 });
 });
+
+test('AI仕上げの作り直し: 同じ写真のまま画像だけ新しくなる、ユーザーの写真は作り直せない', () => {
+  const store = new Store(tmp());
+  const id = store.create({ name: 'x' }).product.id;
+  const orig = photo(store, id);
+  const fin = photo(store, id, 'claude', { source: 'studio', derivedFrom: orig.id, edit: { auto: 'studio', v: 2 } });
+  store.setListingPhotos(id, 'user', [fin.id]);
+  const before = store.get(id).photos.find((x) => x.id === fin.id).files.work;
+  store.refinishPhoto(id, 'claude', fin.id, { edit: { auto: 'studio', v: 3 }, width: 10, height: 10 }, { original: { buffer: JPEG }, work: { buffer: JPEG }, thumb: { buffer: JPEG } });
+  const after = store.get(id).photos.find((x) => x.id === fin.id);
+  assert.notEqual(after.files.work, before);
+  assert.equal(after.edit.v, 3);
+  assert.deepEqual(store.get(id).listingPhotoIds, [fin.id]);
+  assert.ok(fs.existsSync(path.join(store.dir(id), before)), '前の画像は消さない');
+  assert.throws(() => store.refinishPhoto(id, 'claude', orig.id, {}, { original: { buffer: JPEG } }), /AI仕上げの写真だけ/);
+});

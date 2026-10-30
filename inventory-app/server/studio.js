@@ -18,6 +18,7 @@ const OLLAMA = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
 const QC_MODEL = process.env.STUDIO_QC_MODEL || 'qwen3.5:4b';
 const ACTOR = 'claude';
 const DESHADOW = 0.6;
+const VERSION = 3; // 3 = 傾き補正・形に合わせたトリミング（2 = 白抜き/グレー・余白・接地影）
 
 const run = (cmd, args, timeout = 120000) => new Promise((resolve, reject) => execFile(cmd, args, { timeout }, (e, out) => (e && !out ? reject(e) : resolve(String(out)))));
 
@@ -65,7 +66,9 @@ export function createStudio(store) {
     if (!ph || ph.kind !== 'actual' || ph.derivedFrom) return;
     const finished = p.photos.filter((x) => !x.deletedAt && x.derivedFrom === ph.id && x.edit?.auto);
     if (finished.length && !redo) return; // already finished
-    if (redo && finished.some((x) => x.edit?.v === 2)) return; // already in the current style
+    const mine = finished.filter((x) => x.edit?.v >= 2 && x.by !== 'user' && x.edit?.auto === 'studio');
+    if (redo && mine.length && mine.every((x) => x.edit.v === VERSION)) return; // already in the current style
+    if (redo && mine.length) return refinish(productId, ph, mine);
     const dir = store.dir(productId);
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-studio-'));
     try {
@@ -92,7 +95,7 @@ export function createStudio(store) {
         const thumb = path.join(tmp, `t-${m.main ? 'm' : 'a'}.jpg`);
         await run('sips', ['-Z', '400', '-s', 'format', 'jpeg', '-s', 'formatOptions', '82', m.file, '--out', thumb]);
         const buf = fs.readFileSync(m.file);
-        const style = m.info.mode === 'studio' ? STYLE_NOTE[m.info.background] || '白抜き' : '';
+        const style = m.info.mode === 'studio' ? `${STYLE_NOTE[m.info.background] || '白抜き'}${m.info.straightened ? `・傾き${Math.abs(m.info.straightened)}°補正` : ''}` : '';
         const doubt = m.main && qc && !qc.ok ? `・要確認: ローカルAIが欠けを指摘（${qc.reason}）` : '';
         store.addPhoto(productId, ACTOR, {
           kind: 'actual',
@@ -100,13 +103,38 @@ export function createStudio(store) {
           derivedFrom: ph.id,
           tag: ph.tag || '',
           note: style ? `AI仕上げ（${style}・トリミング・色補正・影を明るく${doubt}）` : `AI仕上げ（色・明るさ補正のみ: ${m.info.why || ''}）`,
-          edit: { auto: m.info.mode, v: 2, style: m.info.background || null, why: m.info.why || '', qc: m.main ? qc : null, deshadow: m.info.deshadow, shadowScore: m.info.shadowScore },
+          edit: { auto: m.info.mode, v: VERSION, style: m.info.background || null, why: m.info.why || '', qc: m.main ? qc : null, deshadow: m.info.deshadow, shadowScore: m.info.shadowScore },
           width: m.info.width,
           height: m.info.height,
           clientId: `studio2:${ph.id}:${m.main ? 'main' : 'alt'}`,
           replaceInListing: m.main && !fresh.locks.listingPhotos,
           replacePhotoId: inListing?.id,
         }, { original: { buffer: buf, mime: 'image/jpeg' }, work: { buffer: buf, mime: 'image/jpeg' }, thumb: { buffer: fs.readFileSync(thumb), mime: 'image/jpeg' } });
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
+  /** Make the finished photos again in the current style, in place (same photo, same listing position). */
+  async function refinish(productId, ph, photos) {
+    const src = path.join(store.dir(productId), ph.files.original);
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-studio-'));
+    try {
+      for (const x of photos) {
+        const out = path.join(tmp, `${x.id}.jpg`);
+        const info = lastJson(await run(TOOL, [src, out, '--mode', 'studio', '--bg', x.edit.style || 'white', '--deshadow', String(store.settings.studioDeshadow ?? DESHADOW)]));
+        if (!info.ok || info.mode !== 'studio') continue;
+        const thumb = path.join(tmp, `${x.id}.t.jpg`);
+        await run('sips', ['-Z', '400', '-s', 'format', 'jpeg', '-s', 'formatOptions', '82', out, '--out', thumb]);
+        const buf = fs.readFileSync(out);
+        const note = String(x.note || '').replace(/^AI仕上げ（[^・）]+/, `AI仕上げ（${STYLE_NOTE[info.background] || '白抜き'}`);
+        store.refinishPhoto(productId, ACTOR, x.id, {
+          note: info.straightened ? note.replace('トリミング', `傾き${Math.abs(info.straightened)}°補正・トリミング`) : note,
+          edit: { ...x.edit, v: VERSION, style: info.background, straightened: info.straightened, deshadow: info.deshadow, shadowScore: info.shadowScore },
+          width: info.width,
+          height: info.height,
+        }, { original: { buffer: buf }, work: { buffer: buf }, thumb: { buffer: fs.readFileSync(thumb) } });
       }
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -142,7 +170,7 @@ export function createStudio(store) {
       let n = 0;
       for (const p of store.list({ includeTrash: false })) {
         if (productIds && !productIds.includes(p.id)) continue;
-        const srcs = new Set(p.photos.filter((x) => !x.deletedAt && x.source === 'studio' && x.edit?.auto && x.edit?.v !== 2).map((x) => x.derivedFrom));
+        const srcs = new Set(p.photos.filter((x) => !x.deletedAt && x.source === 'studio' && x.edit?.auto && x.edit?.v !== VERSION).map((x) => x.derivedFrom));
         for (const id of srcs) {
           queue.push({ productId: p.id, photoId: id, redo: true });
           n++;
