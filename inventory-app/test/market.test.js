@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mercariNet, marketBrief } from '../server/market.js';
+import { mercariNet, marketBrief, channelNets, recommendedChannels } from '../server/market.js';
 
 const ship = { cheapest: { price: 210, label: 'ネコポス' } };
 const rec = (matchType, median, examples = []) => ({ matchType, median, count: median == null ? 0 : 3, examples });
@@ -28,4 +28,17 @@ test('一覧から開く参考商品は中央値にいちばん近い売れた�
   const m = marketBrief({ name: 'x', market: rec('similar', 1500, ex) });
   assert.equal(m.ref.url, 'https://jp.mercari.com/item/m2');
   assert.equal(marketBrief({ name: 'x' }).ref, null);
+});
+
+test('手取りのおすすめ: 一番よいサイト＋差が小さいサイト（100円以内か1割以内）', () => {
+  // mercari 2000-200-210=1590, paypay 1900-95-210=1595, rakuma 1500-150-210=1140, yahoo 2400-240-210=1950
+  const p = { market: rec('same', 2000), marketPaypay: rec('similar', 1900), marketRakuma: rec('same', 1500), marketYahoo: rec('same', 2400) };
+  assert.deepEqual(channelNets(p, ship).map((x) => [x.channel, x.net]), [['yahoo', 1950], ['paypay', 1595], ['mercari', 1590], ['rakuma', 1140]]);
+  assert.deepEqual(recommendedChannels(p, { margin: 100, ratio: 0.1 }, ship).channels, ['yahoo']);
+  // close race → several
+  const q = { ...p, marketYahoo: rec('same', 1950) }; // 1950-195-210 = 1545
+  assert.deepEqual(recommendedChannels(q, { margin: 100, ratio: 0.1 }, ship).channels.sort(), ['mercari', 'paypay', 'yahoo']);
+  // no market, no shipping → nothing
+  assert.deepEqual(recommendedChannels({}, {}, ship).channels, []);
+  assert.deepEqual(recommendedChannels(p, {}, { cheapest: null }).channels, []);
 });

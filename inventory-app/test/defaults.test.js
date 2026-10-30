@@ -38,3 +38,28 @@ test('安い商品は出品先にフリマが1回だけ入り、ユーザーが�
   assert.deepEqual(store.get(dear).targets, ['mercari', 'flea'], 'あとから基準に入った商品にも足す（ユーザーの選択は残す）');
   assert.throws(() => store.setTargets(dear, 'claude', []), /ユーザーのみ/);
 });
+
+test('手取りのおすすめ: よいサイトを緑で入れ、相場が変われば入れ替え、手で触ったサイトはそのまま', async () => {
+  const store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-')));
+  store.settings.fleaDefault = { on: false };
+  const id = store.create({ name: 'ケース' }).product.id;
+  const p = store.products.get(id);
+  const rec = (median) => ({ matchType: 'same', median, count: 3, examples: [] });
+  Object.assign(p, { amazon: { package: { dims: [20, 12, 2], kg: 0.1 } }, market: rec(2000), marketPaypay: rec(2600), marketRakuma: rec(1200) });
+  const defaults = createDefaults(store);
+  await tick();
+  assert.deepEqual(store.get(id).targets, ['paypay'], 'ヤフーフリマが一番（手数料5%）');
+  assert.equal(store.get(id).targetDefaults.paypay.rule, 'net');
+
+  // the market moves: Mercari now pays best, Yahoo!フリマ falls behind → swapped
+  Object.assign(store.products.get(id), { market: rec(4000) });
+  defaults.sweep();
+  await tick();
+  assert.deepEqual(store.get(id).targets, ['mercari']);
+
+  // the user adds ラクマ and removes メルカリ by hand: both stay as the user left them
+  store.setTargets(id, 'user', ['rakuma']);
+  defaults.sweep();
+  await tick();
+  assert.deepEqual(store.get(id).targets, ['rakuma']);
+});

@@ -209,9 +209,15 @@ class CameraSession {
     const full = this.full.get(this.id);
     const server = full ? full.photos.filter((p) => !p.deletedAt && p.kind === 'actual').reverse() : [];
     const pending = uploads.pendingFor(this.id).filter((p) => p.kind === 'actual');
+    // ✕ on every shot: one tap removes a failed shot (to the trash; an upload still waiting is just dropped).
+    const x = (label, fn) => h('button', { class: 'cam-x', 'aria-label': label, onclick: (e) => { e.stopPropagation(); fn(); } }, '✕');
     clear(this.strip).append(
-      ...pending.reverse().map((p) => h('img', { src: p.url, class: 'pending', title: p.error || 'アップロード中', onclick: () => this.pendingMenu(p) })),
-      ...server.map((ph) => h('img', { src: `/files/products/${this.id}/${ph.files.thumb}`, onclick: () => this.photoMenu(ph) })));
+      ...pending.reverse().map((p) => h('span', { class: 'cam-thumb' },
+        h('img', { src: p.url, class: 'pending', title: p.error || 'アップロード中', onclick: () => this.pendingMenu(p) }),
+        x('この写真を破棄', () => { uploads.discard(p.qid); toast('写真を破棄しました'); }))),
+      ...server.map((ph) => h('span', { class: 'cam-thumb' },
+        h('img', { src: `/files/products/${this.id}/${ph.files.thumb}`, onclick: () => this.photoMenu(ph) }),
+        x('この写真を削除', () => this.deletePhoto(ph)))));
     const n = server.length + pending.length;
     this.countEl.textContent = `${n}枚`;
   }
@@ -342,6 +348,16 @@ class CameraSession {
         applyProduct(await api.patch(`/api/products/${this.id}/photos/${ph.id}`, { tag: t }));
         await this.loadFull(this.id, true);
       }
+    } catch (e) {
+      showError(e);
+    }
+  }
+
+  async deletePhoto(ph) {
+    try {
+      applyProduct(await api.del(`/api/products/${this.id}/photos/${ph.id}`));
+      await this.loadFull(this.id, true);
+      toast('写真をゴミ箱へ移しました（商品の詳細から戻せます）');
     } catch (e) {
       showError(e);
     }

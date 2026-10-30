@@ -2,7 +2,7 @@
 import { MERCARI_LIMITS, CONFIRM_FIELDS, FIELD_MAP, stageLabel, decisionLabel, LISTABLE_KINDS, PREPARE_DECISIONS, COMMITTED_STATUSES, OFFERED_STATUSES, channelLabel } from './schema.js';
 import { shippingOf } from './shipping.js';
 import { guessCategory } from './category.js';
-import { mercariNet, marketBrief } from './market.js';
+import { mercariNet, marketBrief, channelNets } from './market.js';
 import { norm, normUrl, similarity } from './util.js';
 
 export const livePhotos = (p) => p.photos.filter((ph) => !ph.deletedAt);
@@ -253,6 +253,9 @@ export function summary(p, settings) {
     sourceUrl: sourceUrlOf(p),
     targets: p.targets || [],
     suggestedTargets: suggestedTargets(p),
+    // 出品先のうち既定ルールが入れて、ユーザーがまだ触っていないもの（画面では緑）。手取り見込みはサイトごと（高い順）。
+    targetAuto: (p.targets || []).filter((c) => p.targetDefaults?.[c] && !p.targetsManual?.[c]),
+    channelNets: channelNets(p, ship).map(({ channel, net, matchType }) => ({ channel, net, matchType })),
     prices: { common: p.listing.price ?? null, ...Object.fromEntries(Object.entries(p.override || {}).map(([c, o]) => [c, o.price ?? null])) },
     research: p.research ? { group: p.research.group, amazonPrice: p.research.amazonPrice ?? null, priceStatus: p.research.priceStatus, priority: p.research.jimoty?.priority || '' } : null,
     custom: Object.fromEntries(Object.entries(p.override || {}).filter(([c, o]) => o.title || o.description || o.price != null || p.channelPhotos?.[c]).map(([c]) => [c, true])),

@@ -101,3 +101,13 @@ export async function copyText(text, label = 'コピーしました') {
 
 export const isAiActor = (actor) => actor && actor !== 'user';
 export const actorLabel = (actor) => (actor === 'user' ? 'あなた' : actor === 'api' ? 'API' : actor === 'system' ? '自動ルール' : actor[0].toUpperCase() + actor.slice(1));
+
+/** Tooltip: the expected take-home on that site, and why it was picked. */
+export function targetTitle(p, id, suggested = p.suggestedTargets || []) {
+  const n = (p.channelNets || []).find((x) => x.channel === id);
+  return [
+    n && `手取り見込み ${yen(n.net)}${n.matchType === 'similar' ? '（似た商品の相場）' : ''}`,
+    (p.targetAuto || []).includes(id) && '手取りなどから自動で選択（緑）',
+    !(p.targets || []).includes(id) && suggested.includes(id) && 'おすすめ（価格・大きさの調査から）',
+  ].filter(Boolean).join('・');
+}

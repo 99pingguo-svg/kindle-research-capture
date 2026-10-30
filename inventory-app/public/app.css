@@ -461,3 +461,12 @@ code, .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 .search-photo-bar img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; }
 .search-photo-bar .small { flex: 1; }
 .memo-sheet h2 .small { display: block; margin-top: 2px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cam-thumb { position: relative; flex: none; }
+.cam-thumb .cam-x {
+  position: absolute; top: -4px; right: -4px; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #111;
+  background: #ef4444; color: #fff; font-size: 12px; line-height: 1; padding: 0; display: grid; place-items: center;
+}
+.cam-strip { padding-top: 10px; }
+/* 手取りなどから自動で選んだ出品先は緑（ユーザーが選んだものは青） */
+.seg.targets button.on.auto { background: var(--ok); color: #fff; }
+.net-pick.auto { color: var(--ok); font-weight: 700; }

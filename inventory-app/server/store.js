@@ -709,7 +709,8 @@ export class Store extends EventEmitter {
           ctx.note(`追加撮影「${req.label}」完了`);
         }
         if (record.derivedFrom && meta.replaceInListing) {
-          const i = p.listingPhotoIds.indexOf(record.derivedFrom);
+          // Takes the place of the photo it was made from (or of an older finished version, `replacePhotoId`).
+          const i = [meta.replacePhotoId, record.derivedFrom].map((x) => (x ? p.listingPhotoIds.indexOf(x) : -1)).find((x) => x >= 0) ?? -1;
           if (i >= 0) p.listingPhotoIds[i] = pid;
         } else if (
           this.settings.autoSelectListingPhotos &&
@@ -1036,14 +1037,27 @@ export class Store extends EventEmitter {
   }
 
   /** The user's standing rule adds a destination once (server/defaults.js). Not for AI tools. */
-  applyDefaultTarget(id, channel, reason) {
+  applyDefaultTarget(id, channel, reason, rule = 'flea') {
     return this.mutate(id, 'system', 'targets', (p, ctx) => {
       if (p.targetDefaults?.[channel] || p.targetsManual?.[channel] || (p.targets || []).includes(channel)) return;
       const ordered = CHANNEL_IDS.filter((c) => c === channel || (p.targets || []).includes(c));
       ctx.note(`既定ルールで${channelLabel(channel)}を追加（${reason}）`);
       ctx.changes.push({ path: 'targets', label: '出品先', from: (p.targets || []).map(channelLabel).join('・') || 'なし', to: ordered.map(channelLabel).join('・') });
-      p.targetDefaults = { ...p.targetDefaults, [channel]: { at: nowIso(), reason } };
+      p.targetDefaults = { ...p.targetDefaults, [channel]: { at: nowIso(), reason, rule } };
       p.targets = ordered;
+    });
+  }
+
+  /** Take back a destination the 手取り rule added (only while the user has not touched it). */
+  removeDefaultTarget(id, channel, reason) {
+    return this.mutate(id, 'system', 'targets', (p, ctx) => {
+      if (p.targetDefaults?.[channel]?.rule !== 'net' || p.targetsManual?.[channel] || !(p.targets || []).includes(channel)) return;
+      const next = p.targets.filter((c) => c !== channel);
+      ctx.note(`既定ルールで${channelLabel(channel)}を外す（${reason}）`);
+      ctx.changes.push({ path: 'targets', label: '出品先', from: p.targets.map(channelLabel).join('・'), to: next.map(channelLabel).join('・') || 'なし' });
+      const { [channel]: _, ...rest } = p.targetDefaults;
+      p.targetDefaults = rest;
+      p.targets = next;
     });
   }
 

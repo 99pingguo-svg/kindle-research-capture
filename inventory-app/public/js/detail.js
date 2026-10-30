@@ -1,5 +1,5 @@
 // 商品詳細
-import { h, clear, toast, showError, choose, sheet, fmtDate, yen, copyText, isAiActor, actorLabel } from './ui.js';
+import { h, clear, toast, showError, choose, sheet, fmtDate, yen, copyText, isAiActor, actorLabel, targetTitle } from './ui.js';
 import { api } from './api.js';
 import { state, on, applyProduct, emit } from './state.js';
 import { openCamera } from './camera.js';
@@ -460,10 +460,14 @@ function destinationCard(p) {
   return h('div', { class: 'card' },
     h('h2', null, '🚚 出品先'),
     h('div', { class: 'seg wide targets' }, CHANNEL_DEFS().map((c) => h('button', {
-      class: `${targets.includes(c.id) ? 'on' : ''} ${!targets.includes(c.id) && suggested.includes(c.id) ? 'suggested' : ''}`,
-      title: suggested.includes(c.id) ? 'おすすめ' : '',
+      class: `${targets.includes(c.id) ? 'on' : ''} ${(p.summary.targetAuto || []).includes(c.id) ? 'auto' : ''} ${!targets.includes(c.id) && suggested.includes(c.id) ? 'suggested' : ''}`,
+      title: targetTitle(p.summary, c.id, suggested),
       onclick: () => setTargets(targets.includes(c.id) ? targets.filter((x) => x !== c.id) : [...targets, c.id]),
     }, c.label, !targets.includes(c.id) && suggested.includes(c.id) ? '＊' : ''))),
+    (p.summary.channelNets || []).length > 0 && h('div', { class: 'small', style: { marginTop: '6px' } },
+      '手取り見込み: ', (p.summary.channelNets || []).map((n, i) => h('span', { class: `net-pick ${(p.summary.targetAuto || []).includes(n.channel) ? 'auto' : ''}` },
+        `${i ? '・' : ''}${chLabel(n.channel)} ${yen(n.net)}${n.matchType === 'similar' ? '（似）' : ''}`)),
+      (p.summary.targetAuto || []).length > 0 && h('span', { class: 'muted' }, ' — 緑は自動で選んだ出品先（タップで外すと以後は手動）')),
     suggested.some((x) => !targets.includes(x)) && h('div', { class: 'small muted', style: { marginTop: '6px' } },
       `＊おすすめ: ${suggested.map(chLabel).join('・')}（価格・大きさの調査から）`, ' ',
       h('button', { class: 'btn small', onclick: () => setTargets([...new Set([...targets, ...suggested])]) }, 'おすすめを選ぶ')),

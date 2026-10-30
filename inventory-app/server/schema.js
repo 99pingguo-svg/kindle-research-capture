@@ -220,9 +220,12 @@ export const DEFAULT_SETTINGS = {
   imageQcModels: ['claude-opus-5-5'],
   /** 撮った写真を自動で仕上げる（白背景・トリミング・色補正、Mac 上で処理。元写真は残す）。 */
   autoStudio: true,
+  studioStyle: 'auto', // 自動仕上げの主の背景: auto（白っぽい商品はグレー、ほかは白）／white／grey。もう一方も候補として作る
   studioDeshadow: 0.6, // 自動仕上げで商品に落ちた影を明るく戻す強さ（0=しない〜1）
   // 安い商品は出品先にフリマを既定で入れる（商品ごとに1回。手で変えたらそのまま）
   fleaDefault: { on: true, amazonMax: 1000, netMax: 700 },
+  // 手取りのおすすめ: 一番よいサイトと、差が margin 円以内 または ratio 以内のサイトを出品先に入れる（緑で表示）
+  netDefault: { on: true, margin: 100, ratio: 0.1 },
   /** 一覧の「保存した表示」（絞り込み・並び順の組み合わせ）。全端末で共有。 */
   listViews: [],
 };

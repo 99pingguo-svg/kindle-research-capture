@@ -2,7 +2,9 @@
 // 被写体を切り抜き（macOS Vision の前景マスク＝iPhone の「被写体を持ち上げる」と同じ仕組み）→ 自動の色・明るさ補正 →
 // 白背景に置いて薄い影 → 被写体に合わせて正方形にトリミング → JPEG。
 //
-// 使い方: studio <入力画像> <出力.jpg> [--mode auto|studio|enhance] [--size 2048] [--pad 0.08] [--no-shadow] [--deshadow 0〜1]
+// 使い方: studio <入力画像> <出力.jpg> [--mode auto|studio|enhance] [--bg auto|white|grey] [--fill 0.72] [--size 2048] [--no-shadow] [--deshadow 0〜1]
+//   --bg: white＝白抜き / grey＝明るいグレーのスタジオ風グラデーション / auto＝白っぽい商品はグレー、それ以外は白
+//   --fill: 正方形の中で商品が占める大きさ（長い辺の割合）。商品は少し上寄せ、下に接地影。
 //   --deshadow: 商品の上に落ちた影（手・スマホ・物の影、片側だけ暗い）を明るく戻す強さ。文字や模様など小さな暗い部分は残す。
 //   auto（既定）: 被写体が画面の中に収まっていれば studio、はみ出し・大写し・被写体なしなら enhance
 //   studio : 切り抜き＋白背景＋正方形トリミング＋補正 / enhance: 色・明るさの補正だけ（構図はそのまま）
@@ -30,7 +32,9 @@ func opt(_ name: String) -> String? {
     return v
 }
 let size = CGFloat(Double(opt("--size") ?? "") ?? 2048)
-let pad = CGFloat(Double(opt("--pad") ?? "") ?? 0.08)
+let fill = CGFloat(min(0.95, max(0.4, Double(opt("--fill") ?? "") ?? 0.72)))
+let bgOpt = opt("--bg") ?? "auto"
+_ = opt("--pad") // (old option, no longer used)
 let mode = opt("--mode") ?? "auto"
 let deshadow = min(1, max(0, Double(opt("--deshadow") ?? "") ?? 0))
 let shadow = !args.contains("--no-shadow")
@@ -51,7 +55,10 @@ for f in src.autoAdjustmentFilters(options: [.redEye: false, .features: []]) {
     f.setValue(adjusted, forKey: kCIInputImageKey)
     if let o = f.outputImage { adjusted = o }
 }
-let vib = CIFilter.vibrance(); vib.inputImage = adjusted; vib.amount = 0.12
+// Only 70% of the auto adjustment (the full one flattened highlights and pushed colours), then a touch of vibrance.
+let mix = CIFilter.dissolveTransition(); mix.inputImage = src; mix.targetImage = adjusted; mix.time = 0.7
+adjusted = (mix.outputImage ?? adjusted).cropped(to: extent)
+let vib = CIFilter.vibrance(); vib.inputImage = adjusted; vib.amount = 0.08
 adjusted = (vib.outputImage ?? adjusted).cropped(to: extent)
 
 /**
@@ -129,10 +136,10 @@ func save(_ img: CIImage) {
 /** Colour only, framing kept (long side at most `size`). */
 func enhanceOnly(_ why: String, _ extra: [String: Any] = [:]) -> Never {
     let k = min(1, size / max(extent.width, extent.height))
-    let lit = liftShadows(adjusted, mask: CIImage(color: .white).cropped(to: extent), strength: deshadow)
+    let lit = adjusted // shadows are only lifted on a cut-out product (on the whole frame it lightened the background too)
     let img = lit.transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY)).transformed(by: CGAffineTransform(scaleX: k, y: k))
     save(img)
-    emit(extra.merging(["ok": true, "mode": "enhance", "why": why, "deshadow": deshadow, "shadowScore": shadowScore, "width": Int(img.extent.width), "height": Int(img.extent.height)]) { a, _ in a })
+    emit(extra.merging(["ok": true, "mode": "enhance", "why": why, "deshadow": 0, "width": Int(img.extent.width), "height": Int(img.extent.height)]) { a, _ in a })
 }
 if mode == "enhance" { enhanceOnly("指定") }
 
@@ -165,7 +172,7 @@ if mode == "auto" {
     if coverage < 0.02 { enhanceOnly("被写体が小さすぎる", ["coverage": cov]) }
 }
 
-// 3) Background: white, but a soft light grey when the product itself is mostly white (a white box on white disappears).
+// 3) Background: white, or a light grey studio sweep (auto: grey when the product itself is mostly white, which vanishes on white).
 var sub = [UInt8](repeating: 0, count: 256 * 256 * 4)
 let smallAdj = adjusted.transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY)).transformed(by: CGAffineTransform(scaleX: 256 / extent.width, y: 256 / extent.height))
 ctx.render(smallAdj, toBitmap: &sub, rowBytes: 256 * 4, bounds: CGRect(x: 0, y: 0, width: 256, height: 256), format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
@@ -176,29 +183,47 @@ for i in 0..<(256 * 256) where px[i] > 127 {
     if mx > 0.82 && (mx - mn) < 0.12 { whiteish += 1 }
 }
 let whiteRatio = on > 0 ? Double(whiteish) / Double(on) : 0
-let lightProduct = whiteRatio > 0.35
-let bgColor = lightProduct ? CIColor(red: 0.886, green: 0.894, blue: 0.906) : CIColor.white
-let white = CIImage(color: bgColor).cropped(to: extent)
-var base = white
+let grey = bgOpt == "grey" || (bgOpt == "auto" && whiteRatio > 0.35)
+
+// Clean edge: pull the mask in a hair (drops the fringe of the old background), then soften it.
+let long = Double(max(extent.width, extent.height))
+let choke = CIFilter.morphologyMinimum(); choke.inputImage = mask.clampedToExtent(); choke.radius = Float(max(1, long * 0.0012))
+let edge = (choke.outputImage ?? mask).cropped(to: extent).clampedToExtent().applyingGaussianBlur(sigma: max(0.6, long * 0.0007)).cropped(to: extent)
+let product = liftShadows(adjusted, mask: mask, strength: deshadow)
+
+// 4) Square canvas: the product fills `fill` of it, sitting a little above centre so its shadow has room.
+let side = max(box.width, box.height) / fill
+let crop = CGRect(x: box.midX - side / 2, y: box.midY - side / 2 - side * 0.03, width: side, height: side)
+func srgbColor(_ v: Double) -> CIColor { CIColor(red: v, green: v, blue: v, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)! }
+var bg: CIImage
+if grey {
+    let g = CIFilter.linearGradient()
+    g.point0 = CGPoint(x: crop.midX, y: crop.maxY); g.color0 = srgbColor(0.965)
+    g.point1 = CGPoint(x: crop.midX, y: crop.minY); g.color1 = srgbColor(0.885)
+    bg = (g.outputImage ?? CIImage(color: srgbColor(0.93))).cropped(to: crop)
+} else {
+    bg = CIImage(color: .white).cropped(to: crop)
+}
+func shade(_ m: CIImage, _ alpha: Double) {
+    let dark = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: alpha)).cropped(to: crop)
+    let b = CIFilter.blendWithMask(); b.inputImage = dark; b.backgroundImage = bg; b.maskImage = m.cropped(to: crop)
+    bg = (b.outputImage ?? bg).cropped(to: crop)
+}
 if shadow {
-    let soft = mask.applyingGaussianBlur(sigma: Double(max(extent.width, extent.height)) * 0.012)
-        .transformed(by: CGAffineTransform(translationX: 0, y: -extent.height * 0.008))
-    let grey = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.16)).cropped(to: extent)
-    let blend = CIFilter.blendWithMask()
-    blend.inputImage = grey; blend.backgroundImage = white; blend.maskImage = soft.cropped(to: extent)
-    base = blend.outputImage?.cropped(to: extent) ?? white
+    // Soft ambient shadow, then a thin contact shadow: the silhouette squashed flat at the product's foot.
+    shade(mask.clampedToExtent().applyingGaussianBlur(sigma: Double(side) * 0.03).transformed(by: CGAffineTransform(translationX: 0, y: -side * 0.012)), grey ? 0.10 : 0.07)
+    let foot = box.minY
+    // (one transform at a time: move the foot to y=0, squash, move back just under the foot)
+    let flat = mask.transformed(by: CGAffineTransform(translationX: 0, y: -foot))
+        .transformed(by: CGAffineTransform(scaleX: 1, y: 0.04))
+        .transformed(by: CGAffineTransform(translationX: 0, y: foot - side * 0.006))
+    shade(flat.applyingGaussianBlur(sigma: Double(side) * 0.012), grey ? 0.22 : 0.17)
 }
 let cut = CIFilter.blendWithMask()
-cut.inputImage = liftShadows(adjusted, mask: mask, strength: deshadow); cut.backgroundImage = base; cut.maskImage = mask
-guard var out = cut.outputImage?.cropped(to: extent) else { emit(["ok": false, "reason": "合成に失敗"]) }
-
-// 4) Square crop around the subject with some air; beyond the photo it is just more white.
-let side = max(box.width, box.height) * (1 + 2 * pad)
-let crop = CGRect(x: box.midX - side / 2, y: box.midY - side / 2, width: side, height: side)
-let canvas = CIImage(color: bgColor).cropped(to: crop)
-out = out.composited(over: canvas).cropped(to: crop)
+cut.inputImage = product; cut.backgroundImage = bg; cut.maskImage = edge.cropped(to: crop)
+guard var out = cut.outputImage?.cropped(to: crop) else { emit(["ok": false, "reason": "合成に失敗"]) }
 let scale = min(1, size / side)
 out = out.transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY)).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
 
 save(out)
-emit(["ok": true, "mode": "studio", "deshadow": deshadow, "shadowScore": shadowScore, "background": lightProduct ? "grey" : "white", "whiteRatio": (whiteRatio * 100).rounded() / 100, "coverage": cov, "touchesEdge": touchesEdge, "instances": obs.allInstances.count, "width": Int(out.extent.width), "height": Int(out.extent.height)])
+emit(["ok": true, "mode": "studio", "deshadow": deshadow, "shadowScore": shadowScore, "background": grey ? "grey" : "white", "whiteRatio": (whiteRatio * 100).rounded() / 100, "coverage": cov, "touchesEdge": touchesEdge, "instances": obs.allInstances.count, "width": Int(out.extent.width), "height": Int(out.extent.height)])

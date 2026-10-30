@@ -34,6 +34,9 @@ export const rakumaSoldUrl = (keyword) => `https://fril.jp/s?query=${encodeURICo
 export const imageSearchUrl = (imageUrl) => (imageUrl ? `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(imageUrl)}` : '');
 
 const SITE_NAMES = { mercari: 'メルカリ', yahoo: 'ヤフオク', paypay: 'ヤフーフリマ', rakuma: 'ラクマ' };
+// 販売手数料（2026年時点。改定時はここだけ直す）。ラクマは販売実績で4.5〜10%に変わるので高い方で見積もる。
+export const SITE_FEES = { mercari: MERCARI_FEE_RATE, paypay: 0.05, rakuma: 0.1, yahoo: 0.1 };
+
 const siteRecords = (p) => [['mercari', p.market], ['paypay', p.marketPaypay], ['rakuma', p.marketRakuma], ['yahoo', p.marketYahoo]];
 
 /**
@@ -62,6 +65,31 @@ export function mercariNet(p, ship = shippingOf(p.amazon, p.sizeEstimate)) {
     shipLabel: ship.cheapest?.label || '',
     net: shipPrice == null ? null : basis.price - fee - shipPrice,
   };
+}
+
+/**
+ * 手取りの見込みをサイトごとに: そのサイトの売り切れ中央値（同じ商品、なければ似た商品）− 手数料 − 送料（最安のメルカリ便を目安に共通）。
+ * 戻り値は手取りの高い順。サイトの id は出品先（CHANNELS）の id と同じ。
+ */
+export function channelNets(p, ship = shippingOf(p.amazon, p.sizeEstimate)) {
+  const shipPrice = ship.cheapest?.price ?? null;
+  if (shipPrice == null) return [];
+  return siteRecords(p)
+    .filter(([, m]) => m?.median != null && (m.matchType === 'same' || m.matchType === 'similar'))
+    .map(([site, m]) => {
+      const fee = Math.floor(m.median * SITE_FEES[site]);
+      return { channel: site, label: SITE_NAMES[site], price: m.median, matchType: m.matchType, fee, ship: shipPrice, net: m.median - fee - shipPrice };
+    })
+    .sort((a, b) => b.net - a.net);
+}
+
+/** おすすめの出品先: 手取りが一番よいサイトと、それとの差が小さい（rule.margin 円以内 または rule.ratio 以内）サイト。 */
+export function recommendedChannels(p, rule = {}, ship) {
+  const nets = channelNets(p, ship).filter((x) => x.net > 0);
+  if (!nets.length) return { channels: [], nets };
+  const best = nets[0].net;
+  const gap = Math.max(rule.margin ?? 100, Math.round(best * (rule.ratio ?? 0.1)));
+  return { channels: nets.filter((x) => best - x.net <= gap).map((x) => x.channel), nets };
 }
 
 /** The one sold item to open from the list: same/similar as recorded, price closest to the median. */

@@ -195,6 +195,7 @@ export function createApp({ dataDir, token = '' } = {}) {
   });
   route('GET', '/api/studio', () => ({ available: studio.available(), pending: studio.pending(), on: store.settings.autoStudio !== false }));
   route('POST', '/api/studio/run', ({ body }) => ({ queued: studio.backfill(Array.isArray(body?.productIds) ? body.productIds.map(String) : null) }));
+  route('POST', '/api/studio/redo', ({ body }) => ({ queued: studio.redo(Array.isArray(body?.productIds) ? body.productIds.map(String) : null) }));
   route('PUT', '/api/native-shoot', ({ body, actor }) => {
     store.setNativeShoot(actor, String(body?.productId || ''));
     return shootInfo();
