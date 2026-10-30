@@ -32,6 +32,8 @@
 - メルカリの状況確認は頼まれたときだけ（`channel_tracked` → 一覧を文字で読む → `channel_sync_status` を1回）。定期実行しない。
 - QC（画像QC: 画質・写真間の整合性・違和感チェックを含む）は Claude Opus 5.5（`claude-opus-5-5`）で実施し、`save_qc_result` の `model` に記録する。サーバーは設定 `imageQcModels` 以外のモデルの QC を拒否する。
 
+- 公開用アプリの素材: `node scripts/export-public.js` → `exports/public-kit/`（外に出してよい項目だけ・AI仕上げ写真。git 管理外）。引き継ぎ書は `docs/HANDOFF_PUBLIC_APP.md`、キットの項目は `docs/PUBLIC_KIT_SCHEMA.md`。
+
 ## 開発
 - 軽さのための作り: 一覧は20件ずつ描画（スクロールで追加・更新時は位置を保つ）、一覧のサムネは `x.mini.jpg`（256px、初回要求時に `sips` で作成）、JSON と JS/CSS は gzip・ETag で 304。行に `content-visibility` を付けない（再描画で位置がずれる）。
 - テスト: `npm test`（node:test）。UI は `npm run demo` → `INVENTORY_DATA=./demo-data npm start`。

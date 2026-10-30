@@ -6,3 +6,6 @@ data/
 demo-data/
 backups-full/
 tools/bin/
+
+# 公開用素材キット（作り直せる書き出し物）
+exports/
