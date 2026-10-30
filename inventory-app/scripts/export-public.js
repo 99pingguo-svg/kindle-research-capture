@@ -100,4 +100,5 @@ const meta = {
 fs.writeFileSync(path.join(OUT, 'products.json'), JSON.stringify(products, null, 1));
 fs.writeFileSync(path.join(OUT, 'meta.json'), JSON.stringify(meta, null, 1));
 fs.copyFileSync(path.join(ROOT, 'docs', 'PUBLIC_KIT_SCHEMA.md'), path.join(OUT, 'README.md'));
+fs.copyFileSync(path.join(ROOT, 'docs', 'HANDOFF_PUBLIC_APP.md'), path.join(OUT, 'HANDOFF.md'));
 console.log(`書き出し ${OUT}: 商品 ${meta.count}件・写真つき ${meta.withPhotos}件・写真 ${meta.photoFiles}枚${WITH_OWN ? '（撮ったままの写真を含む）' : ''}`);
