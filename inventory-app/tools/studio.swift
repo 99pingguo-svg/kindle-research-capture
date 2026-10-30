@@ -72,7 +72,7 @@ adjusted = (vib.outputImage ?? adjusted).cropped(to: extent)
  * lighting are divided back up. Only ever brightens, at most ×4 (linear light: a shadow that looks half as bright is about a quarter of the light).
  */
 var shadowScore = 0.0
-func liftShadows(_ img: CIImage, mask m: CIImage, strength: Double) -> CIImage {
+func liftShadows(_ img: CIImage, mask m: CIImage, strength: Double, highTarget: Bool = false) -> CIImage {
     let ext = img.extent
     let long = Double(max(ext.width, ext.height))
     let grey = CIFilter.colorMatrix()
@@ -104,13 +104,20 @@ func liftShadows(_ img: CIImage, mask m: CIImage, strength: Double) -> CIImage {
     let mulI = CIFilter.multiplyCompositing(); mulI.inputImage = illum; mulI.backgroundImage = m
     let mArea = avg(m)
     guard mArea > 0.001 else { return img }
-    let target = min(0.98, avg((mulI.outputImage ?? illum).cropped(to: ext)) / mArea * 1.12)
-    // Shadow score: share of the product lit at under 45% of its typical light (≈ two thirds as bright to the eye).
     let n = 128
     let toSmall = CGAffineTransform(translationX: -ext.minX, y: -ext.minY).scaledBy(x: CGFloat(n) / ext.width, y: CGFloat(n) / ext.height)
     var il = [Float](repeating: 0, count: n * n), mk = [Float](repeating: 0, count: n * n)
     ctx.render(illum.transformed(by: toSmall), toBitmap: &il, rowBytes: n * 4, bounds: CGRect(x: 0, y: 0, width: n, height: n), format: .Rf, colorSpace: nil)
     ctx.render(m.transformed(by: toSmall), toBitmap: &mk, rowBytes: n * 4, bounds: CGRect(x: 0, y: 0, width: n, height: n), format: .Rf, colorSpace: nil)
+    // Typical light: the product average (a little raised). For a light product (white bag, box) the light on its
+    // well-lit parts (85th percentile) instead, so a shaded side is brought up to match the bright side.
+    var target = min(0.98, avg((mulI.outputImage ?? illum).cropped(to: ext)) / mArea * 1.12)
+    if highTarget {
+        var v: [Float] = []
+        for i in 0..<(n * n) where mk[i] > 0.6 { v.append(il[i]) }
+        if v.count > 100 { v.sort(); target = min(0.98, max(target, Double(v[Int(Double(v.count) * 0.85)]))) }
+    }
+    // Shadow score: share of the product lit at under 45% of its typical light (≈ two thirds as bright to the eye).
     var inside = 0, dark = 0
     for i in 0..<(n * n) where mk[i] > 0.5 { inside += 1; if Double(il[i]) < target * 0.45 { dark += 1 } }
     shadowScore = inside > 0 ? (Double(dark) / Double(inside) * 1000).rounded() / 1000 : 0
@@ -190,11 +197,80 @@ for i in 0..<(256 * 256) where px[i] > 127 {
 let whiteRatio = on > 0 ? Double(whiteish) / Double(on) : 0
 let grey = bgOpt == "grey" || (bgOpt == "auto" && whiteRatio > 0.35)
 
+/** Mostly light, near-neutral product (white bag, white box, label): gets clean whites and even light. */
+func isLightProduct(_ img: CIImage, mask m: CIImage) -> Bool {
+    let ext = img.extent, n = 96
+    let toSmall = CGAffineTransform(translationX: -ext.minX, y: -ext.minY).scaledBy(x: CGFloat(n) / ext.width, y: CGFloat(n) / ext.height)
+    var rgb = [Float](repeating: 0, count: n * n * 4), mk = [Float](repeating: 0, count: n * n)
+    ctx.render(img.transformed(by: toSmall), toBitmap: &rgb, rowBytes: n * 16, bounds: CGRect(x: 0, y: 0, width: n, height: n), format: .RGBAf, colorSpace: nil)
+    ctx.render(m.transformed(by: toSmall), toBitmap: &mk, rowBytes: n * 4, bounds: CGRect(x: 0, y: 0, width: n, height: n), format: .Rf, colorSpace: nil)
+    var ls: [Float] = []
+    for i in 0..<(n * n) where mk[i] > 0.6 { ls.append(0.2126 * rgb[i * 4] + 0.7152 * rgb[i * 4 + 1] + 0.0722 * rgb[i * 4 + 2]) }
+    guard ls.count > 100 else { return false }
+    ls.sort()
+    return ls[Int(Double(ls.count) * 0.7)] > 0.22
+}
+let lightProduct = isLightProduct(adjusted, mask: mask)
 // Clean edge: pull the mask in a hair (drops the fringe of the old background), then soften it.
 let long = Double(max(extent.width, extent.height))
-let choke = CIFilter.morphologyMinimum(); choke.inputImage = mask.clampedToExtent(); choke.radius = Float(max(1, long * 0.0012))
+// (a light product is brightened a lot, which makes any grey fringe stand out as a dark rim: trim a little more)
+let choke = CIFilter.morphologyMinimum(); choke.inputImage = mask.clampedToExtent(); choke.radius = Float(max(1, long * (lightProduct ? 0.0028 : 0.0012)))
 var edge = (choke.outputImage ?? mask).cropped(to: extent).clampedToExtent().applyingGaussianBlur(sigma: max(0.6, long * 0.0007)).cropped(to: extent)
-var product = liftShadows(adjusted, mask: mask, strength: deshadow)
+// A light product gets the full shadow lift (its shaded side should match the bright side); others the set strength.
+var product = liftShadows(adjusted, mask: mask, strength: lightProduct ? max(deshadow, 1) : deshadow, highTarget: lightProduct)
+
+/**
+ * 白を白に: when the brightest parts of the product are near-neutral (a white bag, box, label), lift them to a clean
+ * white and take out the colour cast. Products without white (dark, colourful) only get a mild exposure lift, so they
+ * are not washed out. Values are measured and applied in linear light (Core Image's working space).
+ */
+var whiteGain = 1.0
+func cleanWhites(_ img: CIImage, mask m: CIImage) -> CIImage {
+    let ext = img.extent
+    let n = 128
+    let toSmall = CGAffineTransform(translationX: -ext.minX, y: -ext.minY).scaledBy(x: CGFloat(n) / ext.width, y: CGFloat(n) / ext.height)
+    var rgb = [Float](repeating: 0, count: n * n * 4), mk = [Float](repeating: 0, count: n * n)
+    ctx.render(img.transformed(by: toSmall), toBitmap: &rgb, rowBytes: n * 16, bounds: CGRect(x: 0, y: 0, width: n, height: n), format: .RGBAf, colorSpace: nil)
+    ctx.render(m.transformed(by: toSmall), toBitmap: &mk, rowBytes: n * 4, bounds: CGRect(x: 0, y: 0, width: n, height: n), format: .Rf, colorSpace: nil)
+    var px: [(l: Float, r: Float, g: Float, b: Float)] = []
+    for i in 0..<(n * n) where mk[i] > 0.6 {
+        let r = rgb[i * 4], g = rgb[i * 4 + 1], b = rgb[i * 4 + 2]
+        px.append((0.2126 * r + 0.7152 * g + 0.0722 * b, r, g, b))
+    }
+    guard px.count > 200 else { return img }
+    px.sort { $0.l < $1.l }
+    // The brightest 8% (skipping the top 1%: specular glints) stand for "the white of this product".
+    let top = px[Int(Double(px.count) * 0.91)..<Int(Double(px.count) * 0.99)]
+    let k = Float(top.count)
+    let (r, g, b) = (top.reduce(0) { $0 + $1.r } / k, top.reduce(0) { $0 + $1.g } / k, top.reduce(0) { $0 + $1.b } / k)
+    let mx = max(r, g, b), mn = min(r, g, b)
+    // Only a mostly light product counts: on a black remote the "white" is just its small printed text.
+    let p70 = px[Int(Double(px.count) * 0.7)].l
+    let neutral = mx > 0.05 && (mx - mn) / mx < 0.16 && p70 > 0.22
+    let target: Float = 0.87 // linear ≈ sRGB 0.94: white, but not blown out
+    var gr: Float = 1, gg: Float = 1, gb: Float = 1
+    if neutral {
+        gr = min(1.6, max(1, target / max(r, 0.01))); gg = min(1.6, max(1, target / max(g, 0.01))); gb = min(1.6, max(1, target / max(b, 0.01)))
+    } else {
+        let l = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        let e = min(1.1, max(1, 0.75 / max(l, 0.01)))
+        gr = e; gg = e; gb = e
+    }
+    whiteGain = Double((gr + gg + gb) / 3 * 100).rounded() / 100
+    let cm = CIFilter.colorMatrix()
+    cm.inputImage = img
+    cm.rVector = CIVector(x: CGFloat(gr), y: 0, z: 0, w: 0); cm.gVector = CIVector(x: 0, y: CGFloat(gg), z: 0, w: 0); cm.bVector = CIVector(x: 0, y: 0, z: CGFloat(gb), w: 0)
+    cm.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+    // Soft shoulder so lifted highlights roll off instead of clipping.
+    let tone = CIFilter.toneCurve()
+    tone.inputImage = cm.outputImage
+    tone.point0 = CGPoint(x: 0, y: 0); tone.point1 = CGPoint(x: 0.25, y: 0.25); tone.point2 = CGPoint(x: 0.5, y: 0.5); tone.point3 = CGPoint(x: 0.8, y: 0.78); tone.point4 = CGPoint(x: 1.2, y: 0.97)
+    return (tone.outputImage ?? img).cropped(to: ext)
+}
+product = cleanWhites(product, mask: mask)
+// A touch of crispness for labels and small details.
+let sharp = CIFilter.sharpenLuminance(); sharp.inputImage = product; sharp.sharpness = 0.35; sharp.radius = Float(max(1, Double(max(extent.width, extent.height)) * 0.0008))
+product = (sharp.outputImage ?? product).cropped(to: extent)
 
 /**
  * 傾き: the smallest rectangle around the product's outline (convex hull, rotating calipers). A boxy or long product
@@ -282,7 +358,8 @@ func shade(_ m: CIImage, _ alpha: Double) {
 }
 if shadow {
     // Soft ambient shadow, then a thin contact shadow: the silhouette squashed flat at the product's foot.
-    shade(mask.clampedToExtent().applyingGaussianBlur(sigma: Double(side) * 0.03).transformed(by: CGAffineTransform(translationX: 0, y: -side * 0.012)), grey ? 0.10 : 0.07)
+    // (faint, and pushed down so it never rings the sides like a dirty halo)
+    shade(mask.clampedToExtent().applyingGaussianBlur(sigma: Double(side) * 0.018).transformed(by: CGAffineTransform(translationX: 0, y: -side * 0.022)), grey ? 0.05 : 0.035)
     let foot = box.minY
     // (one transform at a time: move the foot to y=0, squash, move back just under the foot)
     let flat = mask.transformed(by: CGAffineTransform(translationX: 0, y: -foot))
@@ -297,4 +374,4 @@ let scale = min(1, size / side)
 out = out.transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY)).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
 
 save(out)
-emit(["ok": true, "mode": "studio", "straightened": straightened, "rectangular": (rectangular * 100).rounded() / 100, "deshadow": deshadow, "shadowScore": shadowScore, "background": grey ? "grey" : "white", "whiteRatio": (whiteRatio * 100).rounded() / 100, "coverage": cov, "touchesEdge": touchesEdge, "instances": obs.allInstances.count, "width": Int(out.extent.width), "height": Int(out.extent.height)])
+emit(["ok": true, "mode": "studio", "light": lightProduct, "whiteGain": whiteGain, "straightened": straightened, "rectangular": (rectangular * 100).rounded() / 100, "deshadow": deshadow, "shadowScore": shadowScore, "background": grey ? "grey" : "white", "whiteRatio": (whiteRatio * 100).rounded() / 100, "coverage": cov, "touchesEdge": touchesEdge, "instances": obs.allInstances.count, "width": Int(out.extent.width), "height": Int(out.extent.height)])

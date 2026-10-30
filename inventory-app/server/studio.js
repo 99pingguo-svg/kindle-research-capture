@@ -19,7 +19,7 @@ const OLLAMA = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
 const QC_MODEL = process.env.STUDIO_QC_MODEL || 'qwen3.5:4b';
 const ACTOR = 'claude';
 const DESHADOW = 0.6;
-const VERSION = 3; // 3 = 傾き補正・形に合わせたトリミング（2 = 白抜き/グレー・余白・接地影）
+const VERSION = 4; // 4 = 白い商品は白く・陰の側を明るい側へ・周りの影を薄く（3 = 傾き補正・トリミング、2 = 白抜き/グレー・接地影）。指針は tools/STUDIO_GUIDE.md
 
 const run = (cmd, args, timeout = 120000) => new Promise((resolve, reject) => execFile(cmd, args, { timeout }, (e, out) => (e && !out ? reject(e) : resolve(String(out)))));
 
