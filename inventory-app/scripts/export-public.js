@@ -3,7 +3,7 @@
 //   node scripts/export-public.js [--out exports/public-kit] [--with-own-photos]
 // 入れるもの: 商品名・種類・説明原稿・価格・大きさ/送料の目安・相場の集計・手取りの見込み・AI仕上げで切り抜いた商品写真。
 // 写真は全部、付いている情報（EXIF・撮影機器・位置など）を消して保存し直す。消せなかった写真は入れない。
-// Amazon 管理番号（X00…）の倉庫ラベルが写っている写真は、番号とバーコードをぼかし、読み直して読めないことを確かめてから入れる（読めたら入れない）。
+// Amazon 管理番号（X00…）の倉庫ラベルが写っている写真は、ラベル全体を単色で塗りつぶし、読み直して欠片も読めないことを確かめてから入れる。
 // 入れないもの: メモ・注文日/到着日/購入価格などの購入記録・Amazon管理番号・保管場所・AI作業の記録・
 //   Amazon の公式画像（権利は Amazon と出品者）・AI紹介画像（出どころ要確認）・撮ったままの写真（--with-own-photos のときだけ）。
 // 書き出しは毎回作り直す（古いキットは exports/ の中で置き換え）。サーバー（http://127.0.0.1:8787）が動いていること。
@@ -38,26 +38,38 @@ let blurredLabels = 0;
 const jobs = []; // [source, destination, max edge, boxes to blur] — re-encoded without metadata at the end
 const readOcr = (file) => JSON.parse(execFileSync(OCR, [file], { timeout: 30000 }).toString());
 /**
- * Where an Amazon warehouse label (X00…) shows in the photo: [] = none, [boxes] = text lines / barcodes to blur
+ * Any trace of a warehouse label in one piece of text: spaces and punctuation are ignored, a partial "X00" + 4 or
+ * more characters counts (O read for 0 too), and so do the last 6 characters of the product's own number.
+ */
+function labelHit(text, known) {
+  const t = String(text || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+  if (/X[0O]{2}[0-9A-Z]{4,}/.test(t)) return true;
+  const k = String(known || '').toUpperCase();
+  return k.length >= 8 && t.includes(k.slice(-6));
+}
+/**
+ * Where an Amazon warehouse label shows in the photo: [] = none, [boxes] = the label's text lines and barcodes
  * (fractions of the image, top-left origin), null = cannot tell (fails closed: the photo is left out).
  */
-function labelBoxes(file) {
+function labelBoxes(file, known) {
   if (!fs.existsSync(OCR)) throw new Error('tools/bin/ocr がありません（npm run build:ocr）');
   try {
     const r = readOcr(file);
     if (!r.ok) return null;
-    const hit = (t) => fnskusIn(t).length > 0;
-    const boxes = [...(r.lines || []).filter((l) => hit(l.text)).map((l) => l.box), ...(r.barcodeBoxes || []).filter((b) => hit(b.value)).map((b) => b.box)];
-    if (!boxes.length && hit([...(r.barcodes || []), ...(r.lines || []).map((l) => l.text)].join(' '))) return null; // found but no position
+    const boxes = [...(r.lines || []).filter((l) => labelHit(l.text, known)).map((l) => l.box), ...(r.barcodeBoxes || []).filter((b) => labelHit(b.value, known)).map((b) => b.box)];
+    const all = [...(r.barcodes || []), ...(r.lines || []).map((l) => l.text)];
+    if (!boxes.length && (all.some((t) => labelHit(t, known)) || labelHit(all.join(''), known))) return null; // found but no position
     return boxes;
   } catch {
     return null;
   }
 }
-const stillShowsLabel = (file) => {
+/** After covering: any trace left (even a fragment) and the photo is left out. */
+const stillShowsLabel = (file, known) => {
   try {
     const r = readOcr(file);
-    return !r.ok || fnskusIn([...(r.barcodes || []), ...(r.lines || []).map((l) => l.text)].join(' ')).length > 0;
+    const all = [...(r.barcodes || []), ...(r.lines || []).map((l) => l.text)];
+    return !r.ok || all.some((t) => labelHit(t, known)) || labelHit(all.join(''), known);
   } catch {
     return true;
   }
@@ -69,26 +81,38 @@ function writeClean(list) {
     'import sys, json',
     'from PIL import Image, ImageOps',
     'ok = []',
-    'from PIL import ImageFilter',
+    'from PIL import ImageDraw',
+    'def segments_ok(path):',  // only SOI, APP0 (JFIF), quantisation/huffman/frame tables before the image data
+    '    b = open(path, "rb").read()',
+    '    if b[:2] != b"\\xff\\xd8": return False',
+    '    i = 2',
+    '    while i + 4 <= len(b):',
+    '        if b[i] != 0xFF: return False',
+    '        m = b[i + 1]',
+    '        if m == 0xDA: return True',
+    '        if (0xE1 <= m <= 0xEF) or m == 0xFE: return False',  // APP1–APP15 (EXIF, XMP, ICC, IPTC…) or COM
+    '        i += 2 + int.from_bytes(b[i + 2:i + 4], "big")',
+    '    return False',
     'for src, dst, edge, boxes in json.load(sys.stdin):',
     '    try:',
     '        im = ImageOps.exif_transpose(Image.open(src)).convert("RGB")',
     '        im.thumbnail((edge, edge))',
-    '        W, H = im.size',
-    '        for x, y, w, h in boxes:',  // the label number / barcode, with a margin, blurred beyond reading
-    '            mx, my = w * 0.25 + 0.01, h * 0.6 + 0.01',
-    '            l, t, r, b = max(0, int((x - mx) * W)), max(0, int((y - my) * H)), min(W, int((x + w + mx) * W)), min(H, int((y + h + my) * H))',
-    '            if r - l > 2 and b - t > 2:',
-    '                region = im.crop((l, t, r, b))',
-    '                im.paste(region.filter(ImageFilter.GaussianBlur(max(6, (b - t) * 0.6))), (l, t))',
-    '        im.save(dst, "JPEG", quality=88, optimize=True)',  // no exif= / icc_profile= → nothing carried over
-    '        if Image.open(dst).getexif(): raise ValueError("metadata left")',
+    '        clean = Image.new("RGB", im.size)',  // fresh pixels: nothing from the source file's info comes along
+    '        clean.paste(im)',
+    '        W, H = clean.size',
+    '        if boxes:',  // cover the whole sticker: one solid patch around every label line and barcode
+    '            x0 = min(x for x, y, w, h in boxes); y0 = min(y for x, y, w, h in boxes)',
+    '            x1 = max(x + w for x, y, w, h in boxes); y1 = max(y + h for x, y, w, h in boxes)',
+    '            mx, my = (x1 - x0) * 0.2 + 0.02, (y1 - y0) * 0.5 + 0.02',
+    '            ImageDraw.Draw(clean).rounded_rectangle([max(0, int((x0 - mx) * W)), max(0, int((y0 - my) * H)), min(W, int((x1 + mx) * W)), min(H, int((y1 + my) * H))], radius=max(4, W // 100), fill=(226, 226, 226))',
+    '        clean.save(dst, "JPEG", quality=88, optimize=True)',
+    '        if not segments_ok(dst): raise ValueError("metadata segment left")',
     '        ok.append(dst)',
     '    except Exception as e:',
     '        print("skip", src, e, file=sys.stderr)',
     'print(json.dumps(ok))',
   ].join('\n');
-  const out = execFileSync('python3', ['-c', prog], { input: JSON.stringify(list), maxBuffer: 64 * 1024 * 1024 }).toString();
+  const out = execFileSync('python3', ['-c', prog], { input: JSON.stringify(list.map(([a, b, c, d]) => [a, b, c, d])), maxBuffer: 64 * 1024 * 1024 }).toString();
   return new Set(JSON.parse(out));
 }
 
@@ -105,12 +129,12 @@ function photosOf(p, outDir) {
   for (const ph of pick) {
     const src = path.join(DATA, p.id, ph.files.work || ph.files.original);
     if (!fs.existsSync(src)) continue;
-    const boxes = labelBoxes(src);
+    const boxes = labelBoxes(src, p.fnsku);
     if (boxes === null) { skippedLabels++; continue; }
     if (boxes.length) blurredLabels++;
     const name = `${p.id}-${ph.id}.jpg`;
     const thumbSrc = path.join(DATA, p.id, ph.files.thumb || ph.files.work);
-    jobs.push([src, path.join(outDir, name), 2048, boxes], [fs.existsSync(thumbSrc) ? thumbSrc : src, path.join(outDir, `${p.id}-${ph.id}.thumb.jpg`), 400, boxes]);
+    jobs.push([src, path.join(outDir, name), 2048, boxes, p.fnsku || ''], [fs.existsSync(thumbSrc) ? thumbSrc : src, path.join(outDir, `${p.id}-${ph.id}.thumb.jpg`), 400, boxes, p.fnsku || '']);
     out.push({
       file: `photos/${name}`,
       thumb: `photos/${p.id}-${ph.id}.thumb.jpg`,
@@ -161,10 +185,10 @@ for (const s of summaryList) {
 
 // Re-encode all photos clean; drop any photo whose main image or thumbnail could not be cleaned (fail closed).
 const clean = writeClean(jobs);
-// Blurred photos are read again: if the number can still be read, the photo is left out.
-for (const [, dst, edge, boxes] of jobs) {
+// Covered photos are read again: if any trace of the label is still read, the photo is left out.
+for (const [, dst, edge, boxes, known] of jobs) {
   if (edge !== 2048 || !boxes.length || !clean.has(dst)) continue;
-  if (stillShowsLabel(dst)) { clean.delete(dst); clean.delete(dst.replace(/\.jpg$/, '.thumb.jpg')); skippedLabels++; blurredLabels--; }
+  if (stillShowsLabel(dst, known)) { clean.delete(dst); clean.delete(dst.replace(/\.jpg$/, '.thumb.jpg')); skippedLabels++; blurredLabels--; }
 }
 for (const x of products) {
   x.photos = x.photos.filter((ph) => clean.has(path.join(photoDir, path.basename(ph.file))) && clean.has(path.join(photoDir, path.basename(ph.thumb))));
@@ -186,4 +210,4 @@ fs.writeFileSync(path.join(OUT, 'products.json'), JSON.stringify(products, null,
 fs.writeFileSync(path.join(OUT, 'meta.json'), JSON.stringify(meta, null, 1));
 fs.copyFileSync(path.join(ROOT, 'docs', 'PUBLIC_KIT_SCHEMA.md'), path.join(OUT, 'README.md'));
 fs.copyFileSync(path.join(ROOT, 'docs', 'HANDOFF_PUBLIC_APP.md'), path.join(OUT, 'HANDOFF.md'));
-console.log(`書き出し ${OUT}: 商品 ${meta.count}件・写真つき ${meta.withPhotos}件・写真 ${meta.photoFiles}枚（倉庫ラベルをぼかした ${blurredLabels}枚・読めてしまい除外 ${skippedLabels}枚・写真の付属情報は消去）${WITH_OWN ? '・撮ったままの写真を含む' : ''}`);
+console.log(`書き出し ${OUT}: 商品 ${meta.count}件・写真つき ${meta.withPhotos}件・写真 ${meta.photoFiles}枚（倉庫ラベルを塗りつぶした ${blurredLabels}枚・判定できず/読めてしまい除外 ${skippedLabels}枚・写真の付属情報は消去）${WITH_OWN ? '・撮ったままの写真を含む' : ''}`);

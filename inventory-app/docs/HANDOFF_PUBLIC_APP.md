@@ -18,7 +18,7 @@
 - 場所: `~/Projects/kindle-research-capture/inventory-app/exports/public-kit/`（約90MB）
   - `products.json` — 商品 483件。項目の説明は同じフォルダの `README.md`（= `docs/PUBLIC_KIT_SCHEMA.md`）。
   - `meta.json` — 書き出し日時・件数・種類ごとの件数。
-  - `photos/` — AI仕上げで切り抜いた商品写真 154枚（59商品分）。白抜きとグレー背景。`.thumb.jpg` は小さい版。写真の付属情報（撮影日時・機器など）は消去済み。倉庫ラベル（X00…）が写っている54枚は番号とバーコードをぼかし、読めないことを確認済み。
+  - `photos/` — AI仕上げで切り抜いた商品写真 154枚（59商品分）。白抜きとグレー背景。`.thumb.jpg` は小さい版。写真の付属情報（撮影日時・機器など）は消去済み。倉庫ラベル（X00…）が写っている54枚はラベルごと単色で塗りつぶし、欠片も読めないことを確認済み。
 - 作り直し（台帳のサーバーが動いているときに台帳側で）:
   ```
   cd ~/Projects/kindle-research-capture/inventory-app && node scripts/export-public.js
