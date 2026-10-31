@@ -647,12 +647,17 @@ test('開封チェック済み: ユーザーだけが付け外しでき、AIは�
   assert.equal(store.get(id).openCheckedAt, null);
 });
 
-test('最新在庫チェック: ユーザーだけが付け外しでき、AIはできない', () => {
+test('最新在庫チェック・在庫状況「不明」: ユーザーだけが付け外しでき、互いに排他で動く', () => {
   const store = new Store(tmp());
   const id = store.create({ name: 'x' }).product.id;
   store.setStockChecked(id, 'user', true);
   assert.ok(store.get(id).stockCheckedAt);
-  assert.throws(() => store.setStockChecked(id, 'claude', false), /ユーザーのみ/);
-  store.setStockChecked(id, 'user', false);
+  assert.equal(store.get(id).stockUnknownAt, null);
+  store.setStockUnknown(id, 'user', true);
+  assert.ok(store.get(id).stockUnknownAt);
   assert.equal(store.get(id).stockCheckedAt, null);
+  assert.throws(() => store.setStockChecked(id, 'claude', false), /ユーザーのみ/);
+  assert.throws(() => store.setStockUnknown(id, 'claude', false), /ユーザーのみ/);
+  store.setStockUnknown(id, 'user', false);
+  assert.equal(store.get(id).stockUnknownAt, null);
 });

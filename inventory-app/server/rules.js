@@ -269,6 +269,7 @@ export function summary(p, settings) {
     shootPlan: p.shootPlan,
     openCheckedAt: p.openCheckedAt || null,
     stockCheckedAt: p.stockCheckedAt || null,
+    stockUnknownAt: p.stockUnknownAt || null,
     status: st,
     thumb: main ? photoUrl(p, main, 'thumb') : null,
     thumbIsReference: !!main && main.kind === 'reference',

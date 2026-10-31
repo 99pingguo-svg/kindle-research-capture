@@ -74,6 +74,7 @@ function newProduct(id, at, settings) {
     shootPlan: false,
     openCheckedAt: null, // 開封して中身を確かめた日時（ユーザーのみ）
     stockCheckedAt: null, // 現在の最新在庫チェック日時（ユーザーのみ）
+    stockUnknownAt: null, // 在庫状況「不明」チェック日時（ユーザーのみ）
     lastPhotoAt: null,
     shotDoneAt: null,
     links: [],
@@ -596,9 +597,21 @@ export class Store extends EventEmitter {
   setStockChecked(id, actor, on) {
     forbidAi(actor, '最新在庫チェック');
     return this.mutate(id, actor, 'stock_check', (p, ctx) => {
-      if (!!p.stockCheckedAt === !!on) return;
+      if (!!p.stockCheckedAt === !!on && (!on || !p.stockUnknownAt)) return;
       p.stockCheckedAt = on ? nowIso() : null;
+      if (on) p.stockUnknownAt = null;
       ctx.note(on ? '最新在庫チェック済みにした' : '最新在庫チェックを外した');
+    });
+  }
+
+  /** 在庫状況「不明」: 手元にあるかすぐ分からない日時（ユーザーのみ）。 */
+  setStockUnknown(id, actor, on) {
+    forbidAi(actor, '在庫不明チェック');
+    return this.mutate(id, actor, 'stock_unknown', (p, ctx) => {
+      if (!!p.stockUnknownAt === !!on && (!on || !p.stockCheckedAt)) return;
+      p.stockUnknownAt = on ? nowIso() : null;
+      if (on) p.stockCheckedAt = null;
+      ctx.note(on ? '在庫状況を「不明」にした' : '在庫状況「不明」を外した');
     });
   }
 

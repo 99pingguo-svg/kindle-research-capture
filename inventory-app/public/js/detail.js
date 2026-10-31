@@ -162,6 +162,8 @@ function topControls(p) {
         h('input', { type: 'checkbox', checked: p.shootPlan, onchange: (e) => act(api.post(url('/shoot-plan'), { on: e.target.checked })) }), '撮影予定'),
       h('label', { class: `small stock-check ${p.stockCheckedAt ? 'on' : ''}`, title: p.stockCheckedAt ? `最新在庫チェック済み（${p.stockCheckedAt.slice(0, 10)}）` : '' },
         h('input', { type: 'checkbox', checked: !!p.stockCheckedAt, onchange: (e) => act(api.post(url('/stock-check'), { on: e.target.checked })) }), p.stockCheckedAt ? '最新在庫チェック済み' : '最新在庫チェック'),
+      h('label', { class: `small stock-unknown ${p.stockUnknownAt ? 'on' : ''}`, title: p.stockUnknownAt ? `在庫状況「不明」（${p.stockUnknownAt.slice(0, 10)}）` : '' },
+        h('input', { type: 'checkbox', checked: !!p.stockUnknownAt, onchange: (e) => act(api.post(url('/stock-unknown'), { on: e.target.checked })) }), '在庫状況「不明」'),
       h('label', { class: `small open-check ${p.openCheckedAt ? 'on' : ''}`, title: p.openCheckedAt ? `開封チェック済み（${p.openCheckedAt.slice(0, 10)}）` : '' },
         h('input', { type: 'checkbox', checked: !!p.openCheckedAt, onchange: (e) => act(api.post(url('/open-check'), { on: e.target.checked })) }), '開封チェック済み')));
 }

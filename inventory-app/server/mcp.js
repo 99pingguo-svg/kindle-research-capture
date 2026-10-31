@@ -71,7 +71,8 @@ export function matchesFilter(sm, filter) {
     case 'open_checked': return active && !!sm.openCheckedAt;
     case 'not_open_checked': return active && !sm.openCheckedAt && !['no_sell', 'no_stock'].includes(sm.decision);
     case 'stock_checked': return active && !!sm.stockCheckedAt;
-    case 'not_stock_checked': return active && !sm.stockCheckedAt && !['no_sell', 'no_stock'].includes(sm.decision) && sm.stage !== 'sold';
+    case 'stock_unknown': return active && !!sm.stockUnknownAt;
+    case 'not_stock_checked': return active && !sm.stockCheckedAt && !sm.stockUnknownAt && !['no_sell', 'no_stock'].includes(sm.decision) && sm.stage !== 'sold';
     case 'ai_queue': return active && ['pending', 'processing'].includes(sm.ai.state);
     case 'review': return active && (sm.stage === 'needs_review' || sm.proposals > 0 || (sm.qc && sm.qc.result !== 'pass'));
     case 'qc_issue': return active && !!sm.qc && (sm.qc.result !== 'pass' || sm.qc.stale);
