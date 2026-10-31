@@ -73,6 +73,7 @@ function newProduct(id, at, settings) {
     trashedAt: null,
     shootPlan: false,
     openCheckedAt: null, // 開封して中身を確かめた日時（ユーザーのみ）
+    stockCheckedAt: null, // 現在の最新在庫チェック日時（ユーザーのみ）
     lastPhotoAt: null,
     shotDoneAt: null,
     links: [],
@@ -588,6 +589,16 @@ export class Store extends EventEmitter {
       if (!!p.openCheckedAt === !!on) return;
       p.openCheckedAt = on ? nowIso() : null;
       ctx.note(on ? '開封チェック済みにした' : '開封チェックを外した');
+    });
+  }
+
+  /** 現在の最新在庫チェック: 今手元にあることを確かめた日時（ユーザーのみ）。 */
+  setStockChecked(id, actor, on) {
+    forbidAi(actor, '最新在庫チェック');
+    return this.mutate(id, actor, 'stock_check', (p, ctx) => {
+      if (!!p.stockCheckedAt === !!on) return;
+      p.stockCheckedAt = on ? nowIso() : null;
+      ctx.note(on ? '最新在庫チェック済みにした' : '最新在庫チェックを外した');
     });
   }
 

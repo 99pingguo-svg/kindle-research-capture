@@ -646,3 +646,13 @@ test('開封チェック済み: ユーザーだけが付け外しでき、AIは�
   store.setOpenChecked(id, 'user', false);
   assert.equal(store.get(id).openCheckedAt, null);
 });
+
+test('最新在庫チェック: ユーザーだけが付け外しでき、AIはできない', () => {
+  const store = new Store(tmp());
+  const id = store.create({ name: 'x' }).product.id;
+  store.setStockChecked(id, 'user', true);
+  assert.ok(store.get(id).stockCheckedAt);
+  assert.throws(() => store.setStockChecked(id, 'claude', false), /ユーザーのみ/);
+  store.setStockChecked(id, 'user', false);
+  assert.equal(store.get(id).stockCheckedAt, null);
+});

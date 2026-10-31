@@ -124,6 +124,7 @@ export function createApp({ dataDir, token = '' } = {}) {
   route('POST', '/api/products/:id/stage', ({ params, body, actor }) => full(store.setStage(params.id, actor, body.stage, { note: body.note })));
   route('POST', '/api/products/:id/archive', ({ params, body, actor }) => full(store.setArchived(params.id, actor, body.archived !== false)));
   route('POST', '/api/products/:id/open-check', ({ params, body, actor }) => full(store.setOpenChecked(params.id, actor, body?.on !== false)));
+  route('POST', '/api/products/:id/stock-check', ({ params, body, actor }) => full(store.setStockChecked(params.id, actor, body?.on !== false)));
   route('POST', '/api/products/:id/shoot-plan', ({ params, body, actor }) => full(store.setShootPlan(params.id, actor, body.on !== false)));
   route('POST', '/api/products/:id/shoot-done', ({ params, body, actor }) => full(store.shootDone(params.id, actor, { requestAi: body?.requestAi !== false })));
   route('POST', '/api/products/:id/trash', ({ params, actor }) => full(store.trash(params.id, actor)));
@@ -339,7 +340,7 @@ export function createApp({ dataDir, token = '' } = {}) {
     return { ok: true };
   });
 
-  const BULK_LABEL = { decision: '出品判断', price: '価格の一括設定', addTarget: '出品先の追加', removeTarget: '出品先の解除', suggestedTargets: 'おすすめの出品先', ai: 'AI依頼', shootPlan: '撮影予定', archive: 'アーカイブ', trash: 'ゴミ箱へ移動', restore: '復元', queue: '出品待ち', unqueue: '出品待ち解除', stage: 'ステータス変更' };
+  const BULK_LABEL = { decision: '出品判断', price: '価格の一括設定', addTarget: '出品先の追加', removeTarget: '出品先の解除', suggestedTargets: 'おすすめの出品先', ai: 'AI依頼', shootPlan: '撮影予定', stockCheck: '最新在庫チェック', archive: 'アーカイブ', trash: 'ゴミ箱へ移動', restore: '復元', queue: '出品待ち', unqueue: '出品待ち解除', stage: 'ステータス変更' };
   route('POST', '/api/bulk', ({ body, actor }) => {
     const { ids = [], op, value } = body || {};
     const results = [];
@@ -351,6 +352,7 @@ export function createApp({ dataDir, token = '' } = {}) {
           case 'decision': store.setDecision(id, actor, value); break;
           case 'ai': store.requestAiTask(id, actor, value); break;
           case 'shootPlan': store.setShootPlan(id, actor, !!value); break;
+          case 'stockCheck': store.setStockChecked(id, actor, !!value); break;
           case 'addTarget': store.setTargets(id, actor, [...(store.get(id).targets || []), value]); break;
           case 'removeTarget': store.setTargets(id, actor, (store.get(id).targets || []).filter((t) => t !== value)); break;
           case 'price': {

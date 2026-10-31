@@ -102,6 +102,8 @@ export function applyProduct(full) {
 
 export const FILTERS = [
   { id: 'all', label: 'すべて' },
+  { id: 'not_stock_checked', label: '現在の最新在庫チェック（未）' },
+  { id: 'stock_checked', label: '最新在庫チェック済み' },
   { id: 'shoot_plan', label: '撮影予定' },
   { id: 'needs_photos', label: '写真不足' },
   { id: 'shot_today', label: '今日撮影済み' },
@@ -153,6 +155,8 @@ export function matchesFilter(sm, filter) {
     case 'shoot_plan': return active && sm.shootPlan;
     case 'open_checked': return active && !!sm.openCheckedAt;
     case 'not_open_checked': return active && !sm.openCheckedAt && !['no_sell', 'no_stock'].includes(sm.decision);
+    case 'stock_checked': return active && !!sm.stockCheckedAt;
+    case 'not_stock_checked': return active && !sm.stockCheckedAt && !['no_sell', 'no_stock'].includes(sm.decision) && sm.stage !== 'sold';
     case 'ai_queue': return active && ['pending', 'processing'].includes(sm.ai.state);
     case 'review': return active && (sm.stage === 'needs_review' || sm.proposals > 0 || (sm.qc && sm.qc.result !== 'pass'));
     case 'qc_issue': return active && !!sm.qc && (sm.qc.result !== 'pass' || sm.qc.stale);
@@ -256,6 +260,7 @@ export function matchCond(p, cond) {
     case 'dec': return p.decision === id;
     case 'tgt': return id === 'none' ? !(p.targets || []).length : (p.targets || []).includes(id);
     case 'photo': return id === 'none' ? !p.counts?.actual : !!p.counts?.actual;
+    case 'stock': return id === 'checked' ? !!p.stockCheckedAt : !p.stockCheckedAt && !['no_sell', 'no_stock'].includes(p.decision) && p.stage !== 'sold';
     case 'date': return { order: !!p.orderDate, noorder: !p.orderDate, arrival: !!p.arrivalDate, noarrival: !p.arrivalDate, any: !!p.itemDate, none: !p.itemDate }[id] ?? true;
     case 'size': return s.sizeClass === id;
     case 'band': return s.band === id;

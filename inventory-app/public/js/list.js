@@ -104,7 +104,7 @@ function renderChips() {
   const all = [...state.products.values()].filter((p) => inDateRange(p) && inPriceRange(p) && inConds(p));
   const counts = Object.fromEntries(FILTERS.map((f) => [f.id, all.filter((p) => matchesFilter(p, f.id) && shownByClass(p, f.id)).length]));
   clear(els.chips).append(
-    ...FILTERS.filter((f) => counts[f.id] > 0 || ['all', 'shoot_plan', 'needs_photos', 'ready', state.prefs.filter].includes(f.id)).map((f) =>
+    ...FILTERS.filter((f) => counts[f.id] > 0 || ['all', 'not_stock_checked', 'stock_checked', 'shoot_plan', 'needs_photos', 'ready', state.prefs.filter].includes(f.id)).map((f) =>
       h('button', {
         class: `chip ${state.prefs.filter === f.id ? 'on' : ''}`,
         onclick: () => {
@@ -208,6 +208,7 @@ function condLabel(c) {
     case 'dec': return id === 'undecided' ? '未判断' : state.meta.decisions.find((d) => d.id === id)?.label || id;
     case 'tgt': return id === 'none' ? '出品先なし' : `→${channelName(id)}`;
     case 'photo': return id === 'none' ? '現物写真なし' : '現物写真あり';
+    case 'stock': return id === 'checked' ? '最新在庫チェック済み' : '最新在庫未チェック';
     case 'date': return DATE_COND[id] || id;
     case 'size': return sh.sizeClasses?.find((x) => x.id === id)?.label.replace(/（.*/, '') || id;
     case 'band': return `送料${sh.bands?.find((x) => x.id === id)?.label.replace(/（.*/, '') || id}`;
@@ -262,6 +263,7 @@ function openConds() {
         ...section('種類', (state.meta.categories || []).map((c) => chip(`cat:${c}`)), '未設定の商品は商品名からの推定'),
         // 出品判断・出品先 are shown/hidden with 👁 (and old dec:/tgt: conditions still work).
         ...section('日付', Object.keys(DATE_COND).map((id) => chip(`date:${id}`))),
+        ...section('現在の最新在庫チェック', [chip('stock:checked'), chip('stock:unchecked')]),
         ...section('写真', [chip('photo:has'), chip('photo:none')]),
         ...section('サイズ', sh.sizeClasses.map((c) => chip(`size:${c.id}`, c.label))),
         ...section('いちばん安いメルカリ便の送料', sh.bands.map((b) => chip(`band:${b.id}`, b.label))),
@@ -604,6 +606,25 @@ function openCheck(p) {
   }), '開封チェック済み');
 }
 
+/** 現在の最新在庫チェック: 今手元にあるものだけワンタップでチェックしていく。 */
+function stockCheck(p) {
+  const on = !!p.stockCheckedAt;
+  return h('label', {
+    class: `stock-check ${on ? 'on' : ''}`, title: on ? `最新在庫チェック済み（${p.stockCheckedAt.slice(0, 10)}）` : '今手元にあることを確認したらチェック',
+    onclick: (e) => e.stopPropagation(),
+  }, h('input', {
+    type: 'checkbox', checked: on,
+    onchange: async (e) => {
+      try {
+        applyProduct(await api.post(`/api/products/${p.id}/stock-check`, { on: e.target.checked }));
+      } catch (err) {
+        e.target.checked = on;
+        showError(err);
+      }
+    },
+  }), on ? '最新在庫チェック済み' : '最新在庫チェック');
+}
+
 function decisionSeg(p) {
   const opts = state.meta.decisions.filter((d) => d.id !== 'undecided').map((d) => [d.id, d.label]);
   return h('div', { class: 'seg decisions', style: { marginTop: '7px' } },
@@ -829,7 +850,7 @@ function rowEl(p, idx, run) {
         rowDates(p, run.gField),
         h('span', { class: `item-cat ${p.categoryGuessed ? 'guess' : ''}`, title: p.categoryGuessed ? '商品名からの推定（詳細画面で設定できます）' : '種類' }, p.category, p.categoryGuessed ? '?' : ''),
         [p.brand, p.model, p.location && `📍${p.location}`].filter(Boolean).join(' · ')),
-      h('div', { class: 'badges' }, badgesFor(p), !p.trashedAt && openCheck(p)),
+      h('div', { class: 'badges' }, badgesFor(p), !p.trashedAt && stockCheck(p), !p.trashedAt && openCheck(p)),
       marketLinks(p),
       issuesFor(p),
       !state.selectMode && !p.trashedAt && decisionSeg(p),
@@ -912,7 +933,9 @@ function renderBulk() {
       ...(state.meta.channels || []).map((c) => h('button', { class: 'btn small', onclick: run('addTarget', c.id, `出品先に${c.label}`) }, `→${c.label}`)),
       h('button', { class: 'btn small', onclick: run('suggestedTargets', null, 'おすすめの出品先') }, '→おすすめ'),
       h('button', { class: 'btn small', onclick: run('shootPlan', true, '撮影予定に追加') }, '撮影予定+'),
-      h('button', { class: 'btn small', onclick: run('shootPlan', false, '撮影予定から外す') }, '撮影予定−')),
+      h('button', { class: 'btn small', onclick: run('shootPlan', false, '撮影予定から外す') }, '撮影予定−'),
+      h('button', { class: 'btn small', onclick: run('stockCheck', true, '最新在庫チェック済みにした') }, '最新在庫+'),
+      h('button', { class: 'btn small', onclick: run('stockCheck', false, '最新在庫チェックを外した') }, '最新在庫−')),
     h('div', { class: 'row' },
       h('button', { class: 'btn small primary', onclick: run('queue', null, 'メルカリ転記を依頼（出品待ち）') }, '🛒 転記依頼'),
       h('button', { class: 'btn small', onclick: run('unqueue', null, '出品待ちから戻す') }, '転記取消'),
