@@ -123,9 +123,27 @@ export function createApp({ dataDir, token = '' } = {}) {
   route('POST', '/api/products/:id/decision', ({ params, body, actor }) => full(store.setDecision(params.id, actor, body.decision)));
   route('POST', '/api/products/:id/stage', ({ params, body, actor }) => full(store.setStage(params.id, actor, body.stage, { note: body.note })));
   route('POST', '/api/products/:id/archive', ({ params, body, actor }) => full(store.setArchived(params.id, actor, body.archived !== false)));
+  const notifyAozoraShelf = (req, id, onShelf) => {
+    if (req?.headers?.['x-from-aozora'] === '1') return;
+    fetch('http://127.0.0.1:8790/api/daicho-webhook', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1:8790', 'x-daicho-sync': '1' },
+      body: JSON.stringify({ ids: [id], onShelf: !!onShelf }),
+    }).catch(() => {});
+  };
   route('POST', '/api/products/:id/open-check', ({ params, body, actor }) => full(store.setOpenChecked(params.id, actor, body?.on !== false)));
-  route('POST', '/api/products/:id/stock-check', ({ params, body, actor }) => full(store.setStockChecked(params.id, actor, body?.on !== false)));
-  route('POST', '/api/products/:id/stock-unknown', ({ params, body, actor }) => full(store.setStockUnknown(params.id, actor, body?.on !== false)));
+  route('POST', '/api/products/:id/stock-check', ({ req, params, body, actor }) => {
+    const on = body?.checked !== undefined ? !!body.checked : body?.on !== false;
+    const p = store.setStockChecked(params.id, actor, on);
+    notifyAozoraShelf(req, params.id, on);
+    return full(p);
+  });
+  route('POST', '/api/products/:id/stock-unknown', ({ req, params, body, actor }) => {
+    const on = body?.on !== false;
+    const p = store.setStockUnknown(params.id, actor, on);
+    if (on) notifyAozoraShelf(req, params.id, false);
+    return full(p);
+  });
   route('POST', '/api/products/:id/shoot-plan', ({ params, body, actor }) => full(store.setShootPlan(params.id, actor, body.on !== false)));
   route('POST', '/api/products/:id/shoot-done', ({ params, body, actor }) => full(store.shootDone(params.id, actor, { requestAi: body?.requestAi !== false })));
   route('POST', '/api/products/:id/trash', ({ params, actor }) => full(store.trash(params.id, actor)));
