@@ -7,6 +7,7 @@ import { makeVariants, fetchBitmap, renderEdit, editToVariants, DEFAULT_EDIT } f
 import * as uploads from './uploads.js';
 import { shootWithNativeCamera } from './native.js';
 import { quickMemo, searchPhotoFor, addSearchPhoto } from './quick.js';
+import { openAmazonSearch } from './amazon-search.js';
 
 let pane;
 let photoTab = 'actual';
@@ -128,6 +129,7 @@ function header(p) {
     h('div', { class: 'detail-head' },
       h('button', { class: 'icon-btn only-mobile', onclick: () => (history.length > 1 ? history.back() : (location.hash = '#/')), 'aria-label': '戻る' }, '‹'),
       h('div', { class: 'name' }, h('span', { class: 'muted', style: { fontWeight: 500, marginRight: '6px' } }, p.id), p.name || '名称未設定'),
+      h('button', { class: 'btn small amz-header-btn', 'aria-label': 'Amazon検索', title: 'お客さん向け Amazon商品検索', onclick: () => openAmazonSearch(p.name || '') }, '🛒 Amazon'),
       h('button', { class: 'icon-btn', 'aria-label': 'その他', onclick: () => moreMenu(p) }, '⋯')));
 }
 

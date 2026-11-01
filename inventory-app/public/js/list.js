@@ -13,6 +13,7 @@ import { openNativeSetup, shootWithNativeCamera } from './native.js';
 import { ocrCandidates, fnskusIn } from './search.js';
 import { makeVariants } from './images.js';
 import { quickMemo, rememberSearchPhoto, addSearchPhoto } from './quick.js';
+import { openAmazonSearch } from './amazon-search.js';
 
 let els = null;
 
@@ -37,6 +38,7 @@ export function mountList() {
       h('div', { class: 'topbar-row' },
         h('h1', null, '商品台帳'),
         els.conn, els.upload,
+        h('button', { class: 'btn small amz-header-btn', 'aria-label': 'Amazon検索', title: 'お客さん向け Amazon商品検索（Alt+A / Cmd+K）', onclick: () => openAmazonSearch() }, '🛒 Amazon'),
         h('button', { class: 'icon-btn', 'aria-label': '追加', onclick: addMenu }, '＋'),
         h('button', { class: 'icon-btn', 'aria-label': 'メニュー', onclick: mainMenu }, '⋯')),
       h('div', { class: 'search' }, search,

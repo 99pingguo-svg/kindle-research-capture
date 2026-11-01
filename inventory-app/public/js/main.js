@@ -6,6 +6,7 @@ import { mountDetail, showDetail, reload as reloadDetail } from './detail.js';
 import { showActivity, showImport, showSettings, showLedger, showDateImport, showSnapshots } from './pages.js';
 import * as uploads from './uploads.js';
 import { watchNativeReturn } from './native.js';
+import { initGlobalAmazonShortcut } from './amazon-search.js';
 
 const app = document.getElementById('app');
 
@@ -61,6 +62,7 @@ async function boot() {
   mountList();
   mountDetail();
   watchNativeReturn();
+  initGlobalAmazonShortcut();
   window.addEventListener('hashchange', route);
   route();
   connectEvents(onServerEvent, (ok) => {
