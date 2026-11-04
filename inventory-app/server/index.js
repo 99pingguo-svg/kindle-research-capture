@@ -24,6 +24,7 @@ import { createMcpHandler, matchesFilter } from './mcp.js';
 import * as mercari from './adapters/mercari.js';
 import * as schema from './schema.js';
 import { parseLine, importDates } from './dates.js';
+import { browserBrief, browserSyncOverview, imageFile, BROWSER_LISTS, IMAGE_STATES } from './browser-sync.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -55,8 +56,9 @@ export function createApp({ dataDir, token = '' } = {}) {
     routes.push({ method, re, keys, handler });
   };
 
-  const full = (p) => ({ ...p, summary: summary(p, store.settings), readiness: readiness(p, store.settings), lint: lint(p, store.settings) });
-  const sm = (p) => summary(p, store.settings);
+  // 観察ブラウザ連携（どの一覧か・画像取得の状況）は台帳の外のファイルも見るので、summary の外で足す。
+  const sm = (p) => ({ ...summary(p, store.settings), browser: browserBrief(p), vineOrderDate: p.browser?.vineOrderDate || null });
+  const full = (p) => ({ ...p, summary: sm(p), readiness: readiness(p, store.settings), lint: lint(p, store.settings) });
 
   // ---- meta / settings ----
   route('GET', '/api/meta', () => ({
@@ -66,6 +68,7 @@ export function createApp({ dataDir, token = '' } = {}) {
     shipping: { payers: schema.SHIPPING_PAYERS, methods: schema.SHIPPING_METHODS, days: schema.SHIPPING_DAYS, prefectures: schema.PREFECTURES },
     settings: store.settings, dataDir: store.dataDir, mcpPath: '/mcp',
     channels: schema.CHANNELS, observedStatuses: schema.OBSERVED_STATUSES, photoKinds: schema.PHOTO_KINDS, channelChecks: store.meta.channelChecks || {},
+    browserLists: BROWSER_LISTS, imageStates: IMAGE_STATES,
   }));
   route('PUT', '/api/settings', ({ body, actor }) => {
     if (!isUser(actor)) throw new AppError(403, '設定変更はユーザーのみ');
@@ -131,6 +134,16 @@ export function createApp({ dataDir, token = '' } = {}) {
       body: JSON.stringify({ ids: [id], onShelf: !!onShelf }),
     }).catch(() => {});
   };
+  route('POST', '/api/products/:id/aside', ({ params, body, actor }) => full(store.setAside(params.id, actor, body?.on !== false)));
+  // 観察ブラウザ連携（Mac の sync.py）が書く: どの一覧に入っているか。null で外す。
+  route('PUT', '/api/products/:id/browser', ({ params, body, actor }) => sm(store.setBrowserInfo(params.id, actor, body?.browser ?? null)));
+  route('GET', '/api/browser-sync', () => browserSyncOverview(store.list()));
+  route('GET', '/api/browser-images/:asin', ({ res, params }) => {
+    // Small JPEGs (one per product): sent in one go so the route has answered before it returns.
+    const buf = fs.readFileSync(imageFile(params.asin));
+    res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=300', 'content-length': buf.length });
+    res.end(buf);
+  });
   route('POST', '/api/products/:id/open-check', ({ params, body, actor }) => full(store.setOpenChecked(params.id, actor, body?.on !== false)));
   route('POST', '/api/products/:id/stock-check', ({ req, params, body, actor }) => {
     const on = body?.checked !== undefined ? !!body.checked : body?.on !== false;
@@ -359,7 +372,7 @@ export function createApp({ dataDir, token = '' } = {}) {
     return { ok: true };
   });
 
-  const BULK_LABEL = { decision: '出品判断', price: '価格の一括設定', addTarget: '出品先の追加', removeTarget: '出品先の解除', suggestedTargets: 'おすすめの出品先', ai: 'AI依頼', shootPlan: '撮影予定', stockCheck: '最新在庫チェック', stockUnknown: '在庫不明チェック', archive: 'アーカイブ', trash: 'ゴミ箱へ移動', restore: '復元', queue: '出品待ち', unqueue: '出品待ち解除', stage: 'ステータス変更' };
+  const BULK_LABEL = { decision: '出品判断', price: '価格の一括設定', addTarget: '出品先の追加', removeTarget: '出品先の解除', suggestedTargets: 'おすすめの出品先', ai: 'AI依頼', shootPlan: '撮影予定', stockCheck: '最新在庫チェック', stockUnknown: '在庫不明チェック', aside: '別枠', archive: 'アーカイブ', trash: 'ゴミ箱へ移動', restore: '復元', queue: '出品待ち', unqueue: '出品待ち解除', stage: 'ステータス変更' };
   route('POST', '/api/bulk', ({ body, actor }) => {
     const { ids = [], op, value } = body || {};
     const results = [];
@@ -373,6 +386,7 @@ export function createApp({ dataDir, token = '' } = {}) {
           case 'shootPlan': store.setShootPlan(id, actor, !!value); break;
           case 'stockCheck': store.setStockChecked(id, actor, !!value); break;
           case 'stockUnknown': store.setStockUnknown(id, actor, !!value); break;
+          case 'aside': store.setAside(id, actor, !!value); break;
           case 'addTarget': store.setTargets(id, actor, [...(store.get(id).targets || []), value]); break;
           case 'removeTarget': store.setTargets(id, actor, (store.get(id).targets || []).filter((t) => t !== value)); break;
           case 'price': {

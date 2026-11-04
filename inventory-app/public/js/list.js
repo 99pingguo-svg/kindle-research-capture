@@ -5,6 +5,7 @@ import { api } from './api.js';
 import {
   state, setPref, on, FILTERS, matchesFilter, visibleProducts, applyProduct, loadAll, inDateRange, inPriceRange, inConds, matchCond, productsForCalendar,
   priceRangeOn, dateRangeOn, NET_BANDS, SORTS, sortDef, DATE_KINDS, dateKindOf, groupDateField, currentView, applyView, shownByClass, hidingOn,
+  hideDateOn, inHiddenDates,
 } from './state.js';
 import { pickDateRange, rangeLabel, fmtDay } from './calendar.js';
 import { openCamera } from './camera.js';
@@ -14,6 +15,7 @@ import { ocrCandidates, fnskusIn } from './search.js';
 import { makeVariants } from './images.js';
 import { quickMemo, rememberSearchPhoto, addSearchPhoto } from './quick.js';
 import { openAmazonSearch } from './amazon-search.js';
+import { openBrowserSync, browserBadges } from './browser-sync.js';
 
 let els = null;
 
@@ -130,7 +132,7 @@ function renderToolbar(items = visibleProducts()) {
       '📅 ', dk.field !== 'itemDate' ? `${dk.label} ` : '', rangeLabel(state.prefs, dk.label)),
     h('button', { class: `btn small date-range ${priceRangeOn() ? 'on' : ''}`, onclick: openPriceRange, 'aria-label': 'Amazon価格で絞り込み' }, '💴 ', priceRangeLabel()),
     h('button', { class: `btn small date-range ${nConds ? 'on' : ''}`, onclick: openConds, 'aria-label': '種類・判断・サイズ・送料・相場などで絞り込み' }, '🔍 ', nConds ? `絞り込み ${nConds}` : '絞り込み'),
-    h('button', { class: `btn small date-range ${hidingOn() ? 'on' : ''}`, onclick: openShowHide, 'aria-label': '出品判断・出品先ごとに表示／非表示' }, '👁 ', hidingOn() ? `非表示 ${(state.prefs.hideDec || []).length + (state.prefs.hideTgt || []).length}` : '判断・出品先'),
+    h('button', { class: `btn small date-range ${hidingOn() ? 'on' : ''}`, onclick: openShowHide, 'aria-label': '出品判断・出品先ごとに表示／非表示' }, '👁 ', hidingOn() ? `非表示 ${hiddenLabels(state.prefs).length}` : '表示・非表示'),
     h('button', { class: 'btn small', onclick: openViews, 'aria-label': '保存した表示' }, '★ 表示'),
     h('span', { class: 'spacer' }),
     h('select', {
@@ -161,14 +163,14 @@ function renderCondBar() {
   els.condbar.append(...[
     dateRangeOn() && h('button', { class: 'cond-chip', onclick: () => setRange({ dateFrom: '', dateTo: '', dateNone: false }) }, `${dk.label} ${rangeLabel(state.prefs, dk.label)}`, h('span', { class: 'x' }, '✕')),
     priceRangeOn() && h('button', { class: 'cond-chip', onclick: () => setPriceRange({ priceMin: '', priceMax: '', priceUnknown: false }) }, `Amazon ${priceRangeLabel()}`, h('span', { class: 'x' }, '✕')),
-    hidingOn() && h('button', { class: 'cond-chip hide', onclick: () => setHidden([], []) }, `非表示: ${hiddenLabels(state.prefs).join('・')}`, h('span', { class: 'x' }, '✕')),
+    hidingOn() && h('button', { class: 'cond-chip hide', onclick: clearHidden }, `非表示: ${hiddenLabels(state.prefs).join('・')}`, h('span', { class: 'x' }, '✕')),
     ...conds.map((c) => h('button', { class: 'cond-chip', onclick: () => setConds(conds.filter((x) => x !== c)) }, condLabel(c), h('span', { class: 'x' }, '✕'))),
     h('button', { class: 'btn small ghost', onclick: clearAllFilters }, 'すべて解除'),
   ].filter(Boolean));
 }
 
 function clearAllFilters() {
-  for (const [k, v] of Object.entries({ dateFrom: '', dateTo: '', dateNone: false, priceMin: '', priceMax: '', priceUnknown: false, conds: [], hideDec: [], hideTgt: [] })) setPref(k, v);
+  for (const [k, v] of Object.entries({ dateFrom: '', dateTo: '', dateNone: false, priceMin: '', priceMax: '', priceUnknown: false, conds: [], hideDec: [], hideTgt: [], hideLists: [], hideDate: noHideDate() })) setPref(k, v);
   state.selected.clear();
   renderAll();
 }
@@ -220,6 +222,8 @@ function condLabel(c) {
     case 'rmarket': return id === 'todo' ? 'ラクマ 未調査' : `ラクマ ${MATCH_LABEL[id]}`;
     case 'pmarket': return id === 'todo' ? 'ヤフーフリマ 未調査' : `ヤフーフリマ ${MATCH_LABEL[id]}`;
     case 'net': return id === 'unknown' ? '手取り 不明' : `手取り ${NET_BANDS.find((x) => x.id === id)?.label || id}`;
+    case 'list': return listLabel(id);
+    case 'img': return `画像 ${state.meta.imageStates?.[id] || id}`;
     default: return c;
   }
 }
@@ -267,6 +271,8 @@ function openConds() {
         ...section('日付', Object.keys(DATE_COND).map((id) => chip(`date:${id}`))),
         ...section('現在の最新在庫チェック', [chip('stock:checked'), chip('stock:unknown'), chip('stock:unchecked')]),
         ...section('写真', [chip('photo:has'), chip('photo:none')]),
+        ...section('観察ブラウザの一覧', [...(state.meta.browserLists || []).map((l) => chip(`list:${l.id}`)), chip('list:none')]),
+        ...section('観察ブラウザの画像取得', Object.keys(state.meta.imageStates || {}).map((id) => chip(`img:${id}`))),
         ...section('サイズ', sh.sizeClasses.map((c) => chip(`size:${c.id}`, c.label))),
         ...section('いちばん安いメルカリ便の送料', sh.bands.map((b) => chip(`band:${b.id}`, b.label))),
         ...sh.groups.flatMap((g) => section(`この方法で送れる（${g.label}）`, sh.methods.filter((m) => m.group === g.id).map((m) => chip(`method:${m.id}`)))),
@@ -287,11 +293,25 @@ function openConds() {
 
 const decLabel = (id) => (id === 'undecided' ? '未判断' : state.meta.decisions.find((d) => d.id === id)?.label || id);
 const tgtLabel = (id) => (id === 'none' ? '出品先なし' : channelName(id));
-const hiddenLabels = (v) => [...(v.hideDec || []).map(decLabel), ...(v.hideTgt || []).map(tgtLabel)];
+const listLabel = (id) => (id === 'none' ? '観察ブラウザの一覧外' : (state.meta.browserLists || []).find((l) => l.id === id)?.label || id);
+const noHideDate = () => ({ kind: state.prefs.hideDate?.kind || 'vineOrderDate', from: '', to: '' });
+const hideDateLabel = (hd) => `${(DATE_KINDS.find((k) => k.field === hd.kind) || DATE_KINDS[0]).label} ${hd.from ? fmtDay(hd.from) : ''}〜${hd.to ? fmtDay(hd.to) : ''}`;
+const hiddenLabels = (v) => [...(v.hideDec || []).map(decLabel), ...(v.hideTgt || []).map(tgtLabel), ...(v.hideLists || []).map(listLabel),
+  ...(hideDateOn(v) ? [hideDateLabel(v.hideDate)] : [])];
 
 function setHidden(hideDec, hideTgt) {
   setPref('hideDec', hideDec);
   setPref('hideTgt', hideTgt);
+  state.selected.clear();
+  renderAll();
+}
+function setHide(key, value) {
+  setPref(key, value);
+  state.selected.clear();
+  renderAll();
+}
+function clearHidden() {
+  for (const [k, v] of Object.entries({ hideDec: [], hideTgt: [], hideLists: [], hideDate: noHideDate() })) setPref(k, v);
   state.selected.clear();
   renderAll();
 }
@@ -315,16 +335,45 @@ function openShowHide() {
       const tgts = [...(state.meta.channels || []).map((c) => c.id), 'none'];
       const tgtCount = (id) => all.filter((p) => (id === 'none' ? !(p.targets || []).length : (p.targets || []).includes(id))).length;
       const shownNow = all.filter((p) => shownByClass(p, 'all')).length;
+      const hl = state.prefs.hideLists || [];
+      const lists = [...(state.meta.browserLists || []).map((l) => l.id), 'none'];
+      const listCount = (id) => all.filter((p) => (id === 'none' ? !p.browser?.lists?.length : p.browser?.lists?.includes(id))).length;
+      const hd2 = { ...noHideDate(), ...(state.prefs.hideDate || {}) };
+      const setDate = (patch) => { setHide('hideDate', { ...hd2, ...patch }); render(); };
+      const inRange = all.filter((p) => inHiddenDates(p, hd2.from || hd2.to ? hd2 : null)).length;
+      const asideN = [...state.products.values()].filter((p) => matchesFilter(p, 'aside')).length;
       clear(body).append(
         h('h2', null, '👁 表示する商品'),
-        h('p', { class: 'muted small' }, 'チェックを外した判断・出品先の商品を一覧から隠します（いくつでも）。出品先が複数ある商品は、どれか1つでも表示中なら出ます。上の「出さない」「→ジモティー」などのチップを選んだときは、その分は隠しません。'),
+        h('p', { class: 'muted small' }, 'チェックを外した判断・出品先・一覧の商品を一覧から隠します（いくつでも）。出品先や一覧が複数ある商品は、どれか1つでも表示中なら出ます。上の「出さない」「→ジモティー」などのチップを選んだときは、その分は隠しません。'),
+        h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px', margin: '8px 0' } },
+          h('button', { class: 'btn small', onclick: () => { setHidden([...new Set([...hd, 'no_stock', 'no_sell'])], ht); render(); } }, '在庫なし・出さないを隠す'),
+          h('button', { class: 'btn small', onclick: () => { setHidden([...new Set([...hd, 'no_stock'])], ht); render(); } }, '在庫なしだけ隠す'),
+          h('button', { class: 'btn small', onclick: () => { setHidden([...new Set([...hd, 'no_sell'])], ht); render(); } }, '出さないだけ隠す')),
         h('h3', { class: 'small', style: { margin: '12px 0 6px' } }, '出品判断'),
         h('div', { class: 'show-grid' }, decs.map((id) => btn(!hd.includes(id), decLabel(id), all.filter((p) => p.decision === id).length, () => toggle(hd, id, 'dec')))),
         h('h3', { class: 'small', style: { margin: '14px 0 6px' } }, '出品先'),
         h('div', { class: 'show-grid' }, tgts.map((id) => btn(!ht.includes(id), tgtLabel(id), tgtCount(id), () => toggle(ht, id, 'tgt')))),
+        h('h3', { class: 'small', style: { margin: '14px 0 6px' } }, '観察ブラウザの一覧'),
+        h('div', { class: 'show-grid' }, lists.map((id) => btn(!hl.includes(id), listLabel(id), listCount(id), () => {
+          setHide('hideLists', hl.includes(id) ? hl.filter((x) => x !== id) : [...hl, id]);
+          render();
+        }))),
+        h('h3', { class: 'small', style: { margin: '14px 0 6px' } }, '日付の範囲で隠す'),
+        h('p', { class: 'muted small' }, 'この日付が範囲に入る商品を隠します（片方だけでも可。その日付がない商品は隠しません）。'),
+        h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px', alignItems: 'center' } },
+          h('select', { 'aria-label': '日付の種類', onchange: (e) => setDate({ kind: e.target.value }) },
+            DATE_KINDS.map((k) => h('option', { value: k.field, selected: k.field === hd2.kind }, k.long))),
+          h('input', { type: 'date', value: hd2.from, 'aria-label': 'ここから', onchange: (e) => setDate({ from: e.target.value }) }),
+          h('span', null, '〜'),
+          h('input', { type: 'date', value: hd2.to, 'aria-label': 'ここまで', onchange: (e) => setDate({ to: e.target.value }) }),
+          (hd2.from || hd2.to) && h('span', { class: 'muted small' }, `${inRange}件を隠す`),
+          (hd2.from || hd2.to) && h('button', { class: 'btn small ghost', onclick: () => setDate({ from: '', to: '' }) }, '解除')),
+        h('h3', { class: 'small', style: { margin: '14px 0 6px' } }, '別枠'),
+        h('p', { class: 'muted small' }, `選んだ商品を一覧から外して別枠に置けます（詳細の ⋯ または「選択」から「別枠へ」）。今は ${asideN}件。`),
+        asideN > 0 ? h('button', { class: 'btn small', onclick: () => { close(); setPref('filter', 'aside'); renderAll(); toTop(); } }, '別枠の商品を見る') : '',
         h('div', { class: 'actions sticky-actions' },
           h('button', { class: 'btn primary', onclick: () => { close(); toTop(); } }, `${shownNow}件を表示`),
-          hidingOn() && h('button', { class: 'btn', onclick: () => { setHidden([], []); render(); } }, 'すべて表示')));
+          hidingOn() && h('button', { class: 'btn', onclick: () => { clearHidden(); render(); } }, 'すべて表示')));
     };
     render();
     return body;
@@ -341,7 +390,7 @@ function viewSummary(v) {
   if (v.dateFrom || v.dateTo || v.dateNone) parts.push(`${dk.label} ${rangeLabel(v, dk.label)}`);
   if (v.priceUnknown) parts.push('Amazon価格なし');
   else if (v.priceMin !== '' && v.priceMin != null || v.priceMax !== '' && v.priceMax != null) parts.push(`Amazon ${yenOr(v.priceMin)}〜${yenOr(v.priceMax)}`);
-  if ((v.hideDec || []).length || (v.hideTgt || []).length) parts.push(`非表示: ${hiddenLabels(v).join('・')}`);
+  if (hiddenLabels(v).length) parts.push(`非表示: ${hiddenLabels(v).join('・')}`);
   for (const c of v.conds || []) parts.push(condLabel(c));
   parts.push(`${d.label} ${d.dir[v.desc ? 1 : 0]}`);
   return parts.join(' · ');
@@ -553,6 +602,8 @@ function badgesFor(p) {
   if (p.proposals) b.push(h('span', { class: 'badge ai' }, `AI提案 ${p.proposals}`));
   if (p.price != null) b.push(h('span', { class: 'badge' }, yen(p.price)));
   if (p.shootPlan) b.push(h('span', { class: 'badge info' }, '撮影予定'));
+  if (p.asideAt) b.push(h('span', { class: 'badge' }, '別枠'));
+  b.push(...browserBadges(p));
   return b;
 }
 
@@ -963,6 +1014,9 @@ function renderBulk() {
       h('button', { class: 'btn small primary', onclick: run('queue', null, 'メルカリ転記を依頼（出品待ち）') }, '🛒 転記依頼'),
       h('button', { class: 'btn small', onclick: run('unqueue', null, '出品待ちから戻す') }, '転記取消'),
       h('button', { class: 'btn small', onclick: () => ids.length && (location.href = `/api/export.zip?ids=${ids.join(',')}`) }, '書き出し'),
+      state.prefs.filter === 'aside'
+        ? h('button', { class: 'btn small', onclick: run('aside', false, '別枠から一覧に戻す') }, '別枠から戻す')
+        : h('button', { class: 'btn small', onclick: run('aside', true, '別枠へ移す') }, '別枠へ'),
       state.prefs.filter === 'archived'
         ? h('button', { class: 'btn small', onclick: run('archive', false, 'アーカイブから戻す') }, 'アーカイブ解除')
         : h('button', { class: 'btn small', onclick: run('archive', true, 'アーカイブ') }, 'アーカイブ'),
@@ -1039,6 +1093,7 @@ async function mainMenu() {
     { label: '📋 商品リストを一括登録', value: '#/import' },
     { label: '📅 日付を一括反映（既存商品）', value: '#/dates' },
     { label: '🖼 公式画像を ZIP でダウンロード', value: 'official' },
+    { label: '🔭 観察ブラウザの画像取得の状況', value: 'browser' },
     { label: '📸 純正カメラ連携の設定', value: 'native' },
     { label: '⚙️ 設定・AI接続・書き出し', value: '#/settings' },
     { label: '↻ 再読み込み', value: 'reload' },
@@ -1048,6 +1103,7 @@ async function mainMenu() {
     toast('更新しました');
   } else if (v === 'official') openOfficialZip();
   else if (v === 'native') openNativeSetup();
+  else if (v === 'browser') openBrowserSync();
   else if (v) location.hash = v;
 }
 

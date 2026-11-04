@@ -167,7 +167,23 @@ function topControls(p) {
       h('label', { class: `small stock-unknown ${p.stockUnknownAt ? 'on' : ''}`, title: p.stockUnknownAt ? `在庫状況「不明」（${p.stockUnknownAt.slice(0, 10)}）` : '' },
         h('input', { type: 'checkbox', checked: !!p.stockUnknownAt, onchange: (e) => act(api.post(url('/stock-unknown'), { on: e.target.checked })) }), '在庫状況「不明」'),
       h('label', { class: `small open-check ${p.openCheckedAt ? 'on' : ''}`, title: p.openCheckedAt ? `開封チェック済み（${p.openCheckedAt.slice(0, 10)}）` : '' },
-        h('input', { type: 'checkbox', checked: !!p.openCheckedAt, onchange: (e) => act(api.post(url('/open-check'), { on: e.target.checked })) }), '開封チェック済み')));
+        h('input', { type: 'checkbox', checked: !!p.openCheckedAt, onchange: (e) => act(api.post(url('/open-check'), { on: e.target.checked })) }), '開封チェック済み'),
+      h('label', { class: 'small', title: '一覧の「すべて」などから外して「別枠」に置く', style: { display: 'flex', alignItems: 'center', gap: '4px' } },
+        h('input', { type: 'checkbox', checked: !!p.asideAt, onchange: (e) => act(api.post(url('/aside'), { on: e.target.checked })) }), '別枠')),
+    browserInfo(p));
+}
+
+/** 観察ブラウザ連携: which lists the product is in, its Vine order date and the fetched picture. */
+function browserInfo(p) {
+  const b = p.summary.browser;
+  if (!b?.lists?.length) return null;
+  const labels = b.lists.map((id) => (state.meta.browserLists || []).find((l) => l.id === id)?.label || id);
+  const st = b.image?.status || 'none';
+  return h('div', { class: 'small', style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '8px' } },
+    b.image?.url && h('img', { src: b.image.url, alt: '', style: { width: '48px', height: '48px', objectFit: 'contain', borderRadius: '6px', background: '#fff' } }),
+    h('span', null, `🔭 ${labels.join('・')}`),
+    b.vineOrderDate && h('span', { class: 'muted' }, `Vine注文日 ${b.vineOrderDate}`),
+    h('span', { class: 'muted' }, `画像 ${state.meta.imageStates?.[st] || st}`));
 }
 
 function readinessCard(p) {

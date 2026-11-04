@@ -661,3 +661,37 @@ test('最新在庫チェック・在庫状況「不明」: ユーザーだけが
   store.setStockUnknown(id, 'user', false);
   assert.equal(store.get(id).stockUnknownAt, null);
 });
+
+test('別枠: ユーザーだけが移せて、「すべて」から外れ「別枠」で見える。QC はやり直しにならない', async () => {
+  const { matchesFilter } = await import('../server/mcp.js');
+  const store = new Store(tmp());
+  const id = store.create({ name: 'x' }).product.id;
+  const rev = store.get(id).rev;
+  assert.throws(() => store.setAside(id, 'claude', true), /ユーザーのみ/);
+  store.setAside(id, 'user', true);
+  const sm = summary(store.get(id), store.settings);
+  assert.ok(sm.asideAt);
+  assert.equal(store.get(id).rev, rev);
+  assert.equal(matchesFilter(sm, 'all'), false);
+  assert.equal(matchesFilter(sm, 'aside'), true);
+  store.setAside(id, 'user', false);
+  assert.equal(matchesFilter(summary(store.get(id), store.settings), 'all'), true);
+});
+
+test('観察ブラウザの一覧: 連携が書け、Vine注文日はVineの一覧から取り、同じ内容なら履歴を増やさない', () => {
+  const store = new Store(tmp());
+  const id = store.create({ name: 'x' }).product.id;
+  const info = { asin: 'b0abcdefgh', lists: { orders: { ordered: '2026-09-01' }, reviewPending: { ordered: '2026/10/29', delivered: '' } } };
+  store.setBrowserInfo(id, 'import', info);
+  const b = store.get(id).browser;
+  assert.equal(b.asin, 'B0ABCDEFGH');
+  assert.equal(b.vineOrderDate, '2026-10-29');
+  assert.deepEqual(Object.keys(b.lists).sort(), ['orders', 'reviewPending']);
+  const n = store.history(id).length;
+  store.setBrowserInfo(id, 'import', info);
+  assert.equal(store.history(id).length, n);
+  assert.throws(() => store.setBrowserInfo(id, 'import', { asin: 'B0ABCDEFGH', lists: { wishlist: {} } }), /不明な一覧/);
+  assert.throws(() => store.setBrowserInfo(id, 'import', { asin: 'x', lists: {} }), /ASIN/);
+  store.setBrowserInfo(id, 'import', null);
+  assert.equal(store.get(id).browser, null);
+});

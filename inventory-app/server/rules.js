@@ -270,6 +270,7 @@ export function summary(p, settings) {
     openCheckedAt: p.openCheckedAt || null,
     stockCheckedAt: p.stockCheckedAt || null,
     stockUnknownAt: p.stockUnknownAt || null,
+    asideAt: p.asideAt || null,
     status: st,
     thumb: main ? photoUrl(p, main, 'thumb') : null,
     thumbIsReference: !!main && main.kind === 'reference',

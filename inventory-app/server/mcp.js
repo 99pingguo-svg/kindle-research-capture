@@ -43,7 +43,7 @@ const s = {
   enumOf: (values, description) => ({ type: 'string', enum: values, description }),
 };
 
-const LIST_FILTERS = ['all', 'sell', 'draft', 'undecided', 'hold', 'no_sell', 'no_stock', 'needs_photos', 'shot_today', 'shoot_plan', 'open_checked', 'not_open_checked', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'trading', 'sold', 'to_mercari', 'to_jmty', 'to_yahoo', 'to_paypay', 'to_rakuma', 'to_flea', 'research_jmty', 'research_3000', 'research_2300', 'archived', 'trash'];
+const LIST_FILTERS = ['all', 'sell', 'draft', 'undecided', 'hold', 'no_sell', 'no_stock', 'needs_photos', 'shot_today', 'shoot_plan', 'open_checked', 'not_open_checked', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'trading', 'sold', 'to_mercari', 'to_jmty', 'to_yahoo', 'to_paypay', 'to_rakuma', 'to_flea', 'research_jmty', 'research_3000', 'research_2300', 'aside', 'archived', 'trash'];
 
 function today() {
   const d = new Date();
@@ -56,7 +56,7 @@ const isToday = (iso) => {
 };
 
 export function matchesFilter(sm, filter) {
-  const active = !sm.trashedAt && !sm.archived;
+  const active = !sm.trashedAt && !sm.archived && !sm.asideAt;
   switch (filter) {
     case 'all': return active;
     case 'sell': return active && sm.decision === 'sell' && sm.stage !== 'sold';
@@ -91,6 +91,7 @@ export function matchesFilter(sm, filter) {
     case 'research_3000': return active && /3000円以上/.test(sm.research?.group || '');
     case 'research_2300': return active && /2300〜2999円/.test(sm.research?.group || '');
     case 'sold': return !sm.trashedAt && sm.stage === 'sold';
+    case 'aside': return !sm.trashedAt && !sm.archived && !!sm.asideAt;
     case 'archived': return !sm.trashedAt && sm.archived;
     case 'trash': return !!sm.trashedAt;
     default: return active;

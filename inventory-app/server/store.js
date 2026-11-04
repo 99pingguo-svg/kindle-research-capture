@@ -15,6 +15,7 @@ import {
 } from './schema.js';
 import { readiness, actualPhotos, listablePhotos, livePhotos, findDuplicates } from './rules.js';
 import { isFood } from './food.js';
+import { normalizeBrowserInfo, sameBrowserInfo } from './browser-sync.js';
 
 const VERSIONS_KEPT = 100;
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
@@ -75,6 +76,8 @@ function newProduct(id, at, settings) {
     openCheckedAt: null, // 開封して中身を確かめた日時（ユーザーのみ）
     stockCheckedAt: null, // 現在の最新在庫チェック日時（ユーザーのみ）
     stockUnknownAt: null, // 在庫状況「不明」チェック日時（ユーザーのみ）
+    asideAt: null, // 別枠に移した日時（ユーザーのみ）。一覧の「すべて」などから外し、「別枠」チップで見る
+    browser: null, // 観察ブラウザ連携: { asin, lists: { vineOrders|reviewPending|reviewed|orders: { ordered, delivered } }, vineOrderDate, syncedAt }
     lastPhotoAt: null,
     shotDoneAt: null,
     links: [],
@@ -590,6 +593,26 @@ export class Store extends EventEmitter {
       if (!!p.openCheckedAt === !!on) return;
       p.openCheckedAt = on ? nowIso() : null;
       ctx.note(on ? '開封チェック済みにした' : '開封チェックを外した');
+    });
+  }
+
+  /** 別枠: the user moves a product out of the normal list (still kept and processed; shown under 「別枠」). */
+  setAside(id, actor, on) {
+    forbidAi(actor, '別枠への移動');
+    return this.mutate(id, actor, 'aside', (p, ctx) => {
+      if (!!p.asideAt === !!on) return;
+      p.asideAt = on ? nowIso() : null;
+      ctx.note(on ? '別枠に移した' : '別枠から一覧に戻した');
+    });
+  }
+
+  /** Which 観察ブラウザ lists the product is in (written by the Mac sync). Organising data only: no QC redo. */
+  setBrowserInfo(id, actor, info) {
+    const next = info ? normalizeBrowserInfo(info) : null;
+    return this.mutate(id, actor, 'browser', (p, ctx) => {
+      if (next ? sameBrowserInfo(p.browser, next) : !p.browser) return;
+      p.browser = next;
+      ctx.note(next ? `観察ブラウザの一覧: ${Object.keys(next.lists).length ? Object.keys(next.lists).join('・') : 'なし'}` : '観察ブラウザの情報を外した');
     });
   }
 

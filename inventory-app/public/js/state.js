@@ -16,6 +16,8 @@ const defaults = {
   conds: [],
   hideDec: [],
   hideTgt: [],
+  hideLists: [], // 観察ブラウザの一覧（vineOrders…orders, none=どれにも入っていない）で隠す
+  hideDate: { kind: 'vineOrderDate', from: '', to: '' }, // この日付の範囲に入る商品を隠す（両方空なら隠さない）
   camAutoNext: true,
   camRequestAi: true,
   camKeepTag: false,
@@ -134,6 +136,7 @@ export const FILTERS = [
   { id: 'hold', label: '保留' },
   { id: 'no_sell', label: '出さない' },
   { id: 'no_stock', label: '在庫なし' },
+  { id: 'aside', label: '別枠' },
   { id: 'archived', label: 'アーカイブ' },
   { id: 'trash', label: 'ゴミ箱' },
 ];
@@ -142,9 +145,10 @@ const isToday = (iso) => !!iso && new Date(iso).toDateString() === new Date().to
 
 /** Same semantics as server/mcp.js matchesFilter so the AI and the UI agree. */
 export function matchesFilter(sm, filter) {
-  const active = !sm.trashedAt && !sm.archived;
+  const active = !sm.trashedAt && !sm.archived && !sm.asideAt;
   switch (filter) {
     case 'all': return active;
+    case 'aside': return !sm.trashedAt && !sm.archived && !!sm.asideAt;
     case 'sell': return active && sm.decision === 'sell' && sm.stage !== 'sold';
     case 'draft': return active && sm.decision === 'draft' && sm.stage !== 'sold';
     case 'undecided': return active && sm.decision === 'undecided';
@@ -190,6 +194,7 @@ export const DATE_KINDS = [
   { field: 'itemDate', label: '日付', long: '日付（代表）' },
   { field: 'orderDate', label: '注文日', long: '注文日・購入日' },
   { field: 'arrivalDate', label: '到着日', long: '到着日' },
+  { field: 'vineOrderDate', label: 'Vine注文日', long: 'Vine注文日（観察ブラウザ）' },
 ];
 export const dateKindOf = (field = state.prefs.dateKind) => DATE_KINDS.find((k) => k.field === field) || DATE_KINDS[0];
 
@@ -201,6 +206,7 @@ export const SORTS = [
   { id: 'date', label: '日付（代表）', date: 'itemDate', desc: true, dir: ['古い順', '新しい順'] },
   { id: 'order', label: '注文日・購入日', date: 'orderDate', desc: true, dir: ['古い順', '新しい順'] },
   { id: 'arrival', label: '到着日', date: 'arrivalDate', desc: true, dir: ['古い順', '新しい順'] },
+  { id: 'vine', label: 'Vine注文日', date: 'vineOrderDate', desc: true, dir: ['古い順', '新しい順'] },
   { id: 'amazon', label: 'Amazon価格', desc: true, dir: ['安い順', '高い順'], value: (p) => p.research?.amazonPrice ?? null },
   { id: 'net', label: 'メルカリ手取り', desc: true, dir: ['少ない順', '多い順'], value: (p) => p.net?.net ?? null },
   { id: 'market', label: 'メルカリ相場', desc: true, dir: ['安い順', '高い順'], value: (p) => p.market?.median ?? null },
@@ -250,7 +256,7 @@ export const NET_BANDS = [
 
 /**
  * One condition "kind:id". Kinds: cat (種類) / dec (出品判断) / tgt (出品先) / photo / date (日付の有無) /
- * size / band (送料帯) / method (送り方) / market (相場) / net (手取り).
+ * size / band (送料帯) / method (送り方) / market (相場) / net (手取り) / list (観察ブラウザの一覧) / img (画像取得) / aside (別枠).
  */
 export function matchCond(p, cond) {
   const i = cond.indexOf(':');
@@ -271,6 +277,9 @@ export function matchCond(p, cond) {
     case 'ymarket': return id === 'todo' ? !p.market?.yahoo?.checkedAt : p.market?.yahoo?.matchType === id;
     case 'rmarket': return id === 'todo' ? !p.market?.rakuma?.checkedAt : p.market?.rakuma?.matchType === id;
     case 'pmarket': return id === 'todo' ? !p.market?.paypay?.checkedAt : p.market?.paypay?.matchType === id;
+    case 'list': return id === 'none' ? !p.browser?.lists?.length : !!p.browser?.lists?.includes(id);
+    case 'img': return (p.browser?.image?.status || (p.browser ? 'none' : '')) === id;
+    case 'aside': return id === 'on' ? !!p.asideAt : !p.asideAt;
     case 'net': {
       if (id === 'unknown') return p.net?.net == null;
       const b = NET_BANDS.find((x) => x.id === id);
@@ -290,13 +299,27 @@ export function shownByClass(p, f = state.prefs.filter) {
   const hd = state.prefs.hideDec || [];
   const ht = state.prefs.hideTgt || [];
   if (hd.length && !DECISION_CHIPS.includes(f) && hd.includes(p.decision)) return false;
+  const hl = state.prefs.hideLists || [];
+  if (hl.length) {
+    const lists = p.browser?.lists || [];
+    // In several lists: hidden only when every one of them is hidden (like 出品先).
+    if (lists.length ? lists.every((x) => hl.includes(x)) : hl.includes('none')) return false;
+  }
+  if (inHiddenDates(p)) return false;
   if (ht.length && !f.startsWith('to_')) {
     const t = p.targets || [];
     return t.length ? t.some((x) => !ht.includes(x)) : !ht.includes('none');
   }
   return true;
 }
-export const hidingOn = () => !!((state.prefs.hideDec || []).length || (state.prefs.hideTgt || []).length);
+/** 日付の範囲で隠す: the chosen date of the product falls inside [from, to] (an open end = no limit). Products without that date stay. */
+export function inHiddenDates(p, hd = state.prefs.hideDate) {
+  if (!hd || (!hd.from && !hd.to)) return false;
+  const v = p[hd.kind || 'vineOrderDate'];
+  return !!v && (!hd.from || v >= hd.from) && (!hd.to || v <= hd.to);
+}
+export const hideDateOn = (v = state.prefs) => !!(v.hideDate && (v.hideDate.from || v.hideDate.to));
+export const hidingOn = () => !!((state.prefs.hideDec || []).length || (state.prefs.hideTgt || []).length || (state.prefs.hideLists || []).length || hideDateOn());
 
 /** Conditions of the same kind are alternatives (OR); different kinds must all hold (AND). */
 export function inConds(p, conds = state.prefs.conds) {
@@ -324,7 +347,7 @@ export function productsForCalendar() {
 }
 
 /** The prefs that make up a saved view. */
-export const VIEW_KEYS = ['filter', 'sort', 'desc', 'dateKind', 'dateFrom', 'dateTo', 'dateNone', 'priceMin', 'priceMax', 'priceUnknown', 'conds', 'hideDec', 'hideTgt'];
+export const VIEW_KEYS = ['filter', 'sort', 'desc', 'dateKind', 'dateFrom', 'dateTo', 'dateNone', 'priceMin', 'priceMax', 'priceUnknown', 'conds', 'hideDec', 'hideTgt', 'hideLists', 'hideDate'];
 export const currentView = () => Object.fromEntries(VIEW_KEYS.map((k) => [k, state.prefs[k] ?? defaults[k] ?? '']));
 export function applyView(view) {
   for (const k of VIEW_KEYS) setPref(k, k in view ? view[k] : defaults[k] ?? '');
