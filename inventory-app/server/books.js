@@ -10,6 +10,8 @@ import path from 'node:path';
 import { AppError, nowIso, readJson, writeJson, appendJsonl, readJsonl } from './util.js';
 import { normalizeDate } from './schema.js';
 import { isVineProvided } from './browser-sync.js';
+import { receiptDateOf } from './prices.js';
+import { ruleSuggest, aiSuggest, localAiReady, matchProduct, FLAGS } from './classify.js';
 
 export const BOOK_KINDS = [
   { id: 'vine_receipt', label: 'Vine受領' },
@@ -29,6 +31,10 @@ const KIND_IDS = BOOK_KINDS.map((k) => k.id);
 const TAX_KEYS = ['claim', 'actual', 'general', 'expert', 'filed']; // 主張・実際・一般的な取扱い・専門家の確認・申告で採用
 const VINE_DEBIT = 'Vine受領品';
 const VINE_CREDIT = '現物収入（Vine）';
+// 事実の欄: 金額（払った・受け取った額／売却なら販売価格）、表示価格とその確認日・出どころ、売却の手数料・送料・手取り・取得原価
+const FACT_NUM = ['amount', 'listPrice', 'fee', 'shipping', 'proceeds', 'cost'];
+const FACT_TEXT = { listPriceAt: 30, listPriceSource: 100, note: 2000, channel: 20 };
+const CHANNEL_NAMES = { mercari: 'メルカリ', jmty: 'ジモティー', yahoo: 'ヤフオク', paypay: 'ヤフーフリマ', rakuma: 'ラクマ', flea: 'フリマ' };
 
 const isUser = (actor) => actor === 'user';
 const forbidAi = (actor, what) => { if (!isUser(actor)) throw new AppError(403, `${what}はユーザーのみ実行できます（AIの権限外）`, 'forbidden'); };
@@ -142,7 +148,7 @@ export class Books {
     const entry = {
       id: this.newId(date), kind, date,
       productId: text(input.productId, 20), asin: text(input.asin, 10).toUpperCase(), title: text(input.title, 200),
-      facts: { amount: yen(input.amount), listPrice: yen(input.listPrice), listPriceAt: text(input.listPriceAt, 30), listPriceSource: text(input.listPriceSource, 100), note: text(input.note) },
+      facts: { ...Object.fromEntries(FACT_NUM.map((k) => [k, yen(input[k])])), ...Object.fromEntries(Object.entries(FACT_TEXT).map(([k, n]) => [k, text(input[k], n)])) },
       valuation: { value: yen(input.value), basis: text(input.basis, 500) },
       journal: cleanJournal(input.journal),
       tax: Object.fromEntries(TAX_KEYS.map((k) => [k, text(input.tax?.[k])])),
@@ -164,8 +170,8 @@ export class Books {
     if (patch.date !== undefined) e.date = normalizeDate(patch.date) || (() => { throw new AppError(400, '日付の形式が不正です'); })();
     if (patch.kind !== undefined) { if (!KIND_IDS.includes(patch.kind)) throw new AppError(400, '記録の種類が不正です'); e.kind = patch.kind; }
     for (const k of ['productId', 'asin', 'title']) if (patch[k] !== undefined) e[k] = text(patch[k], k === 'title' ? 200 : 20);
-    for (const k of ['amount', 'listPrice']) if (patch.facts?.[k] !== undefined) e.facts[k] = yen(patch.facts[k]);
-    for (const k of ['listPriceAt', 'listPriceSource', 'note']) if (patch.facts?.[k] !== undefined) e.facts[k] = text(patch.facts[k]);
+    for (const k of FACT_NUM) if (patch.facts?.[k] !== undefined) e.facts[k] = yen(patch.facts[k]);
+    for (const [k, n] of Object.entries(FACT_TEXT)) if (patch.facts?.[k] !== undefined) e.facts[k] = text(patch.facts[k], n);
     if (patch.valuation?.value !== undefined) e.valuation.value = yen(patch.valuation.value);
     if (patch.valuation?.basis !== undefined) e.valuation.basis = text(patch.valuation.basis, 500);
     if (patch.journal !== undefined) { e.journal = cleanJournal(patch.journal); e.journalEdited = true; }
@@ -201,7 +207,7 @@ export class Books {
    * and one レビュー投稿 record when it is in レビュー済み. Facts are refreshed only while the record is still 要確認.
    * Returns { created, updated }.
    */
-  syncFromProducts(products, actor = 'import') {
+  syncFromProducts(products, actor = 'import', prices = null) {
     let created = 0, updated = 0;
     const byKey = new Map(this.db.entries.filter((e) => e.autoKey).map((e) => [e.autoKey, e]));
     const put = (key, make) => {
@@ -227,21 +233,41 @@ export class Books {
       updated++;
     };
     for (const p of products) {
+      if (!p.trashedAt) for (const [ch, c] of Object.entries(p.channels || {})) {
+        if (c?.status !== 'sold') continue;
+        // 台帳で「売却済み」になった出品先: 1商品1出品先1回。手数料・送料は売上の取り込み（取引画面の値）で埋まる。
+        put(`sold:${p.id}:${ch}`, () => {
+          const date = String(c.soldAt || '').slice(0, 10);
+          if (!date) return null;
+          const amount = c.soldPrice ?? p.soldPrice ?? null;
+          return {
+            kind: 'sold', date, productId: p.id, asin: p.browser?.asin || '', title: p.name || '',
+            facts: { amount, listPrice: null, fee: null, shipping: null, proceeds: null, cost: p.purchasePrice ?? null, listPriceAt: '', listPriceSource: '', channel: ch,
+              note: [`${CHANNEL_NAMES[ch] || ch}で売却（台帳の出品先の状態から）`, isVineProvided(p) ? 'Vine提供品として記録されている商品（規約で販売不可）。Vine とは別に入手した個体か確認' : ''].filter(Boolean).join('。') },
+            valuation: { value: null, basis: '' }, journal: [], tax: Object.fromEntries(TAX_KEYS.map((k) => [k, ''])),
+            evidence: [c.itemUrl && { label: `${CHANNEL_NAMES[ch] || ch}の商品ページ`, ref: c.itemUrl }, { label: '台帳の商品', ref: `#/p/${p.id}` }].filter(Boolean),
+          };
+        });
+      }
       if (p.trashedAt || !isVineProvided(p)) continue;
       const b = p.browser;
       const lists = b.lists || {};
-      const vineOrdered = ['vineOrders', 'reviewPending', 'reviewed'].map((k) => lists[k]?.ordered).find(Boolean) || '';
       const arrived = p.arrivalDate || ['vineOrders', 'reviewPending', 'reviewed'].map((k) => lists[k]?.delivered).find(Boolean) || '';
-      const price = p.amazon?.price ?? p.research?.amazonPrice ?? null;
       put(`vine_receipt:${p.id}`, () => {
-        const date = arrived || vineOrdered || p.orderDate || '';
+        const date = receiptDateOf(p);
         if (!date) return null;
+        // 価格の履歴があれば受領日にいちばん近い確認の値（前14日・後14日まで）。なければ台帳の Amazon 情報の値。
+        const seen = prices?.near(b.asin, date);
+        const fallback = p.amazon?.price ?? p.research?.amazonPrice ?? null;
+        const price = seen?.price ?? fallback;
+        const at = seen?.price != null ? seen.at.slice(0, 10) : price != null ? (p.amazon?.fetchedAt || p.research?.checkedDate || '').slice(0, 10) : '';
+        const range = seen?.range && seen.range.count > 1 && seen.range.min !== seen.range.max ? `受領日の前後30日の表示価格 ${seen.range.min}〜${seen.range.max}円（${seen.range.count}回確認）` : '';
         return {
           kind: 'vine_receipt', date, productId: p.id, asin: b.asin, title: p.name || '',
           facts: {
-            amount: null, listPrice: price, listPriceAt: price != null ? (p.amazon?.fetchedAt || '').slice(0, 10) : '',
-            listPriceSource: price != null ? 'Amazon商品ページの表示価格（ログアウト状態で自動取得）' : '',
-            note: [arrived ? '' : '受領日（到着日）が不明のため Vine注文日で仮置き', price == null ? '表示価格が取れていない（要確認）' : '確認日の表示価格。受領時の価格と違うことがある'].filter(Boolean).join('。'),
+            amount: null, listPrice: price, listPriceAt: at,
+            listPriceSource: price != null ? `Amazon商品ページの表示価格（ログアウト状態で自動取得${seen?.price != null ? `・受領日の${seen.side === 'before' ? '前' : '後'}の確認` : ''}）` : '',
+            note: [arrived ? '' : '受領日（到着日）が不明のため Vine注文日で仮置き', price == null ? '表示価格が取れていない（要確認）' : seen?.price != null ? '' : '確認日の表示価格。受領時の価格と違うことがある', range].filter(Boolean).join('。'),
           },
           valuation: { value: null, basis: '' },
           // 仮の仕訳: 表示価格を仮の金額にしたもの。税務上の評価額・計上の要否は未確定（要確認）。経費は自動で作らない。
@@ -261,6 +287,115 @@ export class Books {
     }
     if (created || updated) this.save();
     return { created, updated };
+  }
+
+  /**
+   * メルカリの売上（parseMercariSales の行）を「売却」の記録にする。同じ取引は2回入れない（商品ID・取引の印で照合）。
+   * 台帳の「売却済み」から作った記録（sold:<商品>:mercari）が要確認ならそこへ手数料・送料・手取りを入れる。
+   * dryRun なら何も書かずに、どうなるかだけ返す。
+   */
+  importSales(rows, products, actor, { dryRun = false } = {}) {
+    const result = [];
+    const byImport = new Map(this.db.entries.filter((e) => e.facts?.importKey).map((e) => [e.facts.importKey, e]));
+    for (const r of rows) {
+      if (!r.title || (r.price == null && r.proceeds == null)) { result.push({ ...r, action: 'skip', why: '商品名か金額が読めない' }); continue; }
+      const key = r.itemId ? `mercari:${r.itemId}` : `mercari:${r.date}|${r.title.normalize('NFKC').replace(/\s+/g, '').slice(0, 40)}|${r.price ?? r.proceeds}`;
+      const match = matchProduct(products, r.title, { price: r.price, channel: 'mercari' });
+      // A sale is never tied to a Vine-provided product by itself: the same item bought separately is a different individual.
+      const vine = !!match.productId && isVineProvided(products.find((p) => p.id === match.productId));
+      const link = vine ? '' : match.productId;
+      const facts = { amount: r.price, fee: r.fee, shipping: r.shipping, proceeds: r.proceeds, channel: 'mercari', importKey: key };
+      const dup = byImport.get(key);
+      const auto = link && this.db.entries.find((e) => e.autoKey === `sold:${link}:mercari`);
+      const row = { ...r, key, match, link, vine };
+      if (dup) { result.push({ ...row, action: 'duplicate', id: dup.id }); continue; }
+      if (auto && auto.status !== 'review') { result.push({ ...row, action: 'locked', id: auto.id, why: '同じ売却の記録が承認済み・載せないになっている' }); continue; }
+      if (auto && !auto.facts.importKey) {
+        result.push({ ...row, action: 'update', id: auto.id });
+        if (dryRun) continue;
+        const before = clone(auto);
+        Object.assign(auto.facts, Object.fromEntries(Object.entries(facts).filter(([, v]) => v != null)));
+        if (r.date) auto.date = normalizeDate(r.date) || auto.date;
+        auto.facts.note = [auto.facts.note, `メルカリの売上（${r.format}）から手数料・送料・手取りを取り込み`].filter(Boolean).join('。');
+        auto.factsEdited = true; // 取引画面の値を優先し、連携で上書きしない
+        auto.updatedAt = nowIso();
+        byImport.set(key, auto);
+        this.audit(actor, auto, 'import:mercari', before);
+        continue;
+      }
+      result.push({ ...row, action: 'new' });
+      if (dryRun) continue;
+      const date = normalizeDate(r.date || '') || nowIso().slice(0, 10);
+      const entry = {
+        id: this.newId(date), kind: 'sold', date, productId: link, asin: '', title: r.title,
+        facts: { amount: null, listPrice: null, fee: null, shipping: null, proceeds: null, cost: null, listPriceAt: '', listPriceSource: '', channel: 'mercari', ...facts,
+          cost: link ? products.find((p) => p.id === link)?.purchasePrice ?? null : null,
+          note: [`メルカリの売上（${r.format === 'table' ? '表' : '貼り付けた文字'}）から取り込み`, r.date ? '' : '日付が読めないため取り込んだ日で仮置き',
+            vine ? `Vine提供品（${match.productId}）と名前が一致（規約で販売不可）。Vine とは別に入手した個体なら、その入手の記録と結び付けてください` : ''].filter(Boolean).join('。') },
+        valuation: { value: null, basis: '' }, journal: [], tax: Object.fromEntries(TAX_KEYS.map((k) => [k, ''])),
+        evidence: [r.itemId && { label: 'メルカリの商品', ref: `https://jp.mercari.com/item/${r.itemId}` }, link && { label: '台帳の商品', ref: `#/p/${link}` }].filter(Boolean),
+        status: 'review', autoKey: null, source: 'import:mercari', createdAt: nowIso(), updatedAt: nowIso(), approvedAt: null, approvedBy: null, excludedReason: '',
+      };
+      this.db.entries.push(entry);
+      byImport.set(key, entry);
+      this.audit(actor, entry, 'import:mercari');
+    }
+    if (!dryRun && result.some((x) => ['new', 'update'].includes(x.action))) this.save();
+    return { rows: result, counts: Object.fromEntries(['new', 'update', 'duplicate', 'locked', 'skip'].map((a) => [a, result.filter((x) => x.action === a).length])) };
+  }
+
+  /** An AI or rule suggestion on a 要確認 record. It never changes the record itself. */
+  setSuggestion(id, suggestion, actor) {
+    const e = this.get(id);
+    if (e.status !== 'review') return e;
+    const before = clone(e);
+    e.suggestion = { ...suggestion, flags: [...new Set(suggestion.flags || [])].filter((f) => FLAGS[f]), at: nowIso() };
+    if (JSON.stringify(before.suggestion && { ...before.suggestion, at: '' }) === JSON.stringify({ ...e.suggestion, at: '' })) { e.suggestion = before.suggestion; return e; }
+    this.audit(actor, e, 'suggest', before);
+    return e;
+  }
+
+  /** The user takes the suggestion: kind, journal and the matched product go into the record. It stays 要確認. */
+  applySuggestion(id, actor) {
+    forbidAi(actor, '分類の候補を使う操作');
+    const e = this.get(id);
+    if (e.status !== 'review') throw new AppError(409, '要確認の記録だけに使えます');
+    const sug = e.suggestion;
+    if (!sug) throw new AppError(400, 'この記録には候補がありません');
+    const before = clone(e);
+    if (sug.kind && KIND_IDS.includes(sug.kind)) e.kind = sug.kind;
+    if (sug.journal?.length) { e.journal = cleanJournal(sug.journal); e.journalEdited = true; }
+    if (sug.productId && !e.productId) e.productId = sug.productId;
+    e.suggestion = { ...sug, appliedAt: nowIso() };
+    e.updatedAt = nowIso();
+    this.save();
+    this.audit(actor, e, 'apply-suggestion', before);
+    return e;
+  }
+
+  /**
+   * Suggestions for every 要確認 record that has none yet (or whose record changed since): the rules first, then the local AI
+   * for what the rules cannot tell (at most `limit` per run). Returns counts.
+   */
+  async classify(products, { useAi = false, limit = 15, actor = 'system' } = {}) {
+    const todo = this.db.entries.filter((e) => e.status === 'review' && !['vine_receipt', 'review_published'].includes(e.kind)
+      && (!e.suggestion || (!e.suggestion.appliedAt && e.suggestion.at < e.updatedAt && e.suggestion.by === 'rules')));
+    let rules = 0, ai = 0, unknown = 0;
+    const left = [];
+    for (const e of todo) {
+      const s = ruleSuggest(e, products);
+      if (s) { this.setSuggestion(e.id, s, actor); rules++; } else if (!e.suggestion) left.push(e);
+    }
+    let aiNote = '';
+    if (useAi && left.length) {
+      if (!(await localAiReady())) aiNote = 'ローカルAI（Ollama の qwen3.5:4b）が動いていないので、決まりごとだけで出しました';
+      else for (const e of left.slice(0, limit)) {
+        const s = await aiSuggest(e).catch(() => null);
+        if (s) { this.setSuggestion(e.id, s, `local-ai`); ai++; } else unknown++;
+      }
+    }
+    if (rules || ai) this.save();
+    return { rules, ai, unknown, waiting: Math.max(0, left.length - (useAi ? limit : 0)), aiNote };
   }
 
   /** Year totals: per kind and status, the shown-price total of Vine receipts, and approved journal totals per account. */
@@ -286,7 +421,7 @@ export class Books {
   /** 仕訳帳＋記録の CSV (Excel で開ける UTF-8 BOM 付き)。 */
   csv(year) {
     const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const head = ['取引ID', '日付', '種類', '状態', '商品ID', 'ASIN', '商品名', '借方', '貸方', '金額', '表示価格', '表示価格の確認日', '価格の出どころ', '税務評価額', '評価の根拠', 'メモ', '利用者の主張', '実際の使用状況', '一般的な取扱い', '専門家の確認', '申告で採用'];
+    const head = ['取引ID', '日付', '種類', '状態', '商品ID', 'ASIN', '商品名', '借方', '貸方', '金額', '表示価格', '表示価格の確認日', '価格の出どころ', '販売手数料', '送料', '手取り', '取得原価', '税務評価額', '評価の根拠', 'メモ', '利用者の主張', '実際の使用状況', '一般的な取扱い', '専門家の確認', '申告で採用'];
     const out = [head.map(q).join(',')];
     for (const e of [...this.list({ year })].reverse()) {
       const debit = e.journal.filter((l) => l.side === 'debit');
@@ -295,7 +430,7 @@ export class Books {
       for (let i = 0; i < n; i++) {
         out.push([e.id, e.date, BOOK_KINDS.find((k) => k.id === e.kind)?.label, BOOK_STATUSES[e.status], e.productId, e.asin, e.title,
           debit[i]?.account, credit[i]?.account, debit[i]?.amount ?? credit[i]?.amount ?? e.facts.amount,
-          e.facts.listPrice, e.facts.listPriceAt, e.facts.listPriceSource, e.valuation.value, e.valuation.basis, e.facts.note,
+          e.facts.listPrice, e.facts.listPriceAt, e.facts.listPriceSource, e.facts.fee, e.facts.shipping, e.facts.proceeds, e.facts.cost, e.valuation.value, e.valuation.basis, e.facts.note,
           ...TAX_KEYS.map((k) => e.tax[k])].map(q).join(','));
       }
     }

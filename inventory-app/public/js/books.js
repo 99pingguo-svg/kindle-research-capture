@@ -84,8 +84,30 @@ export function editRecord(entry, done, base = {}) {
       h('button', { class: 'btn ghost', onclick: () => close() }, 'キャンセル'))));
 }
 
+const journalText = (lines) => lines.map((l) => `${l.side === 'debit' ? '借' : '貸'} ${l.account} ${yen(l.amount)}`).join(' / ');
+
+/** The rule / local-AI suggestion on a 要確認 record: what it proposes, what to check, and「候補を使う」(user only). */
+function suggestionBox(e, done) {
+  const s = e.suggestion;
+  if (!s || e.status !== 'review') return '';
+  const flags = (s.flags || []).map((f) => meta?.flags?.[f]).filter(Boolean);
+  const used = !!s.appliedAt;
+  return h('div', { class: 'notice small', style: { margin: '6px 0' } },
+    h('div', null, `${used ? '✓ 使った候補' : '💡 分類の候補'}（${s.by === 'rules' ? '決まりごと' : 'ローカルAI'}）: `,
+      [s.kind && s.kind !== e.kind && kindLabel(s.kind), s.journal?.length && journalText(s.journal), s.productId && !e.productId && `商品 ${s.productId}`].filter(Boolean).join('・') || '仕訳の候補なし'),
+    s.reason && h('div', { class: 'muted' }, s.reason),
+    !e.productId && s.candidates?.length ? h('div', { class: 'muted' }, '似た商品: ', ...s.candidates.map((c) => h('a', { href: `#/p/${c.productId}`, style: { marginRight: '6px' } }, `${c.productId} ${c.name || ''}（${c.score}）`))) : '',
+    ...flags.map((t) => h('div', { class: 'warn' }, `⚠ ${t}`)),
+    !used && (s.journal?.length || (s.productId && !e.productId) || (s.kind && s.kind !== e.kind)) ? h('button', {
+      class: 'btn small', style: { marginTop: '4px' },
+      onclick: async () => { try { await api.post(`/api/books/${encodeURIComponent(e.id)}/apply-suggestion`, {}); toast('候補を記録に入れました（要確認のまま）'); done(); } catch (err) { showError(err); } },
+    }, '候補を使う') : '');
+}
+
 function entryCard(e, done, { showProduct = true } = {}) {
-  const j = e.journal.length ? e.journal.map((l) => `${l.side === 'debit' ? '借' : '貸'} ${l.account} ${yen(l.amount)}`).join(' / ') : '仕訳なし';
+  const j = e.journal.length ? journalText(e.journal) : '仕訳なし';
+  const f = e.facts;
+  const sale = e.kind === 'sold' && [f.fee != null && `手数料 ${yen(f.fee)}`, f.shipping != null && `送料 ${yen(f.shipping)}`, f.proceeds != null && `手取り ${yen(f.proceeds)}`, f.cost != null && `取得原価 ${yen(f.cost)}`].filter(Boolean).join('・');
   return h('div', { class: 'card', style: { padding: '10px', margin: '6px 0' } },
     h('div', { class: 'row', style: { gap: '6px', alignItems: 'center', flexWrap: 'wrap' } },
       h('strong', null, e.date), h('span', { class: 'badge' }, kindLabel(e.kind)),
@@ -94,14 +116,62 @@ function entryCard(e, done, { showProduct = true } = {}) {
     h('div', null, showProduct && e.productId ? h('a', { href: `#/p/${e.productId}` }, `${e.productId} `) : '', e.title || ''),
     h('div', { class: 'small muted' },
       [e.facts.listPrice != null && `表示価格 ${yen(e.facts.listPrice)}${e.facts.listPriceAt ? `（${e.facts.listPriceAt}確認）` : ''}`,
-        e.facts.amount != null && `金額 ${yen(e.facts.amount)}`, e.valuation.value != null && `評価額 ${yen(e.valuation.value)}`, j].filter(Boolean).join('・')),
+        e.facts.amount != null && `${e.kind === 'sold' ? '販売価格' : '金額'} ${yen(e.facts.amount)}`, sale, e.valuation.value != null && `評価額 ${yen(e.valuation.value)}`, j].filter(Boolean).join('・')),
     e.facts.note && h('div', { class: 'small muted' }, e.facts.note),
+    suggestionBox(e, done),
     e.status === 'excluded' && e.excludedReason && h('div', { class: 'small muted' }, `載せない理由: ${e.excludedReason}`),
     h('div', { class: 'row', style: { gap: '6px', marginTop: '6px', flexWrap: 'wrap' } },
       e.status !== 'approved' && h('button', { class: 'btn small', onclick: () => editRecord(e, done) }, '編集'),
       e.status === 'review' && h('button', { class: 'btn small primary', onclick: () => setStatus(e, 'approved', done) }, '承認'),
       e.status === 'review' && h('button', { class: 'btn small ghost', onclick: () => setStatus(e, 'excluded', done) }, '載せない'),
       e.status !== 'review' && h('button', { class: 'btn small ghost', onclick: () => setStatus(e, 'review', done) }, e.status === 'approved' ? '承認を取り消す' : '要確認に戻す')));
+}
+
+/** 要確認の記録に分類の候補を付ける（決まりごと → 分からないものだけローカルAI）。記録そのものは変えない。 */
+async function classifyAll(done) {
+  toast('分類の候補を作っています（ローカルAIは1件数秒）…');
+  try {
+    const r = await api.post('/api/books/classify', { useAi: true });
+    toast([`候補 ${r.rules + r.ai}件（決まりごと ${r.rules}・ローカルAI ${r.ai}）`, r.unknown && `分からない ${r.unknown}件`, r.waiting && `残り ${r.waiting}件は次回`, r.aiNote].filter(Boolean).join('・'));
+    done();
+  } catch (e) {
+    showError(e);
+  }
+}
+
+/** メルカリの売上: 取引画面・販売履歴をコピーした文字か CSV を貼る → 読めた結果を確かめる → 取り込む（売却の記録・要確認）。 */
+function importMercari(done) {
+  const ta = h('textarea', { rows: 8, placeholder: '取引画面や販売履歴の文字をコピーして貼る（「販売価格」「販売手数料」「配送料」「販売利益」の並び）／CSV（見出し: 日付・商品名・販売価格・販売手数料・配送料・販売利益）' });
+  const file = h('input', { type: 'file', accept: '.csv,.tsv,.txt,text/*', onchange: async () => { if (file.files[0]) ta.value = await file.files[0].text(); } });
+  const out = h('div');
+  const ACT = { new: '新しく記録', update: '台帳の売却記録に追記', duplicate: '取り込み済み', locked: '承認済みのため触らない', skip: '読めない' };
+  const send = async (dryRun, close) => {
+    try {
+      const r = await api.post('/api/books/import/mercari', { text: ta.value, dryRun });
+      if (!dryRun) { toast(`取り込みました: 新しく ${r.counts.new}件・追記 ${r.counts.update}件`); close(); done?.(); return; }
+      const rows = r.rows;
+      clear(out).append(h('div', null,
+        h('p', { class: 'small muted' }, rows.length ? `${rows.length}件読めました（形: ${{ table: '表', labels: '取引画面の文字', pairs: '商品名と金額' }[r.format] || r.format}）。内容を確かめてから取り込んでください。` : '読めませんでした。貼った文字の形を変えてみてください。'),
+        rows.length ? h('table', { class: 'mini-table' },
+          h('thead', null, h('tr', null, ...['日付', '商品名', '販売価格', '手数料', '送料', '手取り', '台帳の商品', '扱い'].map((t) => h('th', null, t)))),
+          h('tbody', null, rows.map((x) => h('tr', null, h('td', null, x.date || '—'), h('td', null, x.title), ...['price', 'fee', 'shipping', 'proceeds'].map((k) => h('td', { style: { textAlign: 'right' } }, x[k] == null ? '—' : yen(x[k]))),
+            h('td', null, x.link ? x.link : x.vine ? `⚠ Vine提供品 ${x.match.productId} と一致（結び付けない）` : x.match?.candidates?.length ? `候補 ${x.match.candidates.map((c) => c.productId).join('・')}` : '—'),
+            h('td', null, ACT[x.action] || x.action))))) : '',
+        rows.some((x) => ['new', 'update'].includes(x.action)) ? h('button', { class: 'btn primary', onclick: () => send(false, close) }, `取り込む（${rows.filter((x) => ['new', 'update'].includes(x.action)).length}件）`) : ''));
+    } catch (e) {
+      showError(e);
+    }
+  };
+  let close;
+  sheet((c) => {
+    close = c;
+    return h('div', null,
+      h('h2', null, '🛒 メルカリの売上を取り込む'),
+      h('p', { class: 'small muted' }, '個人のメルカリには公式の CSV 書き出しがないため、ご自身でコピーした文字や作った表を読みます（メルカリへ自動で取りに行くことはしません）。取り込んだ記録は「要確認」で、同じ取引は二重に入りません。Vine提供品と一致したものには印が付きます。'),
+      ta, h('div', { class: 'row', style: { gap: '6px', alignItems: 'center', margin: '6px 0' } }, file,
+        h('button', { class: 'btn', onclick: () => send(true, close) }, '読んでみる'), h('button', { class: 'btn ghost', onclick: () => c() }, '閉じる')),
+      out);
+  });
 }
 
 async function loadMeta() {
@@ -146,6 +216,8 @@ export async function showBooks() {
           h('select', { onchange: (e) => set('status', e.target.value) }, [['', 'すべての状態'], ...Object.entries(meta.statuses)].map(([v, l]) => h('option', { value: v, selected: v === view.status }, l))),
           h('select', { onchange: (e) => set('kind', e.target.value) }, [['', 'すべての種類'], ...meta.kinds.map((k) => [k.id, k.label])].map(([v, l]) => h('option', { value: v, selected: v === view.kind }, l))),
           h('button', { class: 'btn small primary', onclick: () => editRecord(null, showBooks) }, '＋ 記録を追加'),
+          h('button', { class: 'btn small', onclick: () => importMercari(showBooks) }, '🛒 メルカリの売上を取り込む'),
+          h('button', { class: 'btn small', onclick: () => classifyAll(showBooks) }, '💡 分類の候補を出す'),
           h('a', { class: 'btn small', href: `/api/books/export.csv?year=${view.year}` }, 'CSV（Excel可）'))),
       h('div', { class: 'card small' },
         h('div', null, `${sum.year}年: ${sum.total}件（要確認 ${sum.review}件）`),
@@ -164,13 +236,20 @@ export function booksCard(p) {
   const render = async () => {
     try {
       await loadMeta();
-      const [list, works] = await Promise.all([api.get(`/api/books?productId=${encodeURIComponent(p.id)}`), api.get(`/api/works?productId=${encodeURIComponent(p.id)}`)]);
+      const [list, works, pr] = await Promise.all([api.get(`/api/books?productId=${encodeURIComponent(p.id)}`), api.get(`/api/works?productId=${encodeURIComponent(p.id)}`),
+        api.get(`/api/products/${encodeURIComponent(p.id)}/prices`).catch(() => ({ history: [] }))]);
+      const hist = pr.history.slice(-12).reverse();
       const quick = [['use', '使用・体験'], ['consumed', '消費した'], ['disposed', '廃棄した'], ['kept', '保管・継続使用']];
       clear(box).append(h('div', null,
         h('h3', null, '🧾 帳簿'),
         list.entries.length ? list.entries.map((e) => entryCard(e, render, { showProduct: false })) : h('p', { class: 'muted small' }, 'まだ記録はありません。'),
         h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap' } },
           quick.map(([kind, label]) => h('button', { class: 'btn small', onclick: () => editRecord(null, render, { kind, productId: p.id, asin: p.summary?.browser?.asin || '', title: p.name || '' }) }, `＋ ${label}`))),
+        hist.length ? h('details', { style: { marginTop: '8px' } }, h('summary', { class: 'small' }, `Amazon の価格の履歴（${pr.history.length}回確認・最新 ${hist[0].price == null ? '価格なし' : yen(hist[0].price)}）`),
+          h('table', { class: 'mini-table' }, h('thead', null, h('tr', null, ...['確認日', '価格', '参考価格', '在庫', '出どころ'].map((t) => h('th', null, t)))),
+            h('tbody', null, hist.map((o) => h('tr', null, h('td', null, o.at.slice(0, 10)), h('td', { style: { textAlign: 'right' } }, o.price == null ? '—' : yen(o.price)),
+              h('td', { style: { textAlign: 'right' } }, o.basisPrice == null ? '—' : yen(o.basisPrice)), h('td', null, o.availability || '—'),
+              h('td', { class: 'small' }, o.source === 'amazon-info' ? '台帳の取得' : 'ログアウト状態の商品ページ')))))) : '',
         h('h3', { class: 'small', style: { marginTop: '10px' } }, '作品'),
         works.length ? works.map((w) => workCard(w, render)) : h('p', { class: 'muted small' }, '紐付いた作品はまだありません。'),
         h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap' } },

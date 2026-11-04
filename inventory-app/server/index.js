@@ -25,6 +25,9 @@ import * as mercari from './adapters/mercari.js';
 import * as schema from './schema.js';
 import { parseLine, importDates } from './dates.js';
 import { Books, BOOK_KINDS, BOOK_STATUSES } from './books.js';
+import { Prices } from './prices.js';
+import { parseMercariSales } from './adapters/mercari-sales.js';
+import { FLAGS as BOOK_FLAGS } from './classify.js';
 import { productReport, yearReport } from './book-report.js';
 import { simulate, scenarios, TAX_YEARS } from './tax.js';
 import { browserBrief, browserSyncOverview, imageFile, isVineProvided, BROWSER_LISTS, IMAGE_STATES } from './browser-sync.js';
@@ -53,6 +56,7 @@ export function createApp({ dataDir, token = '' } = {}) {
   const codes = createCodeReader(store);
   createDefaults(store);
   const books = new Books(store.dataDir);
+  const prices = new Prices(store.dataDir);
   const routes = [];
   const route = (method, pattern, handler) => {
     const keys = [];
@@ -312,7 +316,11 @@ export function createApp({ dataDir, token = '' } = {}) {
   });
   route('PUT', '/api/products/:id/size-estimate', ({ params, body, actor }) => full(store.setSizeEstimate(params.id, actor, body?.estimate ?? null)));
   route('PUT', '/api/products/:id/market', ({ params, body, actor }) => full(store.setMarket(params.id, actor, body?.market ?? null, body?.site || 'mercari')));
-  route('PUT', '/api/products/:id/amazon', ({ params, body, actor }) => full(store.setAmazonInfo(params.id, actor, body?.amazon ?? null)));
+  route('PUT', '/api/products/:id/amazon', ({ params, body, actor }) => {
+    const a = body?.amazon;
+    if (a?.asin && a.price != null) prices.add({ asin: a.asin, productId: params.id, price: a.price, at: a.fetchedAt, source: 'amazon-info' }, actor);
+    return full(store.setAmazonInfo(params.id, actor, a ?? null));
+  });
   route('PUT', '/api/products/:id/research', ({ params, body, actor }) => full(store.setResearch(params.id, actor, body?.research ?? null)));
   route('POST', '/api/products/:id/text-candidates', ({ params, body, actor }) => full(store.upsertTextCandidates(params.id, actor, body?.items || [])));
   route('PUT', '/api/products/:id/listing-photos', ({ params, body, actor }) => {
@@ -435,7 +443,7 @@ export function createApp({ dataDir, token = '' } = {}) {
   // export
   // ---- 帳簿（server/books.js）: 承認・対象外はユーザーのみ。観察ブラウザ連携が POST /api/books/sync で Vine受領などを記録する ----
   const thisYear = () => String(new Date().getFullYear());
-  route('GET', '/api/books', ({ query }) => ({ entries: books.list(query), kinds: BOOK_KINDS, statuses: BOOK_STATUSES }));
+  route('GET', '/api/books', ({ query }) => ({ entries: books.list(query), kinds: BOOK_KINDS, statuses: BOOK_STATUSES, flags: BOOK_FLAGS }));
   route('GET', '/api/books/summary', ({ query }) => books.summary(query.year || thisYear()));
   route('GET', '/api/books/export.csv', ({ res, query }) => {
     const year = /^\d{4}$/.test(query.year || '') ? query.year : thisYear();
@@ -443,12 +451,32 @@ export function createApp({ dataDir, token = '' } = {}) {
     res.end(books.csv(year));
   });
   route('POST', '/api/books', ({ body, actor }) => books.create(body || {}, actor));
-  route('POST', '/api/books/sync', ({ actor }) => books.syncFromProducts(store.list({ includeTrash: false }), actor));
+  route('POST', '/api/books/sync', async ({ actor }) => {
+    const r = books.syncFromProducts(store.list({ includeTrash: false }), actor, prices);
+    return { ...r, suggested: (await books.classify(store.list(), { actor: 'system' })).rules };
+  });
+  // メルカリの売上: 貼り付けた文字・CSV を読む（dryRun=true で読めた結果だけ）→ 売却の記録（要確認）。分類の候補も付ける。
+  route('POST', '/api/books/import/mercari', async ({ body, actor }) => {
+    const parsed = parseMercariSales(String(body?.text || '').slice(0, 1_000_000));
+    const r = books.importSales(parsed.rows, store.list(), actor, { dryRun: body?.dryRun !== false });
+    if (body?.dryRun === false) r.suggested = (await books.classify(store.list(), { actor: 'system' })).rules;
+    return { format: parsed.format, ...r };
+  });
+  route('POST', '/api/books/classify', ({ body }) => books.classify(store.list(), { useAi: !!body?.useAi, actor: 'system' }));
+  route('POST', '/api/books/:id/apply-suggestion', ({ params, actor }) => books.applySuggestion(params.id, actor));
   route('PATCH', '/api/books/:id', ({ params, body, actor }) => books.update(params.id, body || {}, actor));
   route('POST', '/api/books/:id/status', ({ params, body, actor }) => books.setStatus(params.id, body?.status, actor, body?.reason));
   route('GET', '/api/books/:id/history', ({ params }) => books.history(params.id));
   // 作品（YouTube・ブログなど）と商品の多対多
   route('GET', '/api/works', ({ query }) => books.listWorks(query));
+  // ---- Amazon の価格の履歴（server/prices.js）: Mac の観察ブラウザ連携がログアウト状態の商品ページで確かめた値を送る ----
+  route('GET', '/api/prices/due', ({ query }) => ({ due: prices.dueAsins(store.list(), Math.min(50, Number(query.limit) || 20)) }));
+  route('POST', '/api/prices', ({ body, actor }) => ({ added: (Array.isArray(body?.observations) ? body.observations : [body]).slice(0, 100).map((o) => prices.add(o, actor)).length }));
+  route('GET', '/api/products/:id/prices', ({ params }) => {
+    const p = store.get(params.id);
+    const asin = p.browser?.asin || p.amazon?.asin || '';
+    return { asin, history: asin ? prices.history(asin) : [] };
+  });
   route('POST', '/api/works', ({ body, actor }) => books.createWork(body, actor));
   route('PATCH', '/api/works/:id', ({ params, body, actor }) => books.updateWork(params.id, body, actor));
   // 活動の理念（利用者の主張）と説明資料（印刷用 HTML）
