@@ -22,6 +22,8 @@
 - 開封チェック済み（`openCheckedAt`、ユーザーのみ・`POST /api/products/:id/open-check`）: 一覧の行と詳細のチェック。絞り込みチップ「開封未チェック」「開封チェック済み」。
 - 別枠（`asideAt`、ユーザーのみ・`POST /api/products/:id/aside`・一括 `aside`・詳細のチェック）: 一覧の「すべて」などから外し、チップ「別枠」で見る（AIの処理対象からは外さない）。
 - 観察ブラウザ連携（`browser`: { asin, lists, vineOrderDate }）は Mac の `~/AI-Workspace/projects/amazon-research-browser/sync/sync.py` が `PUT /api/products/:id/browser` で書く（QC はやり直しにならない）。一覧では 🔍「観察ブラウザの一覧」「観察ブラウザの画像取得」、👁 で一覧・日付の範囲（Vine注文日／注文日など）で隠す、並び順「Vine注文日」。画像取得の状況は ⋯ →「🔭 観察ブラウザの画像取得の状況」（`GET /api/browser-sync`、画像 `GET /api/browser-images/:asin`。台帳からは読むだけ・`server/browser-sync.js`）。
+- 帳簿（`server/books.js`・`data/books/journal.json`＋`audit.jsonl`、画面は ⋯→🧾帳簿 と商品詳細の帳簿欄）: 念のための記録。連携（`POST /api/books/sync`）が Vine受領・レビュー投稿を1商品1回「要確認」で記録。事実（表示価格と確認日）と税務上の扱い（評価額・仕訳・5つのメモ: 主張／実際／一般的な取扱い／専門家の確認／申告で採用）を分けて持つ。承認・載せない・活動の理念はユーザーのみ。Vine受領と同額の経費を自動で作らない。作品（YouTube・ブログ）は `/api/works`（商品と多対多）。税額の試算は `server/tax.js`（年度ごとの値に出典と確認日、未確認の値は画面に表示、国保・年金の所得制限は入力時だけ）。説明資料は `/api/books/report?year=`・`/api/books/report/product/:id`（印刷用 HTML、理念と事実を分ける）。
+- Vine提供品（`browser` に Vine の一覧がある商品）には既定ルールが出品先を入れず、入れた分は外す（規約で販売・譲渡不可）。手で入れた出品先・判断は残して行に警告。
 - 一覧の行の色: 出さない（薄い赤）・在庫なし（グレー）が優先、それ以外でフリマに入っていればオレンジの縁と淡い地。（`--deshadow`、設定 `studioDeshadow` 既定0.6。qwen3.5:4b は影の有無を見分けられず gemma4:26b は1枚3分・16GB で不採用→数値処理）（白っぽい商品は薄いグレー背景、はみ出し・大写しは色補正のみ）→ ローカルAI（Ollama qwen3.5:4b）が欠けを確認 → 編集写真（source=studio）として追加し出品用で元写真と入れ替え（🔒確定時は入れ替えない）。未処理分は `POST /api/studio/run`。
 - 写真の種類: actual（ユーザー撮影の現物）・generated（注記入りのAI紹介画像。出品用に選べるが現物ではない）・reference（参考。出品不可）。
 - 399商品の取り込み・更新同期は `node scripts/import-399.js`（元フォルダは読むだけ。変化は data/imports/update-ledger に記録）。

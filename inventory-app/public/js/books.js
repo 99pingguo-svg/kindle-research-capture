@@ -109,7 +109,10 @@ async function loadMeta() {
   return meta;
 }
 
-let view = { year: String(new Date().getFullYear()), status: '', kind: '' };
+let view = { year: String(new Date().getFullYear()), status: '', kind: '', tab: 'records' };
+const TABS = [['records', '記録'], ['works', '作品'], ['tax', '税額の試算'], ['report', '説明資料']];
+const PLATFORMS = { youtube: 'YouTube', blog: 'ブログ', x: 'X', instagram: 'Instagram', other: 'その他' };
+const WORK_STATUS = { planned: '企画', filming: '撮影中', published: '公開済み', dropped: '中止' };
 
 export async function showBooks() {
   const p = pane();
@@ -122,6 +125,12 @@ export async function showBooks() {
         h('button', { class: 'icon-btn', onclick: () => (location.hash = '#/'), 'aria-label': '戻る' }, '‹'),
         h('div', { class: 'name' }, '🧾 帳簿'))),
     body));
+  const tabs = h('div', { class: 'chips', style: { margin: '8px 0' } }, TABS.map(([id, label]) =>
+    h('button', { class: `chip ${view.tab === id ? 'on' : ''}`, onclick: () => { view.tab = id; showBooks(); } }, label)));
+  body.before(tabs);
+  if (view.tab === 'works') return renderWorks(body);
+  if (view.tab === 'tax') return renderTax(body);
+  if (view.tab === 'report') return renderReport(body);
   try {
     await loadMeta();
     const q = new URLSearchParams({ year: view.year, ...(view.status ? { status: view.status } : {}), ...(view.kind ? { kind: view.kind } : {}) });
@@ -155,17 +164,158 @@ export function booksCard(p) {
   const render = async () => {
     try {
       await loadMeta();
-      const list = await api.get(`/api/books?productId=${encodeURIComponent(p.id)}`);
+      const [list, works] = await Promise.all([api.get(`/api/books?productId=${encodeURIComponent(p.id)}`), api.get(`/api/works?productId=${encodeURIComponent(p.id)}`)]);
       const quick = [['use', '使用・体験'], ['consumed', '消費した'], ['disposed', '廃棄した'], ['kept', '保管・継続使用']];
       clear(box).append(h('div', null,
         h('h3', null, '🧾 帳簿'),
         list.entries.length ? list.entries.map((e) => entryCard(e, render, { showProduct: false })) : h('p', { class: 'muted small' }, 'まだ記録はありません。'),
         h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap' } },
-          quick.map(([kind, label]) => h('button', { class: 'btn small', onclick: () => editRecord(null, render, { kind, productId: p.id, asin: p.summary?.browser?.asin || '', title: p.name || '' }) }, `＋ ${label}`)))));
+          quick.map(([kind, label]) => h('button', { class: 'btn small', onclick: () => editRecord(null, render, { kind, productId: p.id, asin: p.summary?.browser?.asin || '', title: p.name || '' }) }, `＋ ${label}`))),
+        h('h3', { class: 'small', style: { marginTop: '10px' } }, '作品'),
+        works.length ? works.map((w) => workCard(w, render)) : h('p', { class: 'muted small' }, '紐付いた作品はまだありません。'),
+        h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap' } },
+          h('button', { class: 'btn small', onclick: () => editWork(null, render, { productIds: [p.id] }) }, '＋ この商品の作品'),
+          h('a', { class: 'btn small', href: `/api/books/report/product/${encodeURIComponent(p.id)}`, target: '_blank' }, '📄 この商品の説明資料'))));
     } catch (e) {
       clear(box).append(h('h3', null, '🧾 帳簿'), h('p', { class: 'muted small' }, `読み込めません: ${e.message}`));
     }
   };
   render();
   return box;
+}
+
+// ---------- 作品（YouTube・ブログ…）: 企画・撮影・公開と、登場する商品（多対多） ----------
+export function editWork(work, done, base = {}) {
+  const w = work || { title: '', platform: 'youtube', status: 'planned', url: '', plannedAt: today(), filmedAt: '', publishedAt: '', productIds: base.productIds || [], note: '' };
+  const f = {
+    title: h('input', { type: 'text', value: w.title, placeholder: '作品の題・企画名' }),
+    platform: h('select', null, Object.entries(PLATFORMS).map(([v, l]) => h('option', { value: v, selected: v === w.platform }, l))),
+    status: h('select', null, Object.entries(WORK_STATUS).map(([v, l]) => h('option', { value: v, selected: v === w.status }, l))),
+    url: h('input', { type: 'url', value: w.url, placeholder: 'https://…（公開したら）' }),
+    plannedAt: h('input', { type: 'date', value: w.plannedAt }), filmedAt: h('input', { type: 'date', value: w.filmedAt }), publishedAt: h('input', { type: 'date', value: w.publishedAt }),
+    productIds: h('input', { type: 'text', value: w.productIds.join(', '), placeholder: '登場する商品のID（例: 0475, 0476）' }),
+    note: h('textarea', { rows: 4, placeholder: '企画の中身・撮っていない時間の出来事・生活の変化など' }, w.note),
+  };
+  const row = (label, el) => h('label', { class: 'field' }, h('span', { class: 'small muted' }, label), el);
+  return sheet((close) => h('div', null,
+    h('h2', null, work ? `作品の編集（${work.id}）` : '作品を追加'),
+    row('題', f.title), h('div', { class: 'row', style: { gap: '6px' } }, row('媒体', f.platform), row('状態', f.status)), row('URL', f.url),
+    h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap' } }, row('企画日', f.plannedAt), row('撮影日', f.filmedAt), row('公開日', f.publishedAt)),
+    row('登場する商品', f.productIds), row('メモ', f.note),
+    h('div', { class: 'actions sticky-actions' },
+      h('button', {
+        class: 'btn primary',
+        onclick: async () => {
+          const body = Object.fromEntries(Object.entries(f).map(([k, el]) => [k, el.value]));
+          try {
+            if (work) await api.patch(`/api/works/${encodeURIComponent(work.id)}`, body);
+            else await api.post('/api/works', body);
+            toast('保存しました');
+            close();
+            done?.();
+          } catch (e) {
+            showError(e);
+          }
+        },
+      }, '保存'),
+      h('button', { class: 'btn ghost', onclick: () => close() }, 'キャンセル'))));
+}
+
+function workCard(w, done) {
+  return h('div', { class: 'card', style: { padding: '10px', margin: '6px 0' } },
+    h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap', alignItems: 'center' } },
+      h('strong', null, w.title || '（題なし）'), h('span', { class: 'badge' }, PLATFORMS[w.platform]), h('span', { class: `badge ${w.status === 'published' ? 'ok' : ''}` }, WORK_STATUS[w.status]), h('span', { class: 'muted small' }, w.id)),
+    h('div', { class: 'small muted' }, `企画 ${w.plannedAt || '—'}・撮影 ${w.filmedAt || '—'}・公開 ${w.publishedAt || '—'}`),
+    w.url && h('div', { class: 'small' }, h('a', { href: w.url, target: '_blank', rel: 'noopener' }, w.url)),
+    w.productIds.length > 0 && h('div', { class: 'small' }, '商品: ', ...w.productIds.map((id) => h('a', { href: `#/p/${id}`, style: { marginRight: '6px' } }, id))),
+    w.note && h('div', { class: 'small muted' }, w.note),
+    h('button', { class: 'btn small', style: { marginTop: '6px' }, onclick: () => editWork(w, done) }, '編集'));
+}
+
+async function renderWorks(body) {
+  try {
+    const works = await api.get('/api/works');
+    clear(body).append(h('div', null,
+      h('p', { class: 'small muted' }, '1つの作品に何個でも商品を、1つの商品に何本でも作品を紐付けられます。撮っていない時間の出来事や生活の変化もメモに残せます。'),
+      h('button', { class: 'btn small primary', onclick: () => editWork(null, showBooks) }, '＋ 作品を追加'),
+      works.length ? works.map((w) => workCard(w, showBooks)) : h('p', { class: 'muted' }, 'まだ作品はありません。')));
+  } catch (e) {
+    showError(e);
+  }
+}
+
+// ---------- 税額の試算（目安）。入力はこの端末にだけ保存（サーバーに残さない） ----------
+const TAX_KEY = 'daicho.taxInput';
+function loadTaxInput() {
+  try { return { year: new Date().getFullYear(), vineIncome: 1000000, expense: 0, otherIncome: 0, kind: 'misc', blue: 'none', disability: 'none', socialInsurance: 0, otherDeductions: 0, nhi: {}, pensionLimit: {}, ...JSON.parse(localStorage.getItem(TAX_KEY) || '{}') }; } catch { return { year: new Date().getFullYear() }; }
+}
+async function renderTax(body) {
+  const v = loadTaxInput();
+  const num = (k, ph, obj = v) => h('input', { type: 'number', value: obj[k] ?? '', placeholder: ph, oninput: (e) => { obj[k] = e.target.value; } });
+  const sel = (k, opts) => h('select', { onchange: (e) => { v[k] = e.target.value; } }, opts.map(([val, l]) => h('option', { value: val, selected: String(v[k]) === String(val) }, l)));
+  const row = (label, el) => h('label', { class: 'field' }, h('span', { class: 'small muted' }, label), el);
+  const out = h('div');
+  const run = async () => {
+    try { localStorage.setItem(TAX_KEY, JSON.stringify(v)); } catch {}
+    try {
+      const r = await api.post('/api/tax/simulate', v);
+      const s = r.single;
+      if (s.error) return clear(out).append(h('p', { class: 'warn' }, s.error));
+      const cell = (x) => h('td', { style: { textAlign: 'right' } }, x == null ? '—' : yen(x));
+      clear(out).append(h('div', null,
+        h('h3', { class: 'small' }, `${s.label}（この条件）`),
+        h('table', { class: 'mini-table' }, h('tbody', null,
+          h('tr', null, h('th', null, '収入（現物収入を含む）'), cell(s.revenue)), h('tr', null, h('th', null, '必要経費'), cell(s.expense)),
+          s.blue ? h('tr', null, h('th', null, '青色申告特別控除'), cell(s.blue)) : '',
+          h('tr', null, h('th', null, '所得'), cell(s.income)), h('tr', null, h('th', null, `所得控除（基礎 ${yen(s.deductions.basic)}・障害者 ${yen(s.deductions.disability)}・社会保険料 ${yen(s.deductions.social)}・その他 ${yen(s.deductions.other)}）`), cell(s.deductions.basic + s.deductions.disability + s.deductions.social + s.deductions.other)),
+          h('tr', null, h('th', null, '課税所得'), cell(s.taxable)), h('tr', null, h('th', null, '所得税＋復興特別所得税'), cell(s.nationalTotal)),
+          h('tr', null, h('th', null, `住民税（翌年度）${s.resident.exempt ? '・非課税' : ''}`), cell(s.resident.total)),
+          h('tr', null, h('th', null, '国民健康保険料（入力した料率）'), cell(s.nhi?.total)),
+          s.pension ? h('tr', null, h('th', null, '障害基礎年金の所得制限'), h('td', null, s.pension.state)) : '')),
+        h('h3', { class: 'small' }, 'Vine の額 × 経費の割合（ほかの条件は同じ）'),
+        h('table', { class: 'mini-table' },
+          h('thead', null, h('tr', null, h('th', null, 'Vineの額'), h('th', null, '経費'), h('th', null, '所得'), h('th', null, '所得税等'), h('th', null, '住民税'), h('th', null, '国保'))),
+          h('tbody', null, r.scenarios.flatMap((g) => g.rows.map((x) => h('tr', null, h('td', null, yen(g.vineIncome)), h('td', null, x.label), cell(x.result.income), cell(x.result.nationalTotal), cell(x.result.resident?.total), cell(x.result.nhi?.total)))))),
+        h('p', { class: 'small muted' }, ['目安です（確定申告の計算ではありません）。', ...s.notes, `未確認の値: ${s.unverified.join('・')}`, s.resident.note].filter(Boolean).join(' ')),
+        h('p', { class: 'small muted' }, '出典: ', ...s.sources.map((x) => h('a', { href: x.url, target: '_blank', rel: 'noopener', style: { marginRight: '8px' } }, `${x.title}（${x.checked}確認）`)))));
+    } catch (e) {
+      showError(e);
+    }
+  };
+  clear(body).append(h('div', null,
+    h('p', { class: 'small muted' }, '入力した条件だけで計算する目安です。足りない設定（国保の料率・年金の所得制限の基準額）は空のままなら計算しません。入力はこの端末にだけ保存します。'),
+    h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap' } },
+      row('年分', sel('year', [[2025, '令和7年分'], [2026, '令和8年分'], [2027, '令和9年分']])),
+      row('所得の区分', sel('kind', [['misc', '雑所得'], ['business', '事業所得']])),
+      row('青色申告特別控除', sel('blue', [['none', 'なし（白色）'], ['blue10', '10万円'], ['blue55', '55万円'], ['blue65', '65万円']]))),
+    h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap' } },
+      row('Vineの現物収入として計上する額', num('vineIncome', '例: 1000000')), row('必要経費', num('expense', '例: 500000')), row('そのほかの収入（広告・アフィリエイト・売却益）', num('otherIncome', '0'))),
+    h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap' } },
+      row('障害者控除', sel('disability', [['none', 'なし'], ['general', '障害者'], ['special', '特別障害者'], ['cohabit_special', '同居特別障害者']])),
+      row('社会保険料控除（払った額）', num('socialInsurance', '0')), row('そのほかの所得控除', num('otherDeductions', '0'))),
+    h('details', null, h('summary', { class: 'small' }, '国民健康保険料・年金の所得制限（市町村・日本年金機構の値を入れたときだけ）'),
+      h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap' } },
+        row('国保 所得割の率（例 0.1）', num('rate', '', v.nhi)), row('均等割（人数分）', num('perCapita', '', v.nhi)), row('平等割', num('perHousehold', '', v.nhi)), row('上限', num('cap', '', v.nhi))),
+      h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap' } },
+        row('20歳前障害年金 2分の1停止の所得', num('half', '', v.pensionLimit)), row('全額停止の所得', num('full', '', v.pensionLimit)))),
+    h('button', { class: 'btn primary', onclick: run }, '試算する'),
+    out));
+  run();
+}
+
+// ---------- 説明資料: 理念（主張）と事実を分けた年間資料・商品別資料 ----------
+async function renderReport(body) {
+  try {
+    const { statement } = await api.get('/api/books/statement');
+    const ta = h('textarea', { rows: 10, placeholder: '活動の理念（生活そのものを作品にする考え方など）。説明資料の第1部になります。' }, statement);
+    clear(body).append(h('div', null,
+      h('p', { class: 'small muted' }, '説明資料は印刷用のページで開きます（ブラウザの印刷から PDF に保存できます）。理念（あなたの主張）と、商品ごとの客観的な事実は分けて載せます。'),
+      h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap' } },
+        h('a', { class: 'btn small primary', href: `/api/books/report?year=${view.year}`, target: '_blank' }, `${view.year}年の説明資料を開く`),
+        h('span', { class: 'small muted' }, '商品ごとの資料は、商品詳細の「🧾 帳簿」欄から開けます。')),
+      h('label', { class: 'field', style: { marginTop: '12px' } }, h('span', { class: 'small muted' }, '活動の理念（利用者の主張）'), ta),
+      h('button', { class: 'btn small', onclick: async () => { try { await api.put('/api/books/statement', { statement: ta.value }); toast('保存しました'); } catch (e) { showError(e); } } }, '理念を保存')));
+  } catch (e) {
+    showError(e);
+  }
 }

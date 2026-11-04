@@ -25,6 +25,8 @@ import * as mercari from './adapters/mercari.js';
 import * as schema from './schema.js';
 import { parseLine, importDates } from './dates.js';
 import { Books, BOOK_KINDS, BOOK_STATUSES } from './books.js';
+import { productReport, yearReport } from './book-report.js';
+import { simulate, scenarios, TAX_YEARS } from './tax.js';
 import { browserBrief, browserSyncOverview, imageFile, isVineProvided, BROWSER_LISTS, IMAGE_STATES } from './browser-sync.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -445,6 +447,25 @@ export function createApp({ dataDir, token = '' } = {}) {
   route('PATCH', '/api/books/:id', ({ params, body, actor }) => books.update(params.id, body || {}, actor));
   route('POST', '/api/books/:id/status', ({ params, body, actor }) => books.setStatus(params.id, body?.status, actor, body?.reason));
   route('GET', '/api/books/:id/history', ({ params }) => books.history(params.id));
+  // 作品（YouTube・ブログなど）と商品の多対多
+  route('GET', '/api/works', ({ query }) => books.listWorks(query));
+  route('POST', '/api/works', ({ body, actor }) => books.createWork(body, actor));
+  route('PATCH', '/api/works/:id', ({ params, body, actor }) => books.updateWork(params.id, body, actor));
+  // 活動の理念（利用者の主張）と説明資料（印刷用 HTML）
+  route('GET', '/api/books/statement', () => ({ statement: books.db.statement || '' }));
+  route('PUT', '/api/books/statement', ({ body, actor }) => books.setStatement(body?.statement, actor));
+  const sendHtml = (res, html) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); res.end(html); };
+  route('GET', '/api/books/report', ({ res, query }) => {
+    const year = /^\d{4}$/.test(query.year || '') ? query.year : thisYear();
+    sendHtml(res, yearReport({ year, entries: books.list({ year }), works: books.listWorks().filter((w) => (w.publishedAt || w.plannedAt || w.createdAt).startsWith(year)),
+      summary: books.summary(year), products: store.products, statement: books.db.statement || '' }));
+  });
+  route('GET', '/api/books/report/product/:id', ({ res, params }) => {
+    const p = store.get(params.id);
+    sendHtml(res, productReport({ p, entries: books.list({ productId: p.id }).reverse(), works: books.listWorks({ productId: p.id }), statement: books.db.statement || '' }));
+  });
+  // 税額の試算（目安）: 1件の条件と、Vine 100/200/300万円 × 経費 なし/半分/全額 の表
+  route('POST', '/api/tax/simulate', ({ body }) => ({ years: Object.keys(TAX_YEARS), single: simulate(body || {}), scenarios: scenarios(body || {}) }));
   route('GET', '/api/export.csv', ({ res, query }) => {
     let list = store.list({ includeTrash: false });
     if (query.ids) list = list.filter((p) => query.ids.split(',').includes(p.id));

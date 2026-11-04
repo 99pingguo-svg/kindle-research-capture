@@ -50,6 +50,63 @@ export class Books {
     this.file = path.join(this.dir, 'journal.json');
     this.auditFile = path.join(this.dir, 'audit.jsonl');
     this.db = readJson(this.file, { nextSeq: 1, entries: [] });
+    this.db.works ||= []; // 作品（YouTube・ブログなど）。商品とは多対多（work.productIds）
+    this.db.nextWork ||= 1;
+  }
+
+  /** 活動の理念（利用者の主張）。説明資料の第1部。ユーザーだけが書く。 */
+  setStatement(textValue, actor) {
+    forbidAi(actor, '活動の理念の記入');
+    const before = { id: 'statement', text: this.db.statement || '' };
+    this.db.statement = text(textValue, 20000);
+    this.save();
+    this.audit(actor, { id: 'statement', text: this.db.statement }, 'statement', before);
+    return { statement: this.db.statement };
+  }
+
+  // ---------- 作品（コンテンツ）: 企画・撮影・公開と、登場する商品・生活記録 ----------
+  listWorks({ productId } = {}) {
+    return this.db.works.filter((w) => !productId || w.productIds.includes(productId))
+      .sort((a, b) => ((b.publishedAt || b.plannedAt || b.createdAt) > (a.publishedAt || a.plannedAt || a.createdAt) ? 1 : -1));
+  }
+
+  getWork(id) {
+    const w = this.db.works.find((x) => x.id === id);
+    if (!w) throw new AppError(404, `作品がありません: ${id}`);
+    return w;
+  }
+
+  cleanWork(input, base = {}) {
+    const url = text(input.url ?? base.url, 500).trim();
+    if (url && !/^https?:\/\//.test(url)) throw new AppError(400, 'URLは http(s):// で始めてください');
+    const date = (v, k) => (v === undefined ? base[k] || '' : v ? normalizeDate(v) || (() => { throw new AppError(400, `${k} の日付が不正です`); })() : '');
+    const ids = input.productIds === undefined ? base.productIds || [] : [...new Set((Array.isArray(input.productIds) ? input.productIds : String(input.productIds).split(/[\s,、]+/)).map((x) => String(x).trim()).filter(Boolean))].slice(0, 200);
+    return {
+      title: text(input.title ?? base.title, 200), platform: ['youtube', 'blog', 'x', 'instagram', 'other'].includes(input.platform ?? base.platform) ? input.platform ?? base.platform : 'other',
+      url, status: ['planned', 'filming', 'published', 'dropped'].includes(input.status ?? base.status) ? input.status ?? base.status : 'planned',
+      plannedAt: date(input.plannedAt, 'plannedAt'), filmedAt: date(input.filmedAt, 'filmedAt'), publishedAt: date(input.publishedAt, 'publishedAt'),
+      productIds: ids, note: text(input.note ?? base.note, 4000),
+    };
+  }
+
+  createWork(input, actor) {
+    const w = { id: `W${String(this.db.nextWork).padStart(5, '0')}`, ...this.cleanWork(input || {}), createdAt: nowIso(), updatedAt: nowIso(), by: actor };
+    this.db.nextWork += 1;
+    this.db.works.push(w);
+    this.save();
+    this.audit(actor, w, 'work:create');
+    return w;
+  }
+
+  updateWork(id, patch, actor) {
+    const w = this.getWork(id);
+    const before = clone(w);
+    Object.assign(w, this.cleanWork(patch || {}, w));
+    if (JSON.stringify(before) === JSON.stringify(w)) return w;
+    w.updatedAt = nowIso();
+    this.save();
+    this.audit(actor, w, 'work:update', before);
+    return w;
   }
 
   save() { writeJson(this.file, this.db); }

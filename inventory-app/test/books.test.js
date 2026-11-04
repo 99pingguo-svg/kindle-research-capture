@@ -62,3 +62,29 @@ test('帳簿: 手で記録・年の集計・CSV', () => {
   assert.match(csv, /マイク/);
   assert.throws(() => books.create({ kind: 'nope', date: '2026-11-04' }, 'user'), /種類/);
 });
+
+test('作品: 商品と多対多で紐付き、URLは http(s) だけ', () => {
+  const { books, vine, bought } = setup();
+  const w = books.createWork({ title: '30日使ってみた', platform: 'youtube', productIds: `${vine}, ${bought}`, publishedAt: '2026/11/01', url: 'https://www.youtube.com/watch?v=x' }, 'user');
+  books.createWork({ title: '食レポ', platform: 'blog', productIds: [vine] }, 'user');
+  assert.deepEqual(w.productIds, [vine, bought]);
+  assert.equal(w.publishedAt, '2026-11-01');
+  assert.equal(books.listWorks({ productId: vine }).length, 2);
+  assert.equal(books.listWorks({ productId: bought }).length, 1);
+  assert.throws(() => books.createWork({ title: 'x', url: 'javascript:alert(1)' }, 'user'), /http/);
+  assert.throws(() => books.setStatement('理念', 'claude'), /ユーザーのみ/);
+});
+
+test('税額の試算: 速算表・基礎控除（令和7/8年分）・障害者の住民税非課税・経費で所得0', async () => {
+  const { simulate, scenarios } = await import('../server/tax.js');
+  assert.equal(simulate({ year: 2026, vineIncome: 1500, expense: 1500 }).income, 0);
+  const a = simulate({ year: 2026, vineIncome: 2000000, disability: 'general' });
+  assert.equal(a.deductions.basic, 1040000);
+  assert.equal(a.taxable, 690000);
+  assert.equal(a.nationalTotal, 35200); // 690,000×5%=34,500 ＋2.1% → 100円未満切り捨て
+  assert.equal(simulate({ year: 2025, vineIncome: 2000000 }).deductions.basic, 880000);
+  assert.equal(simulate({ year: 2026, vineIncome: 1300000, disability: 'general' }).resident.exempt, true);
+  assert.equal(simulate({ year: 2026, vineIncome: 1000000 }).nhi, null, '国保は料率がなければ計算しない');
+  assert.equal(scenarios({ year: 2026 }).length, 3);
+  assert.match(simulate({ year: 2031, vineIncome: 1 }).error, /基礎控除/);
+});
