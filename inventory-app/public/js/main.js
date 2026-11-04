@@ -7,6 +7,7 @@ import { showActivity, showImport, showSettings, showLedger, showDateImport, sho
 import * as uploads from './uploads.js';
 import { watchNativeReturn } from './native.js';
 import { initGlobalAmazonShortcut } from './amazon-search.js';
+import { showBooks } from './books.js';
 
 const app = document.getElementById('app');
 
@@ -16,11 +17,11 @@ function route() {
   if (m) {
     app.classList.add('show-detail');
     showDetail(m[1]);
-  } else if (['/activity', '/import', '/settings', '/ledger', '/dates', '/snapshots'].includes(hash)) {
+  } else if (['/activity', '/import', '/settings', '/ledger', '/dates', '/snapshots', '/books'].includes(hash)) {
     app.classList.add('show-detail');
     state.detailId = null;
     state.detail = null;
-    ({ '/activity': showActivity, '/import': showImport, '/settings': showSettings, '/ledger': showLedger, '/dates': showDateImport, '/snapshots': showSnapshots })[hash]();
+    ({ '/activity': showActivity, '/import': showImport, '/settings': showSettings, '/ledger': showLedger, '/dates': showDateImport, '/snapshots': showSnapshots, '/books': showBooks })[hash]();
   } else {
     app.classList.remove('show-detail');
     showDetail(null);

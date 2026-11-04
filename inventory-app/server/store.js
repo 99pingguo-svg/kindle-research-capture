@@ -1212,6 +1212,19 @@ export class Store extends EventEmitter {
   }
 
   /** Take back a destination the 手取り rule added (only while the user has not touched it). */
+  /** Take back every destination a default rule put on this product (not the user's own). The record stays so no rule adds it again. */
+  removeRuleTargets(id, reason) {
+    return this.mutate(id, 'system', 'targets', (p, ctx) => {
+      const drop = (p.targets || []).filter((c) => p.targetDefaults?.[c] && !p.targetDefaults[c].removedAt && !p.targetsManual?.[c]);
+      if (!drop.length) return;
+      const next = p.targets.filter((c) => !drop.includes(c));
+      ctx.note(`既定ルールで入れた${drop.map(channelLabel).join('・')}を外す（${reason}）`);
+      ctx.changes.push({ path: 'targets', label: '出品先', from: p.targets.map(channelLabel).join('・'), to: next.map(channelLabel).join('・') || 'なし' });
+      p.targetDefaults = { ...p.targetDefaults, ...Object.fromEntries(drop.map((c) => [c, { ...p.targetDefaults[c], removedAt: nowIso(), removedReason: reason }])) };
+      p.targets = next;
+    });
+  }
+
   removeDefaultTarget(id, channel, reason) {
     return this.mutate(id, 'system', 'targets', (p, ctx) => {
       if (p.targetDefaults?.[channel]?.rule !== 'net' || p.targetsManual?.[channel] || !(p.targets || []).includes(channel)) return;

@@ -1089,6 +1089,7 @@ async function mainMenu() {
   const v = await choose(null, [
     { label: '🕘 共同作業の履歴', value: '#/activity' },
     { label: '📒 更新台帳（素材の更新・出品先の確認）', value: '#/ledger' },
+    { label: '🧾 帳簿（Vine受領・使用・処分・経費）', value: '#/books' },
     { label: '💾 状態の保存・ロールバック', value: '#/snapshots' },
     { label: '📋 商品リストを一括登録', value: '#/import' },
     { label: '📅 日付を一括反映（既存商品）', value: '#/dates' },

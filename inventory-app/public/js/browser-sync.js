@@ -14,6 +14,10 @@ export function browserBadges(p) {
   const vine = b.lists.filter((id) => id !== 'orders');
   if (!vine.length) return [];
   const out = [h('span', { class: 'badge info', title: b.vineOrderDate ? `Vine注文日 ${b.vineOrderDate}` : '観察ブラウザの一覧' }, `🔭 ${vine.map((id) => SHORT[id] || id).join('・')}`)];
+  // Vine items may not be sold or given away (Vine terms). A separately bought unit of the same item should be its own product.
+  if ((p.targets || []).length || ['sell', 'draft'].includes(p.decision)) {
+    out.push(h('span', { class: 'badge danger', title: 'Vine提供品は販売・譲渡できません（規約）。同じ商品を別に買った分なら、別の商品として登録してください' }, '⚠ Vine提供品・販売不可'));
+  }
   const st = b.image?.status || 'none';
   if (st !== 'ok') out.push(h('span', { class: `badge ${IMG_CLASS[st] || ''}`, title: '観察ブラウザ連携の画像取得' }, `画像 ${state.meta.imageStates?.[st] || st}`));
   return out;

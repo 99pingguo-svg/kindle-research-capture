@@ -8,6 +8,7 @@ import * as uploads from './uploads.js';
 import { shootWithNativeCamera } from './native.js';
 import { quickMemo, searchPhotoFor, addSearchPhoto } from './quick.js';
 import { openAmazonSearch } from './amazon-search.js';
+import { booksCard } from './books.js';
 
 let pane;
 let photoTab = 'actual';
@@ -108,7 +109,7 @@ export function renderDetail(message) {
     return;
   }
   pane.append(h('div', { class: 'detail' },
-    header(p), topControls(p), destinationCard(p), marketCard(p), readinessCard(p), photosCard(p), aiCard(p), listingCard(p), channelCard(p), qcCard(p), basicCard(p), linksCard(p), mercariCard(p), historyCard(p)));
+    header(p), topControls(p), destinationCard(p), marketCard(p), readinessCard(p), photosCard(p), aiCard(p), listingCard(p), channelCard(p), qcCard(p), basicCard(p), linksCard(p), mercariCard(p), booksCard(p), historyCard(p)));
   pane.scrollTop = scroll;
   if (keep) {
     const el = pane.querySelector(`[data-path="${CSS.escape(keep.path)}"]`);

@@ -110,3 +110,20 @@ test('飲食料品: フリマは手で入れたものも1回外し、既定で�
   store.setTargets(honey, 'user', ['mercari']); // taking it off needs no confirmation
   assert.deepEqual(store.get(honey).targets, ['mercari']);
 });
+
+test('Vine提供品には出品先を入れず、規則が入れた分だけ外す（手で入れた分と判断はそのまま）', async () => {
+  const store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-')));
+  const id = store.create({ name: '安いVine品' }).product.id;
+  store.setResearch(id, 'claude', { amazonPrice: 500 });
+  const defaults = createDefaults(store);
+  await tick();
+  assert.deepEqual(store.get(id).targets, ['flea'], 'まだVineの印がない間は通常どおり');
+  store.setTargets(id, 'user', ['flea', 'mercari']); // the user adds メルカリ by hand
+  store.setBrowserInfo(id, 'import', { asin: 'B0TESTVINE', lists: { reviewPending: { ordered: '2026-10-01' } } });
+  await tick();
+  assert.deepEqual(store.get(id).targets, ['mercari'], '規則が入れたフリマは外し、手で入れたメルカリは残す');
+  assert.ok(store.get(id).targetDefaults.flea.removedAt);
+  defaults.sweep();
+  await tick();
+  assert.deepEqual(store.get(id).targets, ['mercari'], 'もう一度入れ直さない');
+});

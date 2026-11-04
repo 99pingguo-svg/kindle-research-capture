@@ -61,6 +61,12 @@ export function normalizeBrowserInfo(info) {
   return { asin, lists, vineOrderDate, syncedAt: nowIso() };
 }
 
+/**
+ * Received through Amazon Vine (in a Vine list of the 観察ブラウザ). Vine items may not be sold or given away under the
+ * Vine terms, so the default rules never put them up for sale. A unit of the same ASIN bought separately is a different product.
+ */
+export const isVineProvided = (p) => Object.keys(p?.browser?.lists || {}).some((k) => VINE_LISTS.includes(k));
+
 /** Same content, ignoring when it was synced. */
 export const sameBrowserInfo = (a, b) => !!a && !!b && a.asin === b.asin && a.vineOrderDate === b.vineOrderDate &&
   JSON.stringify(a.lists) === JSON.stringify(b.lists);

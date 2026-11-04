@@ -24,7 +24,8 @@ import { createMcpHandler, matchesFilter } from './mcp.js';
 import * as mercari from './adapters/mercari.js';
 import * as schema from './schema.js';
 import { parseLine, importDates } from './dates.js';
-import { browserBrief, browserSyncOverview, imageFile, BROWSER_LISTS, IMAGE_STATES } from './browser-sync.js';
+import { Books, BOOK_KINDS, BOOK_STATUSES } from './books.js';
+import { browserBrief, browserSyncOverview, imageFile, isVineProvided, BROWSER_LISTS, IMAGE_STATES } from './browser-sync.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -49,6 +50,7 @@ export function createApp({ dataDir, token = '' } = {}) {
   const studio = createStudio(store);
   const codes = createCodeReader(store);
   createDefaults(store);
+  const books = new Books(store.dataDir);
   const routes = [];
   const route = (method, pattern, handler) => {
     const keys = [];
@@ -57,7 +59,7 @@ export function createApp({ dataDir, token = '' } = {}) {
   };
 
   // 観察ブラウザ連携（どの一覧か・画像取得の状況）は台帳の外のファイルも見るので、summary の外で足す。
-  const sm = (p) => ({ ...summary(p, store.settings), browser: browserBrief(p), vineOrderDate: p.browser?.vineOrderDate || null });
+  const sm = (p) => ({ ...summary(p, store.settings), browser: browserBrief(p), vineOrderDate: p.browser?.vineOrderDate || null, vineProvided: isVineProvided(p) });
   const full = (p) => ({ ...p, summary: sm(p), readiness: readiness(p, store.settings), lint: lint(p, store.settings) });
 
   // ---- meta / settings ----
@@ -429,6 +431,20 @@ export function createApp({ dataDir, token = '' } = {}) {
   });
 
   // export
+  // ---- 帳簿（server/books.js）: 承認・対象外はユーザーのみ。観察ブラウザ連携が POST /api/books/sync で Vine受領などを記録する ----
+  const thisYear = () => String(new Date().getFullYear());
+  route('GET', '/api/books', ({ query }) => ({ entries: books.list(query), kinds: BOOK_KINDS, statuses: BOOK_STATUSES }));
+  route('GET', '/api/books/summary', ({ query }) => books.summary(query.year || thisYear()));
+  route('GET', '/api/books/export.csv', ({ res, query }) => {
+    const year = /^\d{4}$/.test(query.year || '') ? query.year : thisYear();
+    res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="books-${year}.csv"` });
+    res.end(books.csv(year));
+  });
+  route('POST', '/api/books', ({ body, actor }) => books.create(body || {}, actor));
+  route('POST', '/api/books/sync', ({ actor }) => books.syncFromProducts(store.list({ includeTrash: false }), actor));
+  route('PATCH', '/api/books/:id', ({ params, body, actor }) => books.update(params.id, body || {}, actor));
+  route('POST', '/api/books/:id/status', ({ params, body, actor }) => books.setStatus(params.id, body?.status, actor, body?.reason));
+  route('GET', '/api/books/:id/history', ({ params }) => books.history(params.id));
   route('GET', '/api/export.csv', ({ res, query }) => {
     let list = store.list({ includeTrash: false });
     if (query.ids) list = list.filter((p) => query.ids.split(',').includes(p.id));
