@@ -2,10 +2,8 @@
 """iPhone のショートカット2つ（台帳で撮る / 台帳に送る）を作り、Mac の `shortcuts sign` で署名する。
 
 使い方: python3 tools/make_shortcuts.py <出力フォルダ> <サーバーのURL> <合言葉>
-  台帳で撮る : 「カメラ」アプリを開く → 撮ったら左上の「◀ ショートカット」で戻る（戻るまで待機）→
-               最新の写真（スクリーンショットを除く・最大15枚）を1枚ずつ送信URLへ POST（Mac の撮影トレイへ）→
-               Mac が受け取った写真だけ iPhone から削除（iOS が枚数つきで確認）→ 通知。Webアプリの「純正カメラで撮る」から呼ぶ。
-  台帳に送る : 送り直し用。最新の写真（最大20枚）を送るだけ。
+  台帳カメラ : 「カメラ」アプリを開くだけ。Webアプリの「純正カメラで撮る」から呼ぶ（写真は Webアプリで選んで登録）。
+  台帳に送る : （任意）最新の写真（最大20枚）を Mac の撮影トレイへ送るだけ。
   撮影開始より前の写真はサーバーが撮影日時を見て取り込まない（同じ写真も二重に登録しない）。
 アクションの識別子は macOS の Shortcuts の実物（dyld 共有キャッシュ）で確かめたもの（最新の写真＝is.workflow.actions.getlastphoto。
 以前の getlatestphotos は存在せず iPhone で「不明なアクション」になった）。
@@ -110,14 +108,12 @@ def send_actions(count, done_message, delete_after=False):
     ]
 
 
-# 台帳で撮る: カメラを開き、ユーザーが「◀ ショートカット」で戻るまで待ってから送る（1つで撮影〜取り込みまで）。
-shoot = workflow(
-    [OPEN_CAMERA, {'WFWorkflowActionIdentifier': 'is.workflow.actions.waittoreturn', 'WFWorkflowActionParameters': {}}]
-    + send_actions(15, '撮った写真を Mac に送りました。台帳に戻って、登録・保留・破棄を選んでください', delete_after=True),
-    glyph=59446, color=4282601983)
+# 台帳カメラ: カメラを開くだけ（写真の登録は Webアプリの「撮った写真から選んで登録」で）。
+# （カメラを開いて戻るまで待ち、送って消す「台帳で撮る」は iPhone で「パラメータが違う」と動かなかったので使わない）
+camera = workflow([OPEN_CAMERA], glyph=59446, color=4282601983)
 send = workflow(send_actions(20, '写真を送りました（撮影開始後の分だけ取り込まれます）'), glyph=59511, color=4251333119)
 
-for name, wf in (('台帳で撮る', shoot), ('台帳に送る', send)):
+for name, wf in (('台帳カメラ', camera), ('台帳に送る', send)):
     raw = out_dir / f'{name}.unsigned.shortcut'
     raw.write_bytes(plistlib.dumps(wf, fmt=plistlib.FMT_BINARY))
     signed = out_dir / f'{name}.shortcut'

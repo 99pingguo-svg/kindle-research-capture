@@ -316,10 +316,10 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
   // A browser link cannot carry x-actor, so the key-bearing file needs a one-time ticket that only the user's key request hands out.
   const shortcutTickets = new Map(); // ticket -> expiry
   route('GET', '/api/native-shoot/shortcut/:which', async ({ params, req, res, query }) => {
-    const name = { camera: '台帳で撮る', send: '台帳に送る' }[params.which];
+    const name = { camera: '台帳カメラ', send: '台帳に送る' }[params.which];
     if (!name) throw new AppError(404, 'not found');
-    // Both carry the passphrase now (台帳で撮る sends the photos itself), so both need the one-time ticket.
-    {
+    // 台帳カメラ only opens the Camera (no passphrase inside); 台帳に送る carries it, so it needs the one-time ticket.
+    if (params.which === 'send') {
       const exp = shortcutTickets.get(String(query.ticket || ''));
       shortcutTickets.delete(String(query.ticket || ''));
       if (!exp || exp < Date.now()) throw new AppError(403, '設定画面を開き直してから押してください（引換券の期限切れ）');

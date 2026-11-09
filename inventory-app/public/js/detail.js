@@ -5,7 +5,7 @@ import { state, on, applyProduct, emit } from './state.js';
 import { openCamera } from './camera.js';
 import { makeVariants, fetchBitmap, renderEdit, editToVariants, DEFAULT_EDIT } from './images.js';
 import * as uploads from './uploads.js';
-import { shootWithNativeCamera, traySheet } from './native.js';
+import { shootWithNativeCamera, pickPhotosFor } from './native.js';
 import { quickMemo, searchPhotoFor, addSearchPhoto, presenceSeg, reviewSheet, placeSheet } from './quick.js';
 import { openAmazonSearch } from './amazon-search.js';
 import { booksCard } from './books.js';
@@ -140,7 +140,7 @@ function presenceCard(p) {
       h('a', { class: 'btn small', href: `/api/materials.zip?ids=${p.id}`, download: '' }, '📦 素材Zip')),
     h('div', { class: 'presence-line' },
       h('button', { class: 'btn small primary', onclick: () => shootWithNativeCamera(p.id) }, '📸 純正カメラで撮る'),
-      h('button', { class: 'btn small', onclick: () => traySheet(p.id) }, '📥 撮った写真から選ぶ')),
+      h('button', { class: 'btn small', onclick: () => pickPhotosFor(p.id) }, '🖼 撮った写真から登録')),
     rv.note && h('p', { class: 'small', style: { margin: '6px 0 0' } }, `メモ: ${rv.note}`),
     rv.draft && h('details', null, h('summary', { class: 'small' }, '下書きを見る'), h('pre', { class: 'review-draft' }, rv.draft)),
     /^https?:\/\//i.test(rv.url || '') && h('a', { class: 'small', href: rv.url, target: '_blank', rel: 'noopener noreferrer' }, '投稿したページ ↗'));
