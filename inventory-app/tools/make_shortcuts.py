@@ -5,6 +5,8 @@
   台帳カメラ : 「カメラ」アプリを開く
   台帳に送る : 最新の写真（スクリーンショットを除く・最大20枚）を1枚ずつ送信URLへ POST。
                撮影開始より前の写真はサーバーが撮影日時を見て取り込まない（同じ写真も二重に登録しない）。
+アクションの識別子は macOS の Shortcuts の実物（dyld 共有キャッシュ）で確かめたもの（最新の写真＝is.workflow.actions.getlastphoto。
+以前の getlatestphotos は存在せず iPhone で「不明なアクション」になった）。
 合言葉は「台帳に送る」の中に入る（この2口にしか使えない合言葉）。ファイルは人に渡さないこと。
 """
 import plistlib
@@ -48,7 +50,7 @@ camera = workflow([{
 photos_uuid = str(uuid.uuid4()).upper()
 loop = str(uuid.uuid4()).upper()
 send = workflow([
-    {'WFWorkflowActionIdentifier': 'is.workflow.actions.getlatestphotos',
+    {'WFWorkflowActionIdentifier': 'is.workflow.actions.getlastphoto',
      'WFWorkflowActionParameters': {'UUID': photos_uuid, 'WFGetLatestPhotoCount': 20, 'WFGetLatestPhotosActionIncludeScreenshots': False}},
     {'WFWorkflowActionIdentifier': 'is.workflow.actions.repeat.each',
      'WFWorkflowActionParameters': {'GroupingIdentifier': loop, 'WFControlFlowMode': 0,
