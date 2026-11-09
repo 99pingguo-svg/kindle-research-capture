@@ -21,6 +21,7 @@ import { createCodeReader } from './codes.js';
 import { createCategorizer } from './categorize.js';
 import { createOfficialFetcher } from './official.js';
 import { agentQueue } from './hub.js';
+import { createTray } from './tray.js';
 import { createDefaults } from './defaults.js';
 import { exportEntries, productsCsv, officialEntries, officialStats, materialsEntries } from './export.js';
 import { createMcpHandler, matchesFilter } from './mcp.js';
@@ -57,6 +58,8 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
   // Auto-finishing of newly shot photos (white background / crop / colour), one at a time in the background.
   const studio = createStudio(store);
   const codes = createCodeReader(store);
+  // 撮影トレイ: 純正カメラの写真はまずここへ。ユーザーが登録したら商品の写真になり、自動仕上げ・番号読み取りへ。
+  const tray = createTray(store, { onRegistered: (id, photo) => { studio.enqueue(id, photo); codes.enqueue(id, photo); } });
   createDefaults(store);
   // 種類の自動分類と公式画像の自動取得（テストでは動かさない: 外へ取りに行くため）
   const categorizer = background ? createCategorizer(store) : null;
@@ -247,7 +250,7 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
     const d = new Date(ns.since);
     const pad = (n) => String(n).padStart(2, '0');
     const sinceLocal = `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-    return { active: true, productId: p.id, name: p.name, since: ns.since, sinceLocal, photos: p.photos.filter((x) => !x.deletedAt && x.source === 'native' && x.createdAt >= ns.at).length };
+    return { active: true, productId: p.id, name: p.name, since: ns.since, sinceLocal, photos: tray.list({ productId: p.id }).filter((x) => x.status === 'new' && x.receivedAt >= ns.at).length };
   };
   // ショートカットからの連絡の記録（最新20件、メモリだけ）: つながっているか・何で失敗したかをアプリで見せる。
   const shortcutContacts = [];
@@ -261,6 +264,14 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
     return info;
   });
   route('GET', '/api/native-shoot/contacts', () => ({ contacts: shortcutContacts }));
+  // 撮影トレイ（候補の写真）: 一覧・画像・登録／保留／破棄（ユーザーのみ）
+  route('GET', '/api/tray', ({ query }) => ({ items: tray.list({ productId: query.productId || null }) }));
+  route('GET', '/api/tray/:id/:variant', ({ res, params }) => {
+    const buf = fs.readFileSync(tray.file(params.id, params.variant));
+    res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=3600', 'content-length': buf.length });
+    res.end(buf);
+  });
+  route('POST', '/api/tray/decide', ({ body, actor }) => tray.decide(actor, Array.isArray(body?.decisions) ? body.decisions : []));
   // 自動仕上げ: 状況と、まだ仕上げていない写真の処理（商品を指定できる）
   // 写真の文字・バーコードを読む（検索用。tools/bin/ocr＝macOS Vision、外部送信なし）。本文 = 画像そのもの。写真は保存しない。
   route('POST', '/api/ocr', async ({ req }) => {
@@ -346,10 +357,10 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
     const files = await nativeVariants(buf);
     // The shortcut sends the latest photos; only those taken after the shoot started belong to this product.
     if (files.takenAt && files.takenAt < new Date(Date.parse(ns.since) - 60_000)) { contact('写真を受け取る', '撮影開始より前の写真なので入れなかった'); return { ok: true, skipped: '撮影開始より前の写真' }; }
-    const { photo, duplicate } = store.addPhoto(ns.productId, 'user', { kind: 'actual', source: 'native', clientId: `native:${digest}`, width: files.width, height: files.height, takenAt: files.takenAt?.toISOString() || null }, files);
-    if (!duplicate) { studio.enqueue(ns.productId, photo); codes.enqueue(ns.productId, photo); }
-    contact('写真を受け取る', duplicate ? `#${ns.productId} に同じ写真が既にある` : `#${ns.productId} に追加した`);
-    return { ok: true, productId: ns.productId, photoId: photo.id, duplicate };
+    // Not into the product yet: the photo waits in the tray until the user picks 登録／保留／破棄 in the web app.
+    const { item, duplicate } = tray.add({ productId: ns.productId, digest, files });
+    contact('写真を受け取る', duplicate ? '同じ写真が既にトレイにある' : `#${ns.productId} の候補としてトレイに入れた`);
+    return { ok: true, productId: ns.productId, trayId: item.id, duplicate };
   });
   route('PATCH', '/api/products/:id/photos/:pid', ({ params, body, actor }) => full(store.updatePhoto(params.id, actor, params.pid, body)));
   route('DELETE', '/api/products/:id/photos/:pid', ({ params, actor }) => full(store.deletePhoto(params.id, actor, params.pid)));

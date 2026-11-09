@@ -3,9 +3,7 @@
 // ショートカットが撮った写真を送る（戻るまで待機）→ 台帳に戻ると次の商品などを選べる。届かなかったときは「台帳に送る」か写真を選んで追加。
 import { h, toast, showError, sheet, copyText } from './ui.js';
 import { api } from './api.js';
-import { state } from './state.js';
-import { makeVariants } from './images.js';
-import * as uploads from './uploads.js';
+import { state, on } from './state.js';
 
 const KEY = 'daicho.native';
 const NAMES_KEY = 'daicho.nativeNames';
@@ -52,51 +50,92 @@ async function endShoot() {
   await api.del('/api/native-shoot').catch(() => {});
 }
 
-async function addPicked(productId, fileList) {
-  const files = [...(fileList || [])];
-  let n = 0;
-  for (const f of files) {
-    try {
-      const v = await makeVariants(f);
-      await uploads.enqueue({ productId, kind: 'actual', source: 'native-pick', original: f, work: v.work, thumb: v.thumb, width: v.width, height: v.height, takenAt: new Date(f.lastModified || Date.now()).toISOString() });
-      n++;
-    } catch (e) {
-      showError(e);
-    }
+
+const ACTION = { register: '登録', hold: '保留', discard: '破棄' };
+const NEXT = { register: 'hold', hold: 'discard', discard: 'register' };
+
+/**
+ * 撮影トレイから選ぶ: この商品のために撮った写真（既定は「登録」）と、保留中・前の撮影の未整理の写真（既定は「保留」）を並べる。
+ * タップで 登録→保留→破棄 を切り替え、「決める」で登録した分だけこの商品の写真になる（Mac が自動で仕上げ）。
+ * 別の商品も続けて撮ったときは、その写真を「保留」のまま残せば、次の商品でここに出てくる。
+ */
+export async function traySheet(productId, { afterShoot = null } = {}) {
+  const p = state.products.get(productId);
+  const choice = new Map();
+  let items = [];
+  const grid = h('div', { class: 'tray-grid' });
+  const status = h('p', { class: 'muted small', style: { margin: '4px 0' } });
+  const decideBtn = h('button', { class: 'btn primary' }, '決める');
+  const mine = (it) => it.status === 'new' && it.productId === productId;
+  const count = () => [...choice.values()].reduce((m, a) => ((m[a] = (m[a] || 0) + 1), m), {});
+  function paint() {
+    grid.replaceChildren(...items.map((it) => {
+      const a = choice.get(it.id);
+      return h('button', { class: `tray-tile ${a}`, onclick: () => { choice.set(it.id, NEXT[a]); paint(); } },
+        h('img', { src: it.thumb, alt: '', loading: 'lazy' }),
+        h('span', { class: 'tray-label' }, ACTION[a]),
+        !mine(it) && h('span', { class: 'tray-from' }, it.status === 'held' ? '保留中' : `#${it.productId}の撮影`));
+    }));
+    const c = count();
+    decideBtn.textContent = `決める（登録 ${c.register || 0}・保留 ${c.hold || 0}・破棄 ${c.discard || 0}）`;
+    status.textContent = items.length ? 'タップで 登録 → 保留 → 破棄。別の商品の写真は「保留」にしておくと、次の商品で選べます。'
+      : afterShoot ? '写真を受け取り中…（ショートカットが送り終えるまで少し待ってください）' : 'トレイに写真はありません。';
   }
-  if (n) toast(`${n}枚を追加しました（送信は自動で続きます）`);
+  async function refresh() {
+    try {
+      items = (await api.get('/api/tray')).items;
+    } catch {
+      return;
+    }
+    items.sort((a, b) => (mine(b) - mine(a)) || (b.takenAt || b.receivedAt).localeCompare(a.takenAt || a.receivedAt));
+    for (const it of items) if (!choice.has(it.id)) choice.set(it.id, mine(it) ? 'register' : 'hold');
+    for (const id of [...choice.keys()]) if (!items.some((it) => it.id === id)) choice.delete(id);
+    paint();
+  }
+  const off = on('tray', refresh);
+  // Photos keep arriving for a while after coming back (the shortcut sends them one by one).
+  const poll = afterShoot ? setInterval(refresh, 3000) : null;
+  const stopPoll = setTimeout(() => poll && clearInterval(poll), 120_000);
+  const cleanup = () => { off(); if (poll) clearInterval(poll); clearTimeout(stopPoll); };
+  const setAll = (a, pred = () => true) => { for (const it of items) if (pred(it)) choice.set(it.id, a); paint(); };
+  sheet((close) => {
+    decideBtn.onclick = async () => {
+      const decisions = items.map((it) => ({ id: it.id, action: choice.get(it.id), productId }));
+      if (!decisions.length) return close();
+      try {
+        const r = await api.post('/api/tray/decide', { decisions });
+        toast(`登録 ${r.registered}枚・保留 ${r.held}枚・破棄 ${r.discarded}枚（登録した写真は Mac が自動で仕上げます）`);
+        close();
+        afterShoot?.();
+      } catch (e) {
+        showError(e);
+      }
+    };
+    return h('div', { class: 'memo-sheet tray-sheet' },
+      h('h2', null, '📥 撮った写真から選ぶ ', h('span', { class: 'muted small' }, `#${productId} ${p?.name || ''}`)),
+      status,
+      h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap', margin: '4px 0' } },
+        h('button', { class: 'btn small', onclick: () => setAll('register', mine) }, 'この商品の分を全部登録'),
+        h('button', { class: 'btn small', onclick: () => setAll('hold', (it) => choice.get(it.id) !== 'register') }, '登録以外は保留'),
+        h('button', { class: 'btn small ghost', onclick: refresh }, '↻ 受け取りを確認')),
+      grid,
+      h('div', { class: 'actions' }, decideBtn, h('button', { class: 'btn ghost', onclick: () => close() }, 'あとで')));
+  }, { onClose: cleanup });
+  await refresh();
 }
 
-/** Shown when coming back from the Camera app (or the send shortcut). */
+/** Shown when coming back from the Camera app: pick from the photos just taken, then 続けて撮る／次の商品／終える. */
 export async function openImportSheet() {
   const s = session();
   if (!s) return;
-  let info = null;
-  try {
-    info = await api.get('/api/native-shoot');
-  } catch {
-    /* offline: the sheet still offers picking photos */
-  }
-  const p = state.products.get(s.productId);
-  const picker = h('input', { type: 'file', accept: 'image/*', multiple: true, style: { display: 'none' } });
-  const names = shortcutNames();
-  sheet((close) => {
-    picker.onchange = (e) => { addPicked(s.productId, e.target.files); close(); };
-    const nextId = s.ids[s.index + 1];
-    return h('div', null,
-      h('h2', null, '📸 純正カメラの写真を取り込む'),
-      h('p', { class: 'small', style: { margin: '0 0 4px' } }, h('b', null, `#${s.productId} `), p?.name || ''),
-      info?.active && h('p', { class: 'muted small', style: { margin: '0 0 8px' } }, `この撮影で届いた写真: ${info.photos}枚`),
-      contactsBox(),
+  const nextId = s.ids[s.index + 1];
+  await traySheet(s.productId, {
+    afterShoot: () => sheet((close) => h('div', null,
+      h('h2', null, '次はどうしますか'),
       h('div', { class: 'actions' },
-        h('button', { class: 'btn', onclick: () => { close(); runShortcut(names.send, `${location.origin}/#/p/${s.productId}`); } }, `⚡ 写真が届いていなければ送り直す`),
-        h('button', { class: 'btn', onclick: () => picker.click() }, '🖼 写真を選んで取り込む'),
-        h('button', { class: 'btn', onclick: async () => { close(); (await import('./bulkimport.js')).bulkImportNativePhotos(); } }, '📸 いくつもの商品をまとめて取り込む（自動で仕分け）'),
-        h('button', { class: 'btn primary', onclick: () => { close(); shootWithNativeCamera(s.productId, s); } }, '📸 続けて撮る'),
-        nextId && h('button', { class: 'btn', onclick: () => { close(); shootWithNativeCamera(nextId, { ids: s.ids, index: s.index + 1 }); } }, `→ 次の商品を撮る（#${nextId}）`),
-        h('button', { class: 'btn ghost', onclick: () => { close(); endShoot(); toast('純正カメラの撮影を終えました'); } }, '✓ 撮影を終える'),
-        h('button', { class: 'btn ghost small', onclick: () => { close(); openNativeSetup(); } }, 'ショートカットの設定方法')),
-      picker);
+        nextId && h('button', { class: 'btn primary', onclick: () => { close(); shootWithNativeCamera(nextId, { ids: s.ids, index: s.index + 1 }); } }, `→ 次の商品を撮る（#${nextId}）`),
+        h('button', { class: 'btn', onclick: () => { close(); shootWithNativeCamera(s.productId, s); } }, '📸 この商品を続けて撮る'),
+        h('button', { class: 'btn ghost', onclick: () => { close(); endShoot(); toast('純正カメラの撮影を終えました'); } }, '✓ 撮影を終える')))),
   });
 }
 

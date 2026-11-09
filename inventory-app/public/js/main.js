@@ -37,6 +37,7 @@ function onServerEvent(ev) {
     api.get('/api/meta').then((m) => (state.meta = m)).catch(() => {});
     return;
   }
+  if (ev.type === 'tray') return emit('tray'); // 純正カメラの写真がトレイに届いた
   if (ev.type !== 'product') return;
   pendingIds.add(ev.id);
   clearTimeout(flushTimer);

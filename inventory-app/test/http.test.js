@@ -202,8 +202,18 @@ test('native camera: the shortcut key can only read the target and send photos t
     const png = await noisePng();
     const r = await (await at(lan, '/api/native-shoot/photos', { method: 'POST', headers: { ...k, 'content-type': 'image/png' }, body: png })).json();
     assert.equal(r.productId, product.id);
+    assert.ok(r.trayId, 'the shortcut deletes from the iPhone only photos whose answer has trayId');
     const again = await (await at(lan, '/api/native-shoot/photos', { method: 'POST', headers: { ...k, 'content-type': 'image/png' }, body: png })).json();
     assert.equal(again.duplicate, true);
+    // Photos wait in the tray until the user picks 登録／保留／破棄.
+    assert.equal(app.store.get(product.id).photos.filter((x) => !x.deletedAt).length, 0);
+    const { items } = await (await at(local, `/api/tray?productId=${product.id}`, { headers: user })).json();
+    assert.equal(items.length, 1);
+    assert.equal((await at(local, '/api/tray/decide', { method: 'POST', headers: { ...user, 'x-actor': 'claude' }, body: JSON.stringify({ decisions: [{ id: items[0].id, action: 'register' }] }) })).status, 403);
+    assert.equal((await at(local, `/api/tray/${items[0].id}/thumb`, { headers: user })).status, 200);
+    const done = await (await at(local, '/api/tray/decide', { method: 'POST', headers: user, body: JSON.stringify({ decisions: [{ id: items[0].id, action: 'register' }] }) })).json();
+    assert.equal(done.registered, 1);
+    assert.equal((await (await at(local, '/api/tray', { headers: user })).json()).items.length, 0);
     const ph = app.store.get(product.id).photos.filter((x) => !x.deletedAt);
     assert.equal(ph.length, 1);
     assert.equal(ph[0].source, 'native');
@@ -232,4 +242,28 @@ test('native camera: the key-bearing shortcut needs a one-time ticket from the u
     local.closeAllConnections();
     local.close();
   }
+});
+
+test('撮影トレイ: 保留した写真は残って次の商品で登録でき、破棄は消さずに移すだけ', async () => {
+  const { createTray } = await import('../server/tray.js');
+  const { Store } = await import('../server/store.js');
+  const store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-tray-')));
+  const a = store.create({ name: 'A' }).product.id;
+  const b = store.create({ name: 'B' }).product.id;
+  const reg = [];
+  const tray = createTray(store, { onRegistered: (id) => reg.push(id) });
+  const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xd9, ...Array(2000).fill(0)]);
+  const files = (n) => ({ original: { buffer: Buffer.concat([jpg, Buffer.from([n])]), mime: 'image/jpeg' }, work: { buffer: jpg }, thumb: { buffer: jpg }, width: 10, height: 10, takenAt: null });
+  const x = tray.add({ productId: a, digest: 'd1', files: files(1) }).item;
+  const y = tray.add({ productId: a, digest: 'd2', files: files(2) }).item;
+  const z = tray.add({ productId: a, digest: 'd3', files: files(3) }).item;
+  // A を撮るついでに B も撮った: x は A に登録、y は次の商品のために保留、z は破棄
+  assert.deepEqual(tray.decide('user', [{ id: x.id, action: 'register' }, { id: y.id, action: 'hold' }, { id: z.id, action: 'discard' }]), { registered: 1, held: 1, discarded: 1 });
+  assert.equal(store.get(a).photos.length, 1);
+  assert.deepEqual(tray.list().map((t) => [t.id, t.status]), [[y.id, 'held']]);
+  assert.ok(fs.existsSync(path.join(store.dataDir, 'tray', 'discarded', `${z.id}.work.jpg`)), '破棄は消さずに discarded/ へ');
+  tray.decide('user', [{ id: y.id, action: 'register', productId: b }]);
+  assert.equal(store.get(b).photos.length, 1);
+  assert.deepEqual(reg, [a, b]);
+  assert.throws(() => tray.decide('claude', []), /ユーザーのみ/);
 });
