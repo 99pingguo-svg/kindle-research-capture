@@ -21,6 +21,7 @@ const defaults = {
   camAutoNext: true,
   camRequestAi: true,
   camKeepTag: false,
+  view: 'check', // 一覧の表示: check＝あるかないか（軽い） / full＝詳しく（出品・相場まで）
 };
 
 function loadPrefs() {
@@ -104,6 +105,11 @@ export function applyProduct(full) {
 
 export const FILTERS = [
   { id: 'all', label: 'すべて' },
+  { id: 'presence_unchecked', label: '未チェック' },
+  { id: 'have', label: 'ある' },
+  { id: 'gone', label: 'ない' },
+  { id: 'presence_unknown', label: 'わからない' },
+  { id: 'review_todo', label: 'レビュー予定' },
   { id: 'not_stock_checked', label: '現在の最新在庫チェック（未）' },
   { id: 'stock_checked', label: '最新在庫チェック済み' },
   { id: 'stock_unknown', label: '在庫状況「不明」' },
@@ -158,6 +164,11 @@ export function matchesFilter(sm, filter) {
     case 'needs_photos': return active && !['no_sell', 'no_stock'].includes(sm.decision) && sm.stage !== 'sold' && (sm.counts.actual + (sm.counts.generated || 0) === 0 || sm.openPhotoRequests.length > 0 || sm.stage === 'needs_photos');
     case 'shot_today': return active && isToday(sm.lastPhotoAt);
     case 'shoot_plan': return active && sm.shootPlan;
+    case 'have': return active && sm.presence === 'have';
+    case 'gone': return sm.presence === 'gone' && !sm.trashedAt;
+    case 'presence_unknown': return active && sm.presence === 'unknown';
+    case 'presence_unchecked': return active && !sm.presence;
+    case 'review_todo': return active && ['todo', 'drafted', 'approved'].includes(sm.review?.status || '');
     case 'open_checked': return active && !!sm.openCheckedAt;
     case 'not_open_checked': return active && !sm.openCheckedAt && !['no_sell', 'no_stock'].includes(sm.decision);
     case 'stock_checked': return active && !!sm.stockCheckedAt;

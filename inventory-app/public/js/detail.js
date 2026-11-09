@@ -6,7 +6,7 @@ import { openCamera } from './camera.js';
 import { makeVariants, fetchBitmap, renderEdit, editToVariants, DEFAULT_EDIT } from './images.js';
 import * as uploads from './uploads.js';
 import { shootWithNativeCamera } from './native.js';
-import { quickMemo, searchPhotoFor, addSearchPhoto } from './quick.js';
+import { quickMemo, searchPhotoFor, addSearchPhoto, presenceSeg, reviewSheet, placeSheet } from './quick.js';
 import { openAmazonSearch } from './amazon-search.js';
 import { booksCard } from './books.js';
 
@@ -109,7 +109,7 @@ export function renderDetail(message) {
     return;
   }
   pane.append(h('div', { class: 'detail' },
-    header(p), topControls(p), destinationCard(p), marketCard(p), readinessCard(p), photosCard(p), aiCard(p), listingCard(p), channelCard(p), qcCard(p), basicCard(p), linksCard(p), mercariCard(p), booksCard(p), historyCard(p)));
+    header(p), presenceCard(p), topControls(p), destinationCard(p), marketCard(p), readinessCard(p), photosCard(p), aiCard(p), listingCard(p), channelCard(p), qcCard(p), basicCard(p), linksCard(p), mercariCard(p), booksCard(p), historyCard(p)));
   pane.scrollTop = scroll;
   if (keep) {
     const el = pane.querySelector(`[data-path="${CSS.escape(keep.path)}"]`);
@@ -123,6 +123,24 @@ export function renderDetail(message) {
       }
     }
   }
+}
+
+/** あるかないか・置き場・レビューの予定・素材Zip（この商品でいちばん先に決めること）。 */
+function presenceCard(p) {
+  const sm = p.summary;
+  const rv = p.reviewPlan || {};
+  const STATUS = Object.fromEntries((state.meta.reviewStatuses || []).map((s) => [s.id, s.label]));
+  const FORMAT = Object.fromEntries((state.meta.reviewFormats || []).map((f) => [f.id, f.label]));
+  return h('div', { class: 'card presence-card' },
+    h('div', { class: 'presence-line' }, h('span', { class: 'small muted' }, 'あるかないか'), presenceSeg({ id: p.id, presence: sm.presence })),
+    h('div', { class: 'presence-line' },
+      h('button', { class: 'chip-btn cat', onclick: () => placeSheet(sm.category) }, sm.category, ' 📍', sm.place || h('span', { class: 'muted' }, '置き場未定')),
+      h('button', { class: `chip-btn review r-${rv.status || 'none'}`, onclick: () => reviewSheet(p.id) },
+        '✍ レビュー: ', STATUS[rv.status || ''] || '未定', (rv.formats || []).length ? `（${rv.formats.map((f) => FORMAT[f] || f).join('・')}）` : ''),
+      h('a', { class: 'btn small', href: `/api/materials.zip?ids=${p.id}`, download: '' }, '📦 素材Zip')),
+    rv.note && h('p', { class: 'small', style: { margin: '6px 0 0' } }, `メモ: ${rv.note}`),
+    rv.draft && h('details', null, h('summary', { class: 'small' }, '下書きを見る'), h('pre', { class: 'review-draft' }, rv.draft)),
+    rv.url && h('a', { class: 'small', href: rv.url, target: '_blank', rel: 'noopener noreferrer' }, '投稿したページ ↗'));
 }
 
 function header(p) {

@@ -544,3 +544,32 @@ code, .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 .mini-table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0; }
 .mini-table th, .mini-table td { border-bottom: 1px solid var(--border); padding: 4px 6px; }
 .mini-table th { text-align: left; font-weight: 600; }
+
+/* あるかないか表示（一覧の基本） */
+.item.check-row { grid-template-columns: 64px 1fr auto; padding: 8px; gap: 8px; }
+.item.check-row .thumb { width: 64px; height: 64px; }
+.item.check-row .item-title { cursor: pointer; }
+.item.check-row.presence-have { border-left: 5px solid #22c55e; }
+.item.check-row.presence-gone { border-left: 5px solid #94a3b8; background: color-mix(in srgb, #94a3b8 14%, var(--card)); }
+.item.check-row.presence-gone .thumb { opacity: .6; }
+.item.check-row.presence-unknown { border-left: 5px solid #f59e0b; }
+.check-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+.presence-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.presence-seg button { min-width: 52px; min-height: 36px; border: none; background: var(--card); font-size: 15px; font-weight: 700; color: var(--muted); }
+.presence-seg button + button { border-left: 1px solid var(--border); }
+.presence-seg button.have.on { background: #22c55e; color: #fff; }
+.presence-seg button.gone.on { background: #64748b; color: #fff; }
+.presence-seg button.unknown.on { background: #f59e0b; color: #fff; }
+.chip-btn { border: 1px solid var(--border); background: var(--card); border-radius: 999px; padding: 3px 10px; font-size: 12px; color: inherit; min-height: 28px; }
+.chip-btn.review.r-todo, .chip-btn.review.r-drafted { border-color: #6366f1; color: #6366f1; font-weight: 700; }
+.chip-btn.review.r-approved { background: #6366f1; color: #fff; border-color: #6366f1; }
+.chip-btn.review.r-posted { border-color: #22c55e; color: #16a34a; }
+.chip-btn.review.r-skip { opacity: .6; }
+.presence-card .presence-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0; }
+.review-draft { white-space: pre-wrap; font-size: 13px; background: var(--bg); padding: 8px; border-radius: 8px; max-height: 260px; overflow: auto; }
+.seg.review-status button { font-size: 12px; }
+.agent-tasks { display: grid; gap: 6px; max-height: 60vh; overflow: auto; }
+.agent-task { text-align: left; border: 1px solid var(--border); background: var(--card); border-radius: 10px; padding: 8px; color: inherit; font-size: 13px; }
+.item.check-row .item-sub { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.item.check-row .chip-btn.cat { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.item.check-row .item-main { min-width: 0; }

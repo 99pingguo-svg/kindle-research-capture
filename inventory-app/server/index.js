@@ -18,8 +18,11 @@ import { summary, readiness, lint, channelPackage, suggestedTargets, bulkPrice }
 import { writeZip } from './zip.js';
 import { createStudio } from './studio.js';
 import { createCodeReader } from './codes.js';
+import { createCategorizer } from './categorize.js';
+import { createOfficialFetcher } from './official.js';
+import { agentQueue } from './hub.js';
 import { createDefaults } from './defaults.js';
-import { exportEntries, productsCsv, officialEntries, officialStats } from './export.js';
+import { exportEntries, productsCsv, officialEntries, officialStats, materialsEntries } from './export.js';
 import { createMcpHandler, matchesFilter } from './mcp.js';
 import * as mercari from './adapters/mercari.js';
 import * as schema from './schema.js';
@@ -42,7 +45,7 @@ const MIME = {
   '.heif': 'image/heif', '.gif': 'image/gif', '.txt': 'text/plain; charset=utf-8',
 };
 
-export function createApp({ dataDir, token = '' } = {}) {
+export function createApp({ dataDir, token = '', background = !process.env.NODE_TEST_CONTEXT } = {}) {
   const store = new Store(dataDir);
   const mcp = createMcpHandler(store);
   const sseClients = new Set();
@@ -55,6 +58,9 @@ export function createApp({ dataDir, token = '' } = {}) {
   const studio = createStudio(store);
   const codes = createCodeReader(store);
   createDefaults(store);
+  // 種類の自動分類と公式画像の自動取得（テストでは動かさない: 外へ取りに行くため）
+  const categorizer = background ? createCategorizer(store) : null;
+  const official = background ? createOfficialFetcher(store, { port: Number(process.env.PORT || 8787) }) : null;
   const books = new Books(store.dataDir);
   const prices = new Prices(store.dataDir);
   const routes = [];
@@ -73,6 +79,7 @@ export function createApp({ dataDir, token = '' } = {}) {
     delivery: shippingMeta(), categories: CATEGORIES, stages: schema.STAGES, decisions: schema.DECISIONS, fields: schema.FIELDS, conditions: schema.MERCARI_CONDITIONS,
     linkTypes: schema.LINK_TYPES, photoTags: schema.PHOTO_TAGS, factConfidence: schema.FACT_CONFIDENCE,
     aiTaskTypes: schema.AI_TASK_TYPES, qcChecks: schema.QC_CHECKS, limits: schema.MERCARI_LIMITS,
+    presence: schema.PRESENCE, reviewStatuses: schema.REVIEW_STATUSES, reviewFormats: schema.REVIEW_FORMATS,
     shipping: { payers: schema.SHIPPING_PAYERS, methods: schema.SHIPPING_METHODS, days: schema.SHIPPING_DAYS, prefectures: schema.PREFECTURES },
     settings: store.settings, dataDir: store.dataDir, mcpPath: '/mcp',
     channels: schema.CHANNELS, observedStatuses: schema.OBSERVED_STATUSES, photoKinds: schema.PHOTO_KINDS, channelChecks: store.meta.channelChecks || {},
@@ -159,6 +166,31 @@ export function createApp({ dataDir, token = '' } = {}) {
     notifyAozoraShelf(req, params.id, on);
     return full(p);
   });
+  // あるかないか（ユーザーのみ）: have / gone / unknown / null。あおぞら市の棚の印も合わせる。
+  route('POST', '/api/products/:id/presence', ({ req, params, body, actor }) => {
+    const state = body?.state ?? null;
+    const p = store.setPresence(params.id, actor, state);
+    notifyAozoraShelf(req, params.id, state === 'have');
+    return full(p);
+  });
+  // レビュー・発信の予定（ユーザーは全部、AI は下書きと投稿済みの報告だけ）
+  route('PUT', '/api/products/:id/review-plan', ({ params, body, actor }) => full(store.setReviewPlan(params.id, actor, body || {})));
+  // AI エージェントの「やること」一覧（レビューの下書き・投稿OKの投稿・出品）
+  route('GET', '/api/agent/queue', () => agentQueue(store, store.settings));
+  // 素材Zip: ?ids=0001,0002（無ければ ?presence=have のように絞った全部）。公式画像・写真・仕上げ・紹介画像・情報・下書き。
+  route('GET', '/api/materials.zip', async ({ res, query }) => {
+    let list = store.list({ includeTrash: false });
+    if (query.ids) { const ids = new Set(String(query.ids).split(',')); list = list.filter((p) => ids.has(p.id)); }
+    if (query.presence) list = list.filter((p) => (sm(p).presence || 'none') === query.presence);
+    if (list.length > 600) throw new AppError(400, '一度に600件までです（絞ってください）');
+    const browserImage = (asin) => { try { return imageFile(asin); } catch { return null; } };
+    res.writeHead(200, { 'content-type': 'application/zip', 'content-disposition': `attachment; filename="materials-${stamp()}.zip"` });
+    await writeZip(res, materialsEntries(store, list, { browserImage, settings: store.settings }));
+    res.end();
+  });
+  route('GET', '/api/auto-jobs', () => ({ official: official?.status() || null }));
+  route('POST', '/api/categorize/run', async () => ({ classified: categorizer ? await categorizer.sweep() : 0 }));
+  route('POST', '/api/official/run', () => ({ started: official ? official.run() : false }));
   route('POST', '/api/products/:id/stock-unknown', ({ req, params, body, actor }) => {
     const on = body?.on !== false;
     const p = store.setStockUnknown(params.id, actor, on);

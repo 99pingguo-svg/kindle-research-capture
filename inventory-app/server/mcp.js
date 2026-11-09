@@ -17,6 +17,7 @@ import { importDates } from './dates.js';
 import { CATEGORIES } from './category.js';
 import { marketBrief, mercariNet } from './market.js';
 import { shippingOf } from './shipping.js';
+import { agentQueue } from './hub.js';
 
 const SERVER_INFO = { name: 'shohin-daicho', title: '商品台帳', version: '0.1.0' };
 const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -43,7 +44,7 @@ const s = {
   enumOf: (values, description) => ({ type: 'string', enum: values, description }),
 };
 
-const LIST_FILTERS = ['all', 'sell', 'draft', 'undecided', 'hold', 'no_sell', 'no_stock', 'needs_photos', 'shot_today', 'shoot_plan', 'open_checked', 'not_open_checked', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'trading', 'sold', 'to_mercari', 'to_jmty', 'to_yahoo', 'to_paypay', 'to_rakuma', 'to_flea', 'research_jmty', 'research_3000', 'research_2300', 'aside', 'archived', 'trash'];
+const LIST_FILTERS = ['all', 'have', 'gone', 'presence_unknown', 'presence_unchecked', 'review_todo', 'sell', 'draft', 'undecided', 'hold', 'no_sell', 'no_stock', 'needs_photos', 'shot_today', 'shoot_plan', 'open_checked', 'not_open_checked', 'ai_queue', 'review', 'qc_issue', 'ready', 'queued', 'mercari', 'listed', 'trading', 'sold', 'to_mercari', 'to_jmty', 'to_yahoo', 'to_paypay', 'to_rakuma', 'to_flea', 'research_jmty', 'research_3000', 'research_2300', 'aside', 'archived', 'trash'];
 
 function today() {
   const d = new Date();
@@ -68,6 +69,11 @@ export function matchesFilter(sm, filter) {
     case 'needs_photos': return active && !['no_sell', 'no_stock'].includes(sm.decision) && sm.stage !== 'sold' && (sm.counts.actual + (sm.counts.generated || 0) === 0 || sm.openPhotoRequests.length > 0 || sm.stage === 'needs_photos');
     case 'shot_today': return active && isToday(sm.lastPhotoAt);
     case 'shoot_plan': return active && sm.shootPlan;
+    case 'have': return active && sm.presence === 'have';
+    case 'gone': return sm.presence === 'gone' && !sm.trashedAt;
+    case 'presence_unknown': return active && sm.presence === 'unknown';
+    case 'presence_unchecked': return active && !sm.presence;
+    case 'review_todo': return active && ['todo', 'drafted', 'approved'].includes(sm.review?.status || '');
     case 'open_checked': return active && !!sm.openCheckedAt;
     case 'not_open_checked': return active && !sm.openCheckedAt && !['no_sell', 'no_stock'].includes(sm.decision);
     case 'stock_checked': return active && !!sm.stockCheckedAt;
@@ -507,6 +513,31 @@ result: pass=問題なし / needs_review=ユーザー確認が必要 / fail=修�
     const p = store.setMarket(id, actor, { matchType: match_type, method, query, searchUrl: search_url, examples, note }, site);
     return json({ market: { yahoo: p.marketYahoo, rakuma: p.marketRakuma, paypay: p.marketPaypay }[site] ?? p.market, net: mercariNet(p) });
   });
+
+  // ---- 共同作業の入口（あるかないか・レビュー・発信）----
+  tool('agent_queue', 'AI エージェントの「やること」一覧: review_draft（ユーザーが「する」にしたレビュー・ブログ・動画などの下書き作り）・review_post（ユーザーが「投稿OK」にした下書きの投稿）・listing（出品判断「出品」の出品先ごとの作業）。各件に商品の要点（種類・置き場・あるかないか・ASIN・Vineの一覧）と素材Zipの入口がある。作業前に毎回呼ぶ。', {}, [], () =>
+    json(agentQueue(store, store.settings)), { readOnlyHint: true });
+  tool('get_materials', '商品の素材（公式画像・撮った写真・AI仕上げ・紹介画像のファイルの絶対パス、商品の情報、レビューの予定と下書き）を返す。ブログ・動画・レビュー作りに使う。', { id: s.id }, ['id'], ({ id }) => {
+    const p = store.get(id);
+    const dir = store.dir(id);
+    const live = p.photos.filter((ph) => !ph.deletedAt);
+    const files = (pick) => live.filter(pick).map((ph) => path.join(dir, ph.files.work || ph.files.original));
+    return json({
+      id, name: p.name, category: p.category, amazon: { asin: p.browser?.asin || p.amazon?.asin || null, title: p.amazon?.title || '' },
+      review: p.reviewPlan || null,
+      official: files((ph) => ph.kind === 'reference'),
+      photos: files((ph) => ph.kind === 'actual' && !ph.derivedFrom && ph.source !== 'studio'),
+      finished: files((ph) => ph.kind === 'actual' && ph.source === 'studio'),
+      intro: files((ph) => ph.kind === 'generated'),
+      listing: { title: p.listing?.title || '', description: p.listing?.description || '' },
+    });
+  }, { readOnlyHint: true });
+  tool('save_review_draft', 'レビュー・発信の下書きを保存する（ユーザーが「する」にした商品だけ。状態は「下書きあり」になり、投稿してよいかはユーザーが決める）。', {
+    id: s.id, draft: s.str('下書きの本文（形式ごとに見出しを付けてよい）'),
+  }, ['id', 'draft'], ({ id, draft }) => json(store.setReviewPlan(id, actor, { draft, status: 'drafted' }).reviewPlan));
+  tool('mark_review_posted', 'ユーザーが「投稿OK」にした下書きを投稿したことを報告する（投稿先の URL）。「投稿OK」でない商品は拒否される。', {
+    id: s.id, url: s.str('投稿したページの URL'),
+  }, ['id', 'url'], ({ id, url }) => json(store.setReviewPlan(id, actor, { status: 'posted', url }).reviewPlan));
 
   // ---- destinations: what each platform should receive ----
   tool('channel_package', '出品先（mercari=メルカリ / jmty=ジモティー / yahoo=ヤフオク / paypay=ヤフーフリマ / rakuma=ラクマ / flea=フリマ）に出す内容の完成形を返す。出品先ごとの原稿（override.<出品先>.title/description/price と出品先ごとの写真）があればそれを、無ければ共通の原稿を使う。写真は順番どおりの絶対パス。アップロード作業はこれだけを正本として読む。targeted=false はユーザーがその出品先を選んでいない商品（出品しない）。', {

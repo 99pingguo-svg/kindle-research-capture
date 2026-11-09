@@ -120,3 +120,61 @@ export function officialStats(store, products) {
   }
   return { products: list.length, images, bytes };
 }
+
+/**
+ * 素材Zip（作品づくり・投稿用）: 商品ごとのフォルダに 公式画像・撮った写真・AI仕上げ・紹介画像と、情報（人が読む 情報.txt と
+ * エージェントが読む info.json）、レビューの下書き。browserImage(asin) は観察ブラウザが取った公式画像（参考画像がない商品だけ使う）。
+ */
+export function materialsEntries(store, products, { browserImage = () => null, settings = {} } = {}) {
+  const rows = [['ID', '商品名', '種類', '置き場', 'あるかないか', 'レビュー', '形式', 'ASIN', 'フォルダ']];
+  const entries = [];
+  const PRES = { have: 'ある', gone: 'ない', unknown: 'わからない' };
+  const REVIEW = { '': '未定', skip: 'しない', todo: 'する', drafted: '下書きあり', approved: '投稿OK', posted: '投稿済み' };
+  for (const p of products) {
+    const folder = `素材/${p.id}_${safeSegment(p.name || '名称未設定').slice(0, 30)}`;
+    const dir = store.dir(p.id);
+    const live = livePhotos(p).filter((ph) => fs.existsSync(path.join(dir, ph.files.original)));
+    const files = [];
+    const add = (sub, list, pick = (ph) => ph.files.original) => list.forEach((ph, i) => {
+      const f = path.join(dir, pick(ph));
+      if (!fs.existsSync(f)) return;
+      const name = `${sub}/${String(i + 1).padStart(2, '0')}${path.extname(f) || '.jpg'}`;
+      entries.push({ name: `${folder}/${name}`, file: f });
+      files.push(name);
+    });
+    const refs = live.filter((ph) => ph.kind === 'reference');
+    add('公式画像', refs);
+    const asin = p.browser?.asin || p.amazon?.asin || '';
+    if (!refs.length && asin) {
+      const f = browserImage(asin);
+      if (f && fs.existsSync(f)) { entries.push({ name: `${folder}/公式画像/01.jpg`, file: f }); files.push('公式画像/01.jpg'); }
+    }
+    add('写真', live.filter((ph) => ph.kind === 'actual' && !ph.derivedFrom && ph.source !== 'studio'));
+    add('仕上げ', live.filter((ph) => ph.kind === 'actual' && ph.source === 'studio'), (ph) => ph.files.work || ph.files.original);
+    add('紹介画像', live.filter((ph) => ph.kind === 'generated'));
+    const category = p.category || guessCategory(p.name);
+    const place = p.location || settings.categoryPlaces?.[category] || '';
+    const presence = p.decision === 'no_stock' ? 'gone' : p.stockCheckedAt ? 'have' : p.stockUnknownAt ? 'unknown' : null;
+    const rp = p.reviewPlan || {};
+    const url = asin ? `https://www.amazon.co.jp/dp/${asin}` : (p.links?.find((l) => l.type === 'purchase')?.url || '');
+    const info = {
+      id: p.id, name: p.name, category, place, presence,
+      amazon: { asin, url, title: p.amazon?.title || '', price: p.research?.amazonPrice ?? p.amazon?.price ?? null },
+      vineLists: Object.keys(p.browser?.lists || {}),
+      review: { status: rp.status || '', formats: rp.formats || [], note: rp.note || '', draft: rp.draft || '', url: rp.url || '' },
+      listing: { decision: p.decision, targets: p.targets || [], title: p.listing?.title || '', description: p.listing?.description || '', price: p.listing?.price ?? null },
+      files,
+    };
+    entries.push({ name: `${folder}/info.json`, data: JSON.stringify(info, null, 2) });
+    entries.push({ name: `${folder}/情報.txt`, data: [
+      `商品名: ${p.name || ''}`, `Amazon: ${info.amazon.title}`, `URL: ${url}`, `種類: ${category}`, `置き場: ${place || '（未設定）'}`,
+      `あるかないか: ${PRES[presence] || '未確認'}`, `レビュー: ${REVIEW[info.review.status] || '未定'}${info.review.formats.length ? `（${info.review.formats.join('・')}）` : ''}`,
+      info.review.note && `レビューのメモ: ${info.review.note}`, `出品先: ${(p.targets || []).join('・') || 'なし'}`,
+      info.listing.title && `出品タイトル: ${info.listing.title}`, info.listing.description && `\n説明:\n${info.listing.description}`,
+    ].filter(Boolean).join('\n') + '\n' });
+    if (info.review.draft) entries.push({ name: `${folder}/レビュー下書き.txt`, data: info.review.draft + '\n' });
+    rows.push([p.id, p.name, category, place, PRES[presence] || '未確認', REVIEW[info.review.status] || '未定', info.review.formats.join('・'), asin, folder]);
+  }
+  const csv = '﻿' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+  return [{ name: '素材/一覧.csv', data: csv }, ...entries];
+}

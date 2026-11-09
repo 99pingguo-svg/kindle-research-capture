@@ -695,3 +695,57 @@ test('観察ブラウザの一覧: 連携が書け、Vine注文日はVineの一�
   store.setBrowserInfo(id, 'import', null);
   assert.equal(store.get(id).browser, null);
 });
+
+test('あるかないか: ある／ない／？／未確認を1回で、ないは在庫なし、AIは変えられない', async () => {
+  const { presenceOf } = await import('../server/rules.js');
+  const store = new Store(tmp());
+  const id = store.create({ name: 'x' }).product.id;
+  store.setPresence(id, 'user', 'have');
+  assert.equal(presenceOf(store.get(id)), 'have');
+  store.setPresence(id, 'user', 'gone');
+  assert.equal(store.get(id).decision, 'no_stock');
+  assert.equal(presenceOf(store.get(id)), 'gone');
+  store.setPresence(id, 'user', 'unknown');
+  assert.equal(store.get(id).decision, 'undecided');
+  assert.equal(presenceOf(store.get(id)), 'unknown');
+  store.setPresence(id, 'user', null);
+  assert.equal(presenceOf(store.get(id)), null);
+  assert.throws(() => store.setPresence(id, 'claude', 'have'), /ユーザーのみ/);
+});
+
+test('レビューの予定: ユーザーが決め、AIは「する」に下書き・「投稿OK」に投稿済みだけ', async () => {
+  const { agentQueue } = await import('../server/hub.js');
+  const store = new Store(tmp());
+  const id = store.create({ name: 'ケース' }).product.id;
+  assert.throws(() => store.setReviewPlan(id, 'claude', { draft: 'x' }), /「する」/);
+  store.setReviewPlan(id, 'user', { status: 'todo', formats: ['blog', 'video'], note: '使い心地中心' });
+  assert.equal(agentQueue(store, {}).tasks[0].type, 'review_draft');
+  store.setReviewPlan(id, 'claude', { draft: '下書き本文', status: 'drafted' });
+  assert.equal(store.get(id).reviewPlan.status, 'drafted');
+  assert.throws(() => store.setReviewPlan(id, 'claude', { status: 'posted', url: 'https://x' }), /投稿OK/);
+  assert.throws(() => store.setReviewPlan(id, 'claude', { status: 'approved' }), /ユーザーだけ/);
+  assert.throws(() => store.setReviewPlan(id, 'claude', { note: '勝手に' }), /下書き・投稿済み/);
+  store.setReviewPlan(id, 'user', { status: 'approved' });
+  assert.equal(agentQueue(store, {}).tasks[0].type, 'review_post');
+  store.setReviewPlan(id, 'claude', { status: 'posted', url: 'https://example.com/post' });
+  assert.equal(store.get(id).reviewPlan.status, 'posted');
+  assert.equal(agentQueue(store, {}).tasks.length, 0);
+  assert.throws(() => store.setReviewPlan(id, 'user', { formats: ['tiktok'] }), /formats/);
+});
+
+test('素材Zipの中身: 情報・写真の分類・置き場', async () => {
+  const { materialsEntries } = await import('../server/export.js');
+  const store = new Store(tmp());
+  const id = store.create({ name: '国産はちみつ', category: '食品・飲料' }).product.id;
+  photo(store, id);
+  store.addPhoto(id, 'claude', { kind: 'reference' }, { original: { buffer: JPEG, mime: 'image/jpeg' } });
+  store.setPresence(id, 'user', 'have');
+  const entries = materialsEntries(store, [store.get(id)], { settings: { categoryPlaces: { '食品・飲料': '台所の棚' } } });
+  const names = entries.map((e) => e.name);
+  assert.ok(names.includes('素材/一覧.csv'));
+  assert.ok(names.some((n) => /素材\/.+\/公式画像\/01\.jpg$/.test(n)));
+  assert.ok(names.some((n) => /素材\/.+\/写真\/01\.jpg$/.test(n)));
+  const info = JSON.parse(entries.find((e) => e.name.endsWith('info.json')).data);
+  assert.equal(info.place, '台所の棚');
+  assert.equal(info.presence, 'have');
+});

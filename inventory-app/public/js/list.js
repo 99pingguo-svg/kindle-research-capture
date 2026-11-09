@@ -13,7 +13,7 @@ import * as uploads from './uploads.js';
 import { openNativeSetup, shootWithNativeCamera } from './native.js';
 import { ocrCandidates, fnskusIn } from './search.js';
 import { makeVariants } from './images.js';
-import { quickMemo, rememberSearchPhoto, addSearchPhoto } from './quick.js';
+import { quickMemo, rememberSearchPhoto, addSearchPhoto, presenceSeg, reviewSheet, placeSheet } from './quick.js';
 import { openAmazonSearch } from './amazon-search.js';
 import { openBrowserSync, browserBadges } from './browser-sync.js';
 
@@ -134,6 +134,8 @@ function renderToolbar(items = visibleProducts()) {
     h('button', { class: `btn small date-range ${nConds ? 'on' : ''}`, onclick: openConds, 'aria-label': '種類・判断・サイズ・送料・相場などで絞り込み' }, '🔍 ', nConds ? `絞り込み ${nConds}` : '絞り込み'),
     h('button', { class: `btn small date-range ${hidingOn() ? 'on' : ''}`, onclick: openShowHide, 'aria-label': '出品判断・出品先ごとに表示／非表示' }, '👁 ', hidingOn() ? `非表示 ${hiddenLabels(state.prefs).length}` : '表示・非表示'),
     h('button', { class: 'btn small', onclick: openViews, 'aria-label': '保存した表示' }, '★ 表示'),
+    h('button', { class: 'btn small view-toggle', onclick: () => { setPref('view', state.prefs.view === 'full' ? 'check' : 'full'); renderAll(); }, title: '一覧の表示を切り替え' },
+      state.prefs.view === 'full' ? '✓ あるかないか表示へ' : '≡ 詳しく表示へ'),
     h('span', { class: 'spacer' }),
     h('select', {
       class: 'sort-more', 'aria-label': '並び順',
@@ -896,7 +898,47 @@ function marketLinks(p) {
   }));
 }
 
+const REVIEW_SHORT = { '': '未定', skip: 'しない', todo: 'する', drafted: '下書き', approved: '投稿OK', posted: '済み' };
+const FORMAT_ICON = { vine: '⭐', blog: '📝', video: '🎬', sns: '💬' };
+
+/**
+ * あるかないか表示の行: 写真・名前・種類と置き場・ある／ない／？・レビューの予定。出品や相場は「詳しく」表示と詳細で。
+ */
+function checkRow(p, idx, run) {
+  const selected = state.selected.has(p.id);
+  const open = (e) => {
+    if (!state.selectMode) return void (location.hash = `#/p/${p.id}`);
+    const on = !state.selected.has(p.id);
+    on ? state.selected.add(p.id) : state.selected.delete(p.id);
+    e.currentTarget.closest('.item').classList.toggle('selected', on);
+    const check = e.currentTarget.closest('.item').querySelector('.select-check');
+    if (check) check.textContent = on ? '✓' : '';
+    renderBulk();
+  };
+  const img = p.thumb ? mini(p.thumb) : p.browser?.image?.url || null;
+  const rv = p.review || { status: '', formats: [] };
+  const vine = (p.browser?.lists || []).some((l) => ['vineOrders', 'reviewPending', 'reviewed'].includes(l));
+  const pending = (p.browser?.lists || []).includes('reviewPending');
+  return h('article', { class: `item check-row presence-${p.presence || 'none'} ${selected ? 'selected' : ''} ${state.detailId === p.id ? 'active' : ''}`, dataset: { id: p.id } },
+    h('div', { class: 'thumb', style: img ? { backgroundImage: `url("${img}")` } : null, onclick: open },
+      state.selectMode ? h('div', { class: 'select-check' }, selected ? '✓' : '') : !img && '📦'),
+    h('div', { class: 'item-main' },
+      h('div', { class: 'item-title', onclick: open }, h('span', { class: 'pid' }, p.id), p.name || h('span', { class: 'muted' }, '名称未設定')),
+      h('div', { class: 'item-sub' },
+        h('button', { class: 'chip-btn cat', title: 'この種類の置き場を決める', onclick: (e) => { e.stopPropagation(); placeSheet(p.category); } },
+          p.category, p.categoryGuessed ? '?' : '', ' 📍', p.place || h('span', { class: 'muted' }, '置き場未定')),
+        vine && h('span', { class: `badge ${pending ? 'warn' : ''}` }, pending ? 'Vine レビュー待ち' : 'Vine')),
+      !state.selectMode && !p.trashedAt && h('div', { class: 'check-actions' },
+        presenceSeg(p),
+        h('button', { class: `chip-btn review r-${rv.status || 'none'}`, title: 'レビュー・発信の予定', onclick: (e) => { e.stopPropagation(); reviewSheet(p.id); } },
+          '✍ ', REVIEW_SHORT[rv.status || ''], (rv.formats || []).map((f) => FORMAT_ICON[f] || '').join('')))),
+    h('div', { class: 'item-side' },
+      h('button', { class: 'icon-btn link memo', 'aria-label': `${p.name || p.id} のメモを書く`, onclick: (e) => { e.stopPropagation(); quickMemo(p.id, p.notes || ''); } }, '📝'),
+      !p.trashedAt && h('button', { class: 'icon-btn link', 'aria-label': `${p.name || p.id} を撮影`, onclick: (e) => { e.stopPropagation(); openCamera({ ids: run.ids, index: idx }); } }, '📷')));
+}
+
 function rowEl(p, idx, run) {
+  if (state.prefs.view !== 'full') return checkRow(p, idx, run);
   const selected = state.selected.has(p.id);
   const open = (e) => {
     if (!state.selectMode) return void (location.hash = `#/p/${p.id}`);
@@ -1014,6 +1056,7 @@ function renderBulk() {
       h('button', { class: 'btn small primary', onclick: run('queue', null, 'メルカリ転記を依頼（出品待ち）') }, '🛒 転記依頼'),
       h('button', { class: 'btn small', onclick: run('unqueue', null, '出品待ちから戻す') }, '転記取消'),
       h('button', { class: 'btn small', onclick: () => ids.length && (location.href = `/api/export.zip?ids=${ids.join(',')}`) }, '書き出し'),
+      h('button', { class: 'btn small', onclick: () => ids.length && (location.href = `/api/materials.zip?ids=${ids.join(',')}`) }, '📦 素材Zip'),
       state.prefs.filter === 'aside'
         ? h('button', { class: 'btn small', onclick: run('aside', false, '別枠から一覧に戻す') }, '別枠から戻す')
         : h('button', { class: 'btn small', onclick: run('aside', true, '別枠へ移す') }, '別枠へ'),
@@ -1085,6 +1128,21 @@ export function newProductForm() {
   });
 }
 
+/** AI エージェントの「やること」（読むだけ）: 何が頼まれていて、何が投稿待ちか。 */
+async function openAgentQueue() {
+  let q;
+  try { q = await api.get('/api/agent/queue'); } catch (e) { return showError(e); }
+  const LABEL = { review_draft: '✍ 下書きを作る', review_post: '🚀 投稿する（投稿OK）', listing: '🛒 出品' };
+  sheet((close) => h('div', { class: 'memo-sheet' },
+    h('h2', null, '🤖 AIエージェントのやること'),
+    h('p', { class: 'muted small' }, 'エージェントは MCP の agent_queue でこの一覧を読み、get_materials で素材を受け取ります。投稿・出品は、あなたが「投稿OK」「出品」にしたものだけです。'),
+    q.tasks.length ? h('div', { class: 'agent-tasks' }, q.tasks.slice(0, 200).map((t) => h('button', {
+      class: 'agent-task', onclick: () => { close(); location.hash = `#/p/${t.product.id}`; },
+    }, h('b', null, LABEL[t.type] || t.type), ' ', `#${t.product.id} ${t.product.name || ''}`, t.channel ? `（${t.channel}）` : '', (t.formats || []).length ? `（${t.formats.join('・')}）` : '')))
+      : h('p', null, 'いまは何もありません。商品のレビューを「する」にすると、ここに載ります。'),
+    h('div', { class: 'actions' }, h('button', { class: 'btn ghost', onclick: () => close() }, '閉じる'))));
+}
+
 async function mainMenu() {
   const v = await choose(null, [
     { label: '🕘 共同作業の履歴', value: '#/activity' },
@@ -1093,6 +1151,9 @@ async function mainMenu() {
     { label: '💾 状態の保存・ロールバック', value: '#/snapshots' },
     { label: '📋 商品リストを一括登録', value: '#/import' },
     { label: '📅 日付を一括反映（既存商品）', value: '#/dates' },
+    { label: '📦 素材Zip（今の一覧の商品）', value: 'materials' },
+    { label: '📦 素材Zip（「ある」商品すべて）', value: 'materials-have' },
+    { label: '🤖 AIエージェントのやること', value: 'agent' },
     { label: '🖼 公式画像を ZIP でダウンロード', value: 'official' },
     { label: '🔭 観察ブラウザの画像取得の状況', value: 'browser' },
     { label: '📸 純正カメラ連携の設定', value: 'native' },
@@ -1102,7 +1163,14 @@ async function mainMenu() {
   if (v === 'reload') {
     await loadAll().catch(showError);
     toast('更新しました');
-  } else if (v === 'official') openOfficialZip();
+  } else if (v === 'materials') {
+    const ids = visibleProducts().filter((p) => !p.trashedAt).map((p) => p.id);
+    if (!ids.length) return toast('一覧に商品がありません');
+    if (ids.length > 600) return toast('一度に600件までです。絞り込んでから押してください', { error: true });
+    location.href = `/api/materials.zip?ids=${ids.join(',')}`;
+  } else if (v === 'materials-have') location.href = '/api/materials.zip?presence=have';
+  else if (v === 'agent') openAgentQueue();
+  else if (v === 'official') openOfficialZip();
   else if (v === 'native') openNativeSetup();
   else if (v === 'browser') openBrowserSync();
   else if (v) location.hash = v;

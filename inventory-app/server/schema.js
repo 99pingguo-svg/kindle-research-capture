@@ -208,6 +208,28 @@ for (const c of CHANNELS) {
 export const FIELD_MAP = Object.fromEntries(FIELDS.map((f) => [f.path, f]));
 export const CONFIRM_FIELDS = FIELDS.filter((f) => f.confirm).map((f) => f.path);
 
+// あるかないか（在庫の確かめ）: summary.presence = have（ある）/ gone（ない＝出品判断「在庫なし」）/ unknown（わからない）/ null（未確認）
+export const PRESENCE = [
+  { id: 'have', label: 'ある' },
+  { id: 'gone', label: 'ない' },
+  { id: 'unknown', label: '？' },
+];
+// レビュー・発信の予定（商品ごと）。AI は drafted（下書き）まで、posted は approved のあとだけ。決めるのはユーザー。
+export const REVIEW_STATUSES = [
+  { id: '', label: '未定' },
+  { id: 'skip', label: 'しない' },
+  { id: 'todo', label: 'する' },
+  { id: 'drafted', label: '下書きあり' },
+  { id: 'approved', label: '投稿OK' },
+  { id: 'posted', label: '投稿済み' },
+];
+export const REVIEW_FORMATS = [
+  { id: 'vine', label: 'Vineレビュー' },
+  { id: 'blog', label: 'ブログ' },
+  { id: 'video', label: '動画' },
+  { id: 'sns', label: 'SNS' },
+];
+
 export const DEFAULT_SETTINGS = {
   shippingPayer: '送料込み（出品者負担）',
   shippingMethod: '',
@@ -228,6 +250,12 @@ export const DEFAULT_SETTINGS = {
   fleaDefault: { on: true, amazonMax: 1000, netMax: 700 },
   // 手取りのおすすめ: 一番よいサイトと、差が margin 円以内 または ratio 以内のサイトを出品先に入れる（緑で表示）
   netDefault: { on: true, margin: 100, ratio: 0.1 },
+  // 種類ごとの置き場（どこにあるかの目安）。商品ごとの「保管場所」があればそちらが優先。
+  categoryPlaces: {},
+  // 種類が空の商品を自動で分類する（商品名の決まりごと → ローカルAI。結果は AI の設定として入り、ユーザーが変えたら優先）
+  autoCategory: true,
+  // ASIN があって公式画像がまだの商品を、ログアウト状態で少しずつ取りに行く（scripts/amazon-info.js・1回10件・CAPTCHAなら12時間休む）
+  autoOfficial: true,
   /** 一覧の「保存した表示」（絞り込み・並び順の組み合わせ）。全端末で共有。 */
   listViews: [],
 };

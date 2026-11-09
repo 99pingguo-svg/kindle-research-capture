@@ -12,6 +12,7 @@ import {
   FIELD_MAP, DECISION_IDS, STAGE_IDS, USER_ONLY_STAGES, DEFAULT_SETTINGS, FACT_CONFIDENCE,
   LINK_TYPES, PHOTO_TAGS, AI_TASK_TYPES, MERCARI_LIMITS, IMAGE_QC_CHECK_IDS, QC_CHECKS, coerceField, stageLabel,
   decisionLabel, PREPARE_DECISIONS, PHOTO_KINDS, PHOTO_KIND_IDS, LISTABLE_KINDS, CHANNEL_IDS, channelLabel,
+  REVIEW_STATUSES, REVIEW_FORMATS,
 } from './schema.js';
 import { readiness, actualPhotos, listablePhotos, livePhotos, findDuplicates } from './rules.js';
 import { isFood } from './food.js';
@@ -74,6 +75,7 @@ function newProduct(id, at, settings) {
     trashedAt: null,
     shootPlan: false,
     openCheckedAt: null, // 開封して中身を確かめた日時（ユーザーのみ）
+    reviewPlan: null, // レビュー・発信の予定 { status, formats[], note, draft, url, updatedAt, by }
     stockCheckedAt: null, // 現在の最新在庫チェック日時（ユーザーのみ）
     stockUnknownAt: null, // 在庫状況「不明」チェック日時（ユーザーのみ）
     asideAt: null, // 別枠に移した日時（ユーザーのみ）。一覧の「すべて」などから外し、「別枠」チップで見る
@@ -298,7 +300,10 @@ export class Store extends EventEmitter {
   updateSettings(patch) {
     for (const [k, v] of Object.entries(patch || {})) {
       if (!(k in DEFAULT_SETTINGS)) throw new AppError(400, `不明な設定: ${k}`);
-      this.meta.settings[k] = k === 'listViews' ? normalizeListViews(v) : v;
+      this.meta.settings[k] = k === 'listViews' ? normalizeListViews(v)
+        // 種類ごとの置き場: 文字だけ・短く（空は消す）
+        : k === 'categoryPlaces' ? Object.fromEntries(Object.entries(v && typeof v === 'object' ? v : {}).map(([c, t]) => [String(c).slice(0, 40), String(t ?? '').trim().slice(0, 60)]).filter(([, t]) => t))
+        : v;
     }
     this.saveMeta();
     this.emit('change', { type: 'settings' });
@@ -624,6 +629,63 @@ export class Store extends EventEmitter {
       p.stockCheckedAt = on ? nowIso() : null;
       if (on) p.stockUnknownAt = null;
       ctx.note(on ? '最新在庫チェック済みにした' : '最新在庫チェックを外した');
+    });
+  }
+
+  /**
+   * あるかないか（ユーザーのみ）を1回で: have=手元にある（最新在庫チェック）・gone=ない（出品判断「在庫なし」）・
+   * unknown=わからない・null=未確認に戻す。今までの3つの印（stockCheckedAt / decision no_stock / stockUnknownAt）をそろえて書く。
+   */
+  setPresence(id, actor, state) {
+    forbidAi(actor, 'あるかないかのチェック');
+    if (![null, 'have', 'gone', 'unknown'].includes(state)) throw new AppError(400, `state が不正: ${state}`);
+    return this.mutate(id, actor, 'presence', (p, ctx) => {
+      const before = { c: p.stockCheckedAt, u: p.stockUnknownAt, d: p.decision };
+      const now = nowIso();
+      p.stockCheckedAt = state === 'have' ? (p.stockCheckedAt || now) : null;
+      p.stockUnknownAt = state === 'unknown' ? (p.stockUnknownAt || now) : null;
+      if (state === 'gone' && p.decision !== 'no_stock') p.decision = 'no_stock';
+      if (state !== 'gone' && p.decision === 'no_stock') p.decision = 'undecided';
+      if (state === 'have') p.stockCheckedAt = now; // re-tapping ある refreshes the date it was last seen
+      if (before.c === p.stockCheckedAt && before.u === p.stockUnknownAt && before.d === p.decision) return;
+      if (before.d !== p.decision) ctx.changes.push({ path: 'decision', label: '出品判断', from: decisionLabel(before.d), to: decisionLabel(p.decision) });
+      const word = { have: 'ある', gone: 'ない', unknown: 'わからない' }[state];
+      ctx.note(word ? `あるかないか: ${word}` : 'あるかないかを未確認に戻した');
+      ctx.dirty = true;
+    });
+  }
+
+  /**
+   * レビュー・発信の予定。ユーザーは全部決められる。AI（投稿エージェント等）は 下書き（draft・status drafted）と、
+   * ユーザーが「投稿OK」にしたものの投稿済み報告（status posted・url）だけ。
+   */
+  setReviewPlan(id, actor, patch = {}) {
+    const ST = REVIEW_STATUSES.map((s) => s.id);
+    const FM = REVIEW_FORMATS.map((f) => f.id);
+    if (patch.status !== undefined && !ST.includes(patch.status)) throw new AppError(400, `status が不正: ${patch.status}`);
+    if (patch.formats !== undefined && (!Array.isArray(patch.formats) || patch.formats.some((f) => !FM.includes(f)))) throw new AppError(400, `formats が不正（${FM.join('/')}）`);
+    const cur = this.get(id).reviewPlan || {};
+    if (!isUser(actor)) {
+      const allowed = ['draft', 'status', 'url'];
+      const extra = Object.keys(patch).filter((k) => !allowed.includes(k));
+      if (extra.length) throw new AppError(403, `AI が変えられるのは下書き・投稿済みの報告だけです（${extra.join(', ')}）`, 'forbidden');
+      if (patch.status === 'drafted' && !['todo', 'drafted'].includes(cur.status)) throw new AppError(409, '「する」になっていない商品には下書きを付けられません', 'not_requested');
+      if (patch.status === 'posted' && cur.status !== 'approved') throw new AppError(403, '投稿済みにできるのは、ユーザーが「投稿OK」にした商品だけです', 'not_approved');
+      if (patch.status !== undefined && !['drafted', 'posted'].includes(patch.status)) throw new AppError(403, 'その状態はユーザーだけが決められます', 'forbidden');
+      if (patch.draft !== undefined && patch.status === undefined && !['todo', 'drafted'].includes(cur.status)) throw new AppError(409, '「する」になっていない商品には下書きを付けられません', 'not_requested');
+    }
+    return this.mutate(id, actor, 'review_plan', (p, ctx) => {
+      const next = { status: '', formats: [], note: '', draft: '', url: '', ...(p.reviewPlan || {}) };
+      for (const k of ['status', 'formats', 'note', 'draft', 'url']) if (patch[k] !== undefined) next[k] = k === 'formats' ? [...new Set(patch[k])] : String(patch[k] ?? '').slice(0, k === 'draft' ? 20000 : 2000);
+      if (!isUser(actor) && patch.draft !== undefined && patch.status === undefined) next.status = 'drafted';
+      if (same(next, { status: '', formats: [], note: '', draft: '', url: '', ...(p.reviewPlan || {}) })) return;
+      next.updatedAt = nowIso();
+      next.by = actor;
+      const label = (s) => REVIEW_STATUSES.find((x) => x.id === s)?.label || '未定';
+      if ((p.reviewPlan?.status || '') !== next.status) ctx.changes.push({ path: 'reviewPlan.status', label: 'レビュー', from: label(p.reviewPlan?.status || ''), to: label(next.status) });
+      ctx.note(`レビュー・発信の予定を更新（${label(next.status)}${next.formats.length ? `・${next.formats.map((f) => REVIEW_FORMATS.find((x) => x.id === f)?.label).join('/')}` : ''}）`);
+      p.reviewPlan = next;
+      ctx.dirty = true;
     });
   }
 

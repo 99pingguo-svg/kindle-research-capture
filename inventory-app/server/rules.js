@@ -229,6 +229,11 @@ export function suggestedTargets(p) {
 /** The product's shop page (Amazon first), for a quick open-in-new-window link from the list. */
 const sourceUrlOf = (p) => (p.links.find((l) => /amazon\./i.test(l.url)) || p.links.find((l) => l.type === 'purchase'))?.url || null;
 
+/** あるかないか: have / gone（在庫なし）/ unknown / null（未確認）。今までの3つの印から決める。 */
+export const presenceOf = (p) => (p.decision === 'no_stock' ? 'gone' : p.stockCheckedAt ? 'have' : p.stockUnknownAt ? 'unknown' : null);
+/** 置き場: 商品ごとの「保管場所」→ 種類ごとの置き場（設定 categoryPlaces）。 */
+export const placeOf = (p, settings) => p.location || settings?.categoryPlaces?.[p.category || guessCategory(p.name)] || '';
+
 export function summary(p, settings) {
   const rd = readiness(p, settings);
   const actual = actualPhotos(p);
@@ -268,6 +273,9 @@ export function summary(p, settings) {
     trashedAt: p.trashedAt,
     shootPlan: p.shootPlan,
     openCheckedAt: p.openCheckedAt || null,
+    presence: presenceOf(p),
+    place: placeOf(p, settings),
+    review: p.reviewPlan ? { status: p.reviewPlan.status || '', formats: p.reviewPlan.formats || [], hasDraft: !!p.reviewPlan.draft, url: p.reviewPlan.url || '' } : null,
     stockCheckedAt: p.stockCheckedAt || null,
     stockUnknownAt: p.stockUnknownAt || null,
     asideAt: p.asideAt || null,
