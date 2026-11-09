@@ -14,6 +14,7 @@ import { openNativeSetup, shootWithNativeCamera } from './native.js';
 import { ocrCandidates, fnskusIn } from './search.js';
 import { makeVariants } from './images.js';
 import { quickMemo, rememberSearchPhoto, addSearchPhoto, presenceSeg, reviewSheet, placeSheet } from './quick.js';
+import { bulkImportNativePhotos } from './bulkimport.js';
 import { openAmazonSearch } from './amazon-search.js';
 import { openBrowserSync, browserBadges } from './browser-sync.js';
 
@@ -1007,7 +1008,8 @@ function renderFab(items = visibleProducts()) {
   if (state.selectMode) return;
   const ids = items.filter((p) => !p.trashedAt).map((p) => p.id);
   els.fab.append(
-    h('button', { class: 'btn primary big', disabled: !ids.length, onclick: () => openCamera({ ids, index: 0 }) }, `📷 撮影モード（${ids.length}件）`));
+    h('button', { class: 'btn primary big', disabled: !ids.length, onclick: () => openCamera({ ids, index: 0 }) }, `📷 撮影（${ids.length}）`),
+    h('button', { class: 'btn big', onclick: bulkImportNativePhotos, title: 'iPhone の「カメラ」で撮った写真を選ぶと、商品ごとに分けて取り込みます' }, '📸 写真を取り込む'));
 }
 
 function renderBulk() {
@@ -1151,6 +1153,7 @@ async function mainMenu() {
     { label: '💾 状態の保存・ロールバック', value: '#/snapshots' },
     { label: '📋 商品リストを一括登録', value: '#/import' },
     { label: '📅 日付を一括反映（既存商品）', value: '#/dates' },
+    { label: '📸 純正カメラの写真をまとめて取り込む', value: 'bulkimport' },
     { label: '📦 素材Zip（今の一覧の商品）', value: 'materials' },
     { label: '📦 素材Zip（「ある」商品すべて）', value: 'materials-have' },
     { label: '🤖 AIエージェントのやること', value: 'agent' },
@@ -1170,6 +1173,7 @@ async function mainMenu() {
     location.href = `/api/materials.zip?ids=${ids.join(',')}`;
   } else if (v === 'materials-have') location.href = '/api/materials.zip?presence=have';
   else if (v === 'agent') openAgentQueue();
+  else if (v === 'bulkimport') bulkImportNativePhotos();
   else if (v === 'official') openOfficialZip();
   else if (v === 'native') openNativeSetup();
   else if (v === 'browser') openBrowserSync();

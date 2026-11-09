@@ -249,7 +249,18 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
     const sinceLocal = `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     return { active: true, productId: p.id, name: p.name, since: ns.since, sinceLocal, photos: p.photos.filter((x) => !x.deletedAt && x.source === 'native' && x.createdAt >= ns.at).length };
   };
-  route('GET', '/api/native-shoot', () => shootInfo());
+  // ショートカットからの連絡の記録（最新20件、メモリだけ）: つながっているか・何で失敗したかをアプリで見せる。
+  const shortcutContacts = [];
+  const contact = (what, result, ok = true) => {
+    shortcutContacts.unshift({ at: nowIso(), what, result, ok });
+    shortcutContacts.length = Math.min(shortcutContacts.length, 20);
+  };
+  route('GET', '/api/native-shoot', ({ req }) => {
+    const info = shootInfo();
+    if (req.headers['x-upload-key']) contact('撮影中の商品を確認', info.active ? `#${info.productId} を受け付け中` : '撮影中の商品なし（アプリで撮影を始めていない）', info.active);
+    return info;
+  });
+  route('GET', '/api/native-shoot/contacts', () => ({ contacts: shortcutContacts }));
   // 自動仕上げ: 状況と、まだ仕上げていない写真の処理（商品を指定できる）
   // 写真の文字・バーコードを読む（検索用。tools/bin/ocr＝macOS Vision、外部送信なし）。本文 = 画像そのもの。写真は保存しない。
   route('POST', '/api/ocr', async ({ req }) => {
@@ -303,6 +314,8 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
     }
     const host = String(req.headers['x-forwarded-host'] || req.headers.host || '');
     if (!/^[a-z0-9.:-]+$/i.test(host)) throw new AppError(400, 'ホスト名が不正です');
+    // A shortcut made for a Mac-only address can never reach the Mac from the iPhone (it failed silently before).
+    if (/^(127\.|localhost|\[::1\])/i.test(host)) throw new AppError(400, 'このアドレス（Mac の中だけ）ではショートカットが iPhone から届きません。iPhone で Tailscale のアドレス（…ts.net）を開いてから押してください');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'daicho-shortcut-'));
     try {
       await new Promise((resolve, reject) => execFile('python3', [path.join(ROOT, 'tools', 'make_shortcuts.py'), dir, `https://${host}`, store.uploadKey()], { timeout: 120000 }, (e) => (e ? reject(e) : resolve())));
@@ -325,15 +338,16 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
   // Body = the photo itself (JPEG / HEIC / PNG). Display and list sizes are made here with sips.
   route('POST', '/api/native-shoot/photos', async ({ req }) => {
     const ns = store.nativeShoot;
-    if (!ns) throw new AppError(409, '撮影中の商品がありません（アプリで「純正カメラで撮る」を押してから送ってください）');
+    if (!ns) { contact('写真を受け取る', '撮影中の商品がないので受け取らなかった', false); throw new AppError(409, '撮影中の商品がありません（アプリで「純正カメラで撮る」を押してから送ってください）'); }
     const buf = await readBody(req, 60 * 1024 * 1024);
-    if (buf.length < 1000) throw new AppError(400, '画像データがありません');
+    if (buf.length < 1000) { contact('写真を受け取る', '画像が空だった（ショートカットの「本文」の設定を確認）', false); throw new AppError(400, '画像データがありません'); }
     const digest = createHash('sha256').update(buf).digest('hex').slice(0, 32);
     const files = await nativeVariants(buf);
     // The shortcut sends the latest photos; only those taken after the shoot started belong to this product.
-    if (files.takenAt && files.takenAt < new Date(Date.parse(ns.since) - 60_000)) return { ok: true, skipped: '撮影開始より前の写真' };
+    if (files.takenAt && files.takenAt < new Date(Date.parse(ns.since) - 60_000)) { contact('写真を受け取る', '撮影開始より前の写真なので入れなかった'); return { ok: true, skipped: '撮影開始より前の写真' }; }
     const { photo, duplicate } = store.addPhoto(ns.productId, 'user', { kind: 'actual', source: 'native', clientId: `native:${digest}`, width: files.width, height: files.height, takenAt: files.takenAt?.toISOString() || null }, files);
     if (!duplicate) { studio.enqueue(ns.productId, photo); codes.enqueue(ns.productId, photo); }
+    contact('写真を受け取る', duplicate ? `#${ns.productId} に同じ写真が既にある` : `#${ns.productId} に追加した`);
     return { ok: true, productId: ns.productId, photoId: photo.id, duplicate };
   });
   route('PATCH', '/api/products/:id/photos/:pid', ({ params, body, actor }) => full(store.updatePhoto(params.id, actor, params.pid, body)));
@@ -609,6 +623,7 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
   function authorized(req, url) {
     if (!token || trustedRequests.has(req)) return true;
     if (isUploadKeyRequest(req, url)) return true;
+    if (req.headers['x-upload-key'] && url.pathname.startsWith('/api/native-shoot')) contact('合言葉の確認', '合言葉が違う（ショートカット②を入れ直す）', false);
     const cookie = /(?:^|;\s*)inv_token=([^;]+)/.exec(req.headers.cookie || '')?.[1];
     const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '')?.[1];
     return isToken(cookie) || isToken(bearer) || isToken(url.searchParams.get('token'));

@@ -664,15 +664,19 @@ export class Store extends EventEmitter {
     const FM = REVIEW_FORMATS.map((f) => f.id);
     if (patch.status !== undefined && !ST.includes(patch.status)) throw new AppError(400, `status が不正: ${patch.status}`);
     if (patch.formats !== undefined && (!Array.isArray(patch.formats) || patch.formats.some((f) => !FM.includes(f)))) throw new AppError(400, `formats が不正（${FM.join('/')}）`);
+    if (patch.url !== undefined && patch.url !== '' && !/^https?:\/\/[^\s]+$/i.test(String(patch.url))) throw new AppError(400, '投稿先の URL は http:// か https:// で始まるものだけです');
     const cur = this.get(id).reviewPlan || {};
     if (!isUser(actor)) {
       const allowed = ['draft', 'status', 'url'];
       const extra = Object.keys(patch).filter((k) => !allowed.includes(k));
       if (extra.length) throw new AppError(403, `AI が変えられるのは下書き・投稿済みの報告だけです（${extra.join(', ')}）`, 'forbidden');
-      if (patch.status === 'drafted' && !['todo', 'drafted'].includes(cur.status)) throw new AppError(409, '「する」になっていない商品には下書きを付けられません', 'not_requested');
-      if (patch.status === 'posted' && cur.status !== 'approved') throw new AppError(403, '投稿済みにできるのは、ユーザーが「投稿OK」にした商品だけです', 'not_approved');
       if (patch.status !== undefined && !['drafted', 'posted'].includes(patch.status)) throw new AppError(403, 'その状態はユーザーだけが決められます', 'forbidden');
-      if (patch.draft !== undefined && patch.status === undefined && !['todo', 'drafted'].includes(cur.status)) throw new AppError(409, '「する」になっていない商品には下書きを付けられません', 'not_requested');
+      // 下書きは「する」「下書きあり」のあいだだけ（ユーザーが投稿OKにした下書きは AI が書き換えられない）。
+      if ((patch.draft !== undefined || patch.status === 'drafted') && !['todo', 'drafted'].includes(cur.status)) throw new AppError(409, '下書きを付けられるのは「する」「下書きあり」の商品だけです', 'not_requested');
+      // 投稿先 URL は「投稿OK」の商品の投稿済み報告と一緒にだけ。
+      if (patch.status === 'posted' && cur.status !== 'approved') throw new AppError(403, '投稿済みにできるのは、ユーザーが「投稿OK」にした商品だけです', 'not_approved');
+      if (patch.url !== undefined && patch.status !== 'posted') throw new AppError(403, '投稿先 URL は投稿済みの報告と一緒にだけ送れます', 'forbidden');
+      if (patch.status === 'posted' && patch.draft !== undefined) throw new AppError(403, '投稿済みの報告で下書きは変えられません', 'forbidden');
     }
     return this.mutate(id, actor, 'review_plan', (p, ctx) => {
       const next = { status: '', formats: [], note: '', draft: '', url: '', ...(p.reviewPlan || {}) };

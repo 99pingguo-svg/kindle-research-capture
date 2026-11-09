@@ -22,6 +22,19 @@ const session = () => {
   return s && Date.now() - s.at < 3 * 3600_000 ? s : null;
 };
 
+/** The last contacts from the iPhone shortcut (did it reach the Mac, and why not). */
+export function contactsBox() {
+  const box = h('div', { class: 'contacts small' }, h('span', { class: 'muted' }, 'ショートカットからの連絡を確認中…'));
+  api.get('/api/native-shoot/contacts').then(({ contacts }) => {
+    const fmt = (iso) => new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    box.replaceChildren(
+      h('b', null, 'ショートカットからの連絡（新しい順）'),
+      contacts.length ? h('ul', null, contacts.slice(0, 5).map((c) => h('li', { class: c.ok ? '' : 'ng' }, `${fmt(c.at)} ${c.what}: ${c.result}`)))
+        : h('p', { class: 'muted', style: { margin: '2px 0' } }, 'まだ一度も届いていません（このMacの再起動後）。iPhone の Tailscale がオンか、ショートカットを今のアドレスで入れ直したかを確かめてください。'));
+  }).catch(() => box.replaceChildren(h('span', { class: 'muted' }, '確認できませんでした')));
+  return box;
+}
+
 /** Start (or move) a shoot: this product receives the photos, then the Camera app opens. ids/index = the list being shot, for 次の商品. */
 export async function shootWithNativeCamera(productId, { ids = [productId], index } = {}) {
   try {
@@ -73,9 +86,11 @@ export async function openImportSheet() {
       h('h2', null, '📸 純正カメラの写真を取り込む'),
       h('p', { class: 'small', style: { margin: '0 0 4px' } }, h('b', null, `#${s.productId} `), p?.name || ''),
       info?.active && h('p', { class: 'muted small', style: { margin: '0 0 8px' } }, `この撮影で届いた写真: ${info.photos}枚`),
+      contactsBox(),
       h('div', { class: 'actions' },
         h('button', { class: 'btn primary', onclick: () => { close(); runShortcut(names.send, `${location.origin}/#/p/${s.productId}`); } }, `⚡ 撮った写真を自動で取り込む`),
         h('button', { class: 'btn', onclick: () => picker.click() }, '🖼 写真を選んで取り込む'),
+        h('button', { class: 'btn', onclick: async () => { close(); (await import('./bulkimport.js')).bulkImportNativePhotos(); } }, '📸 いくつもの商品をまとめて取り込む（自動で仕分け）'),
         h('button', { class: 'btn', onclick: () => { close(); shootWithNativeCamera(s.productId, s); } }, '📸 続けて撮る'),
         nextId && h('button', { class: 'btn', onclick: () => { close(); shootWithNativeCamera(nextId, { ids: s.ids, index: s.index + 1 }); } }, `→ 次の商品を撮る（#${nextId}）`),
         h('button', { class: 'btn ghost', onclick: () => { close(); endShoot(); toast('純正カメラの撮影を終えました'); } }, '✓ 撮影を終える'),
@@ -116,6 +131,9 @@ export async function openNativeSetup() {
   sheet((close) => h('div', { class: 'native-setup' },
     h('h2', null, '📸 純正カメラ連携の設定（最初に1回）'),
     h('p', { class: 'small' }, 'iPhone の「カメラ」アプリで撮るので、フォトグラフスタイル（ローズゴールド等）や 17 Pro のカメラ機能がそのまま使えます。iPhone でこの画面を開き、下の2つを押すと「ショートカット」アプリに追加できます（自動設定）。'),
+    h('p', { class: 'small', style: { background: 'var(--bg)', padding: '8px', borderRadius: '8px' } }, h('b', null, 'いちばん簡単なのは: '), 'ショートカットなしで「カメラ」で撮りっぱなし → 一覧の下の「📸 カメラの写真を取り込む」で写真を選ぶだけ（撮影時刻と写真の文字で商品ごとに自動で分けます）。'),
+    h('p', { class: 'small' }, `ショートカット②はこのアドレスに送ります: `, h('code', null, base), `（前に別のアドレスで入れたショートカットは届きません。①②を押し直して入れ替えてください）`),
+    contactsBox(),
     h('div', { class: 'actions' },
       h('a', { class: 'btn primary', href: '/api/native-shoot/shortcut/camera' }, `① 「${names.camera}」を追加`),
       h('a', { class: 'btn primary', href: `/api/native-shoot/shortcut/send?ticket=${encodeURIComponent(ticket)}` }, `② 「${names.send}」を追加`)),

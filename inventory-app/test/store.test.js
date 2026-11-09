@@ -749,3 +749,18 @@ test('素材Zipの中身: 情報・写真の分類・置き場', async () => {
   assert.equal(info.place, '台所の棚');
   assert.equal(info.presence, 'have');
 });
+
+test('レビューの予定: URL は http(s) だけ、AI は投稿OKの下書きを書き換えられず URL は投稿済み報告と一緒にだけ', () => {
+  const store = new Store(tmp());
+  const id = store.create({ name: 'x' }).product.id;
+  assert.throws(() => store.setReviewPlan(id, 'user', { url: 'javascript:alert(1)' }), /http/);
+  store.setReviewPlan(id, 'user', { status: 'todo' });
+  assert.throws(() => store.setReviewPlan(id, 'claude', { url: 'https://example.com' }), /投稿済みの報告と一緒/);
+  store.setReviewPlan(id, 'claude', { draft: 'a' });
+  store.setReviewPlan(id, 'user', { status: 'approved' });
+  assert.throws(() => store.setReviewPlan(id, 'claude', { draft: '書き換え' }), /「する」「下書きあり」/);
+  assert.throws(() => store.setReviewPlan(id, 'claude', { status: 'drafted', draft: '書き換え' }), /「する」「下書きあり」/);
+  assert.throws(() => store.setReviewPlan(id, 'claude', { status: 'posted', url: 'javascript:x' }), /http/);
+  store.setReviewPlan(id, 'claude', { status: 'posted', url: 'https://example.com/p' });
+  assert.equal(store.get(id).reviewPlan.draft, 'a');
+});

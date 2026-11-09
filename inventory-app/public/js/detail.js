@@ -140,7 +140,7 @@ function presenceCard(p) {
       h('a', { class: 'btn small', href: `/api/materials.zip?ids=${p.id}`, download: '' }, '📦 素材Zip')),
     rv.note && h('p', { class: 'small', style: { margin: '6px 0 0' } }, `メモ: ${rv.note}`),
     rv.draft && h('details', null, h('summary', { class: 'small' }, '下書きを見る'), h('pre', { class: 'review-draft' }, rv.draft)),
-    rv.url && h('a', { class: 'small', href: rv.url, target: '_blank', rel: 'noopener noreferrer' }, '投稿したページ ↗'));
+    /^https?:\/\//i.test(rv.url || '') && h('a', { class: 'small', href: rv.url, target: '_blank', rel: 'noopener noreferrer' }, '投稿したページ ↗'));
 }
 
 function header(p) {
