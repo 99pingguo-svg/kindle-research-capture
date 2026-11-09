@@ -1,6 +1,6 @@
 // 純正カメラ連携: iPhone の「カメラ」アプリ（フォトグラフスタイル等がそのまま使える）で撮って取り込む。
-// アプリで撮影対象を決める → ショートカット「台帳カメラ」でカメラを開く → 撮影 → アプリに戻ると取り込み画面。
-// 取り込みは ショートカット「台帳に送る」（撮影開始後の写真を自動で送信）か、写真を選んで追加。
+// アプリで撮影対象を決める → ショートカット「台帳で撮る」がカメラを開く → 撮影 → 左上の「◀ ショートカット」で戻ると
+// ショートカットが撮った写真を送る（戻るまで待機）→ 台帳に戻ると次の商品などを選べる。届かなかったときは「台帳に送る」か写真を選んで追加。
 import { h, toast, showError, sheet, copyText } from './ui.js';
 import { api } from './api.js';
 import { state } from './state.js';
@@ -9,10 +9,11 @@ import * as uploads from './uploads.js';
 
 const KEY = 'daicho.native';
 const NAMES_KEY = 'daicho.nativeNames';
-const DEFAULT_NAMES = { camera: '台帳カメラ', send: '台帳に送る' };
+const DEFAULT_NAMES = { camera: '台帳で撮る', send: '台帳に送る' };
 const read = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 'null') ?? d; } catch { return d; } };
 const write = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
-export const shortcutNames = () => ({ ...DEFAULT_NAMES, ...read(NAMES_KEY, {}) });
+// (the old two-step 「台帳カメラ」 only opened the Camera; 「台帳で撮る」 now shoots and sends in one go)
+export const shortcutNames = () => { const n = { ...DEFAULT_NAMES, ...read(NAMES_KEY, {}) }; if (n.camera === '台帳カメラ') n.camera = DEFAULT_NAMES.camera; return n; };
 const runShortcut = (name, back) => {
   const q = `name=${encodeURIComponent(name)}`;
   location.href = back ? `shortcuts://x-callback-url/run-shortcut?${q}&x-success=${encodeURIComponent(back)}` : `shortcuts://run-shortcut?${q}`;
@@ -88,10 +89,10 @@ export async function openImportSheet() {
       info?.active && h('p', { class: 'muted small', style: { margin: '0 0 8px' } }, `この撮影で届いた写真: ${info.photos}枚`),
       contactsBox(),
       h('div', { class: 'actions' },
-        h('button', { class: 'btn primary', onclick: () => { close(); runShortcut(names.send, `${location.origin}/#/p/${s.productId}`); } }, `⚡ 撮った写真を自動で取り込む`),
+        h('button', { class: 'btn', onclick: () => { close(); runShortcut(names.send, `${location.origin}/#/p/${s.productId}`); } }, `⚡ 写真が届いていなければ送り直す`),
         h('button', { class: 'btn', onclick: () => picker.click() }, '🖼 写真を選んで取り込む'),
         h('button', { class: 'btn', onclick: async () => { close(); (await import('./bulkimport.js')).bulkImportNativePhotos(); } }, '📸 いくつもの商品をまとめて取り込む（自動で仕分け）'),
-        h('button', { class: 'btn', onclick: () => { close(); shootWithNativeCamera(s.productId, s); } }, '📸 続けて撮る'),
+        h('button', { class: 'btn primary', onclick: () => { close(); shootWithNativeCamera(s.productId, s); } }, '📸 続けて撮る'),
         nextId && h('button', { class: 'btn', onclick: () => { close(); shootWithNativeCamera(nextId, { ids: s.ids, index: s.index + 1 }); } }, `→ 次の商品を撮る（#${nextId}）`),
         h('button', { class: 'btn ghost', onclick: () => { close(); endShoot(); toast('純正カメラの撮影を終えました'); } }, '✓ 撮影を終える'),
         h('button', { class: 'btn ghost small', onclick: () => { close(); openNativeSetup(); } }, 'ショートカットの設定方法')),
@@ -130,21 +131,27 @@ export async function openNativeSetup() {
   const nameInputs = {};
   sheet((close) => h('div', { class: 'native-setup' },
     h('h2', null, '📸 純正カメラ連携の設定（最初に1回）'),
-    h('p', { class: 'small' }, 'iPhone の「カメラ」アプリで撮るので、フォトグラフスタイル（ローズゴールド等）や 17 Pro のカメラ機能がそのまま使えます。iPhone でこの画面を開き、下の2つを押すと「ショートカット」アプリに追加できます（自動設定）。'),
+    h('p', { class: 'small' }, 'iPhone の「カメラ」アプリで撮るので、フォトグラフスタイルや撮影モードなど、カメラの機能がそのまま使えます。iPhone でこの画面を開き、下の①を押すと「ショートカット」に追加されます（自動設定）。'),
+    h('ol', { class: 'small' },
+      h('li', null, '商品の「📸 純正カメラで撮る」を押す → 「カメラ」が開く'),
+      h('li', null, '好きなだけ撮る'),
+      h('li', null, '左上の「◀ ショートカット」を押して戻る → 撮った写真がその商品に届く（Mac が自動で仕上げ）'),
+      h('li', null, '台帳に戻ると「次の商品を撮る」などが出る')),
     h('p', { class: 'small', style: { background: 'var(--bg)', padding: '8px', borderRadius: '8px' } }, h('b', null, 'いちばん簡単なのは: '), 'ショートカットなしで「カメラ」で撮りっぱなし → 一覧の下の「📸 カメラの写真を取り込む」で写真を選ぶだけ（撮影時刻と写真の文字で商品ごとに自動で分けます）。'),
     h('p', { class: 'small' }, `ショートカット②はこのアドレスに送ります: `, h('code', null, base), `（前に別のアドレスで入れたショートカットは届きません。①②を押し直して入れ替えてください）`),
     contactsBox(),
     h('div', { class: 'actions' },
-      h('a', { class: 'btn primary', href: '/api/native-shoot/shortcut/camera' }, `① 「${names.camera}」を追加`),
-      h('a', { class: 'btn primary', href: `/api/native-shoot/shortcut/send?ticket=${encodeURIComponent(ticket)}` }, `② 「${names.send}」を追加`)),
+      h('a', { class: 'btn primary', href: `/api/native-shoot/shortcut/camera?ticket=${encodeURIComponent(ticket)}` }, `① 「${names.camera}」を追加（これだけで使えます）`),
+      h('a', { class: 'btn', href: `/api/native-shoot/shortcut/send?ticket=${encodeURIComponent(ticket)}` }, `② 「${names.send}」を追加（送り直し用・任意）`)),
     h('p', { class: 'muted small' }, '「台帳に送る」は最新の写真（スクリーンショット以外・最大20枚）を送ります。撮影を始める前の写真はMacが撮影日時を見て取り込みません。同じ写真が二重に入ることもありません。'),
     h('details', null, h('summary', { class: 'small' }, '手で作る場合の手順'),
-    h('h3', null, '① 台帳カメラ（カメラを開く）'),
+    h('h3', null, '① 台帳で撮る（カメラを開き、戻ったら送る）'),
     h('ol', { class: 'small' },
       h('li', null, '新規ショートカット → 名前「', names.camera, '」'),
-      h('li', null, 'アクション「アプリを開く」→ アプリに「カメラ」を選ぶ')),
-    h('p', { class: 'muted small' }, 'カメラコントロール（側面のボタン）でカメラを開いても同じように使えます。'),
-    h('h3', null, '② 台帳に送る（撮った写真を自動で送る）'),
+      h('li', null, 'アクション「アプリを開く」→ アプリに「カメラ」を選ぶ'),
+      h('li', null, 'アクション「戻るまで待機」'),
+      h('li', null, '「最新の写真を取得」（10枚・スクリーンショットを含めない）→「各項目を繰り返す」の中に下の②と同じ「URLの内容を取得」（POST・ヘッダ x-upload-key・本文ファイル＝繰り返し項目）')),
+    h('h3', null, '② 台帳に送る（送り直し用）'),
     copyRow('対象URL', `${base}/api/native-shoot`),
     copyRow('送信URL', `${base}/api/native-shoot/photos`),
     copyRow('合言葉', key, true),
