@@ -2,6 +2,7 @@
 // taken and uploaded in the background with retries, so a flaky connection or an app
 // reload never loses a shot. The server de-duplicates by clientId, so retries are safe.
 import { emit } from './state.js';
+import { actor } from './api.js';
 
 const DB = 'daicho';
 const STORE = 'uploads';
@@ -77,7 +78,7 @@ export function pendingFor(productId) {
 
 export async function enqueue(item) {
   const qid = (crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`).toString();
-  const rec = { ...item, qid, clientId: qid, createdAt: Date.now(), attempts: 0, error: null };
+  const rec = { ...item, actor, qid, clientId: qid, createdAt: Date.now(), attempts: 0, error: null };
   await put(rec);
   await refresh();
   kick();
@@ -118,7 +119,7 @@ export async function kick() {
       if (item.work && item.work !== item.original) fd.append('work', item.work, 'work.jpg');
       if (item.thumb) fd.append('thumb', item.thumb, 'thumb.jpg');
       try {
-        const res = await fetch(`/api/products/${item.productId}/photos`, { method: 'POST', body: fd, headers: { 'x-actor': 'user' }, credentials: 'same-origin' });
+        const res = await fetch(`/api/products/${item.productId}/photos`, { method: 'POST', body: fd, headers: { 'x-actor': item.actor || 'user' }, credentials: 'same-origin' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           // 4xx (except timeouts/rate limits) will not fix itself: park it and tell the user.

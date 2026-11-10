@@ -1,4 +1,4 @@
-import { api, connectEvents } from './api.js';
+import { api, connectEvents, actor } from './api.js';
 import { state, loadAll, refreshSummaries, emit } from './state.js';
 import { showError } from './ui.js';
 import { mountList } from './list.js';
@@ -60,6 +60,11 @@ async function boot() {
   } catch (e) {
     document.getElementById('list-pane').textContent = `サーバーに接続できません: ${e.message}`;
     return;
+  }
+  if (actor !== 'user') {
+    // An AI agent working this tab (?as=<name>): say so on every screen.
+    const name = actor[0].toUpperCase() + actor.slice(1);
+    document.body.prepend(Object.assign(document.createElement('div'), { className: 'agent-banner', textContent: `🤖 ${name} として操作中（記録は ${name} の名前。ある/ない・出品判断・出品先・設定などユーザー専用の操作はできません）` }));
   }
   mountList();
   mountDetail();

@@ -603,3 +603,6 @@ code, .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 .tray-tile.discard { border-color: #64748b; }
 .tray-tile.discard img { opacity: .35; }
 .tray-tile.discard .tray-label { background: #64748b; }
+
+/* AI エージェントが ?as=<名前> で開いたタブ */
+.agent-banner { position: sticky; top: 0; z-index: 50; padding: 6px 12px; background: var(--warn-weak); color: var(--warn); border-bottom: 1px solid var(--warn); font-size: 13px; font-weight: 600; }

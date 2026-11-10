@@ -4,6 +4,7 @@
 // ショートカットは要らない（入れてあれば今まで通り使える）。
 import { h, toast, showError, sheet } from './ui.js';
 import { state } from './state.js';
+import { actor } from './api.js';
 import { makeVariants } from './images.js';
 import * as uploads from './uploads.js';
 import { ocrCandidates, termsOf, searchScore } from './search.js';
@@ -16,7 +17,7 @@ async function suggest(group) {
   const barcodes = [];
   for (const it of picks) {
     try {
-      const r = await fetch('/api/ocr', { method: 'POST', headers: { 'x-actor': 'user', 'content-type': 'image/jpeg' }, body: it.v.work, credentials: 'same-origin' });
+      const r = await fetch('/api/ocr', { method: 'POST', headers: { 'x-actor': actor, 'content-type': 'image/jpeg' }, body: it.v.work, credentials: 'same-origin' });
       const j = await r.json();
       if (r.ok) { lines.push(...(j.lines || [])); barcodes.push(...(j.barcodes || [])); }
     } catch { /* offline: no suggestion */ }

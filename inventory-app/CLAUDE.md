@@ -3,6 +3,7 @@
 手元の物が「あるかないか」を気軽に確かめ、レビュー・発信（Vineレビュー・ブログ・動画）と出品をどうするかを決める、ユーザーと AI エージェントの共同作業のハブ。
 
 - 一覧の基本は「あるかないか表示」（設定 `view`: check。≡で従来の詳しい表示）: 行ごとに ある／ない／？（`POST /api/products/:id/presence`、ユーザーのみ。ない＝出品判断「在庫なし」、ある＝最新在庫チェック、？＝在庫不明）・種類と置き場（設定 `categoryPlaces`、商品の「保管場所」が優先）・レビューの予定（`reviewPlan`: 未定／しない／する／下書きあり／投稿OK／投稿済み＋形式 vine/blog/video/sns・メモ・下書き・URL。`PUT /api/products/:id/review-plan`、AI は下書きと投稿OK後の投稿済み報告だけ）。チップ「未チェック・ある・ない・わからない・レビュー予定」。
+- ほかのエージェント（Muse など）に渡す共有入口は `docs/SHARED_ENTRY.md`（つなぎ方・できること・メールからの台帳更新・場所・触らないもの）。画面を操作するエージェントは `?as=<名前>` で開く（そのタブは AI の名前で記録・ユーザー専用の操作は断られる、`public/js/api.js` の `actor`）。連絡帳は `agent-notes/NOTES.md`（git 管理外）。
 - AI エージェントの入口は `docs/AGENT_HUB.md`（MCP `agent_queue`・`get_materials`・`save_review_draft`・`mark_review_posted`、`GET /api/agent/queue`）。素材Zip は `GET /api/materials.zip?ids=…` または `?presence=have`（公式画像・写真・仕上げ・紹介画像・info.json・情報.txt・下書き）。
 - 自動: 種類が空の商品を分類（`server/categorize.js`、決まりごと→ローカルAI qwen3.5:4b、設定 `autoCategory`）。ASIN があって公式画像がない商品を30分ごとに10件、ログアウト状態で取得（`server/official.js` が `scripts/amazon-info.js` を呼ぶ、ロボット確認で12時間休む、設定 `autoOfficial`、状況 `GET /api/auto-jobs`）。新しい商品は観察ブラウザ連携（sync.py）が足す。テスト中（NODE_TEST_CONTEXT）は動かさない。
 

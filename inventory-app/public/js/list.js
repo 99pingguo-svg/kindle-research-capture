@@ -1,7 +1,7 @@
 // 商品一覧: the main screen. Decision, camera, status, issues and bulk actions are all
 // available per row so most work never needs the detail page.
 import { h, clear, toast, showError, choose, sheet, yen, targetTitle, confirmFoodFlea } from './ui.js';
-import { api } from './api.js';
+import { api, actor } from './api.js';
 import {
   state, setPref, on, FILTERS, matchesFilter, visibleProducts, applyProduct, loadAll, inDateRange, inPriceRange, inConds, matchCond, productsForCalendar,
   priceRangeOn, dateRangeOn, NET_BANDS, SORTS, sortDef, DATE_KINDS, dateKindOf, groupDateField, currentView, applyView, shownByClass, hidingOn,
@@ -809,7 +809,7 @@ function searchByPhoto(searchInput) {
       const v = await makeVariants(file);
       // Kept for a while: the photo becomes the product's photo once the product is known.
       rememberSearchPhoto(file, v);
-      const r = await fetch('/api/ocr', { method: 'POST', headers: { 'x-actor': 'user', 'content-type': 'image/jpeg' }, body: v.work, credentials: 'same-origin' });
+      const r = await fetch('/api/ocr', { method: 'POST', headers: { 'x-actor': actor, 'content-type': 'image/jpeg' }, body: v.work, credentials: 'same-origin' });
       res = await r.json();
       if (!r.ok) throw new Error(res?.error || `HTTP ${r.status}`);
     } catch (e) {

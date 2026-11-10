@@ -1,9 +1,26 @@
-// REST client. Every request from the UI is made as the human user (X-Actor: user).
+// REST client. Requests from the UI are made as the human user (X-Actor: user), except in a tab opened with ?as=<name>
+// (e.g. ?as=muse): an AI agent working the screen (Muse over remote desktop). That tab's changes are recorded under its name
+// (history, 一括取り消し) and the server refuses the user-only operations. Per tab (sessionStorage); ?as=user goes back.
+const AS_KEY = 'daicho.actor';
+function initActor() {
+  try {
+    const q = new URLSearchParams(location.search);
+    if (q.has('as')) {
+      const v = (q.get('as') || '').trim().toLowerCase();
+      if (/^[a-z][a-z0-9_-]{1,30}$/.test(v) && !['user', 'system', 'api'].includes(v)) sessionStorage.setItem(AS_KEY, v);
+      else sessionStorage.removeItem(AS_KEY);
+    }
+    return sessionStorage.getItem(AS_KEY) || 'user';
+  } catch {
+    return 'user';
+  }
+}
+export const actor = initActor();
 
 async function request(method, url, body) {
   const res = await fetch(url, {
     method,
-    headers: { 'x-actor': 'user', ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
+    headers: { 'x-actor': actor, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
     credentials: 'same-origin',
   });

@@ -179,6 +179,12 @@ test('duplicates detected by model, JAN, URL, similar name', () => {
   const d2 = store.duplicatesFor({ name: '別物', links: ['https://amazon.co.jp/dp/B019GJLER8'] });
   assert.match(d2[0].reasons.join(), /URL/);
   assert.throws(() => store.create({ name: 'x', model: 'a-1263' }, 'user', { allowDuplicate: false }), /重複/);
+  // Another link form of the same ASIN (as in an order email), and a trashed product with that ASIN.
+  const d3 = store.duplicatesFor({ name: '別物', links: ['https://www.amazon.co.jp/gp/product/B019GJLER8/ref=ox_sc?th=1'] });
+  assert.match(d3[0].reasons.join(), /ASIN/);
+  const t = store.create({ name: '捨てた物' }, 'user', { links: ['https://www.amazon.co.jp/dp/B0TRASH001'] }).product.id;
+  store.trash(t, 'user');
+  assert.throws(() => store.create({ name: '別名' }, 'muse', { links: [{ url: 'https://www.amazon.co.jp/gp/product/B0TRASH001' }], allowDuplicate: false }), /ゴミ箱/);
 });
 
 test('AI task lifecycle and shoot-done', () => {

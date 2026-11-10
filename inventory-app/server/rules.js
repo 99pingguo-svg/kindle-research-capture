@@ -5,6 +5,7 @@ import { guessCategory } from './category.js';
 import { mercariNet, marketBrief, channelNets } from './market.js';
 import { isFood } from './food.js';
 import { norm, normUrl, similarity } from './util.js';
+import { asinOf } from './dates.js';
 
 export const livePhotos = (p) => p.photos.filter((ph) => !ph.deletedAt);
 export const actualPhotos = (p) => livePhotos(p).filter((ph) => ph.kind === 'actual');
@@ -315,12 +316,21 @@ export function summary(p, settings) {
 export function findDuplicates(cand, products, { excludeId } = {}) {
   const out = [];
   const urls = new Set((cand.links || []).map((l) => normUrl(l.url ?? l)).filter(Boolean));
+  // The same Amazon item under another link form (/gp/product/…, ?th=1, ref=…) — e.g. a link taken from an order email.
+  const asins = new Set((cand.links || []).map((l) => asinOf(l.url ?? l)).filter(Boolean));
+  const asinHit = (p) => asins.size > 0 && [p.browser?.asin, p.amazon?.asin, ...(p.links || []).map((l) => asinOf(l.url))].some((a) => a && asins.has(String(a).toUpperCase()));
   for (const p of products) {
-    if (p.id === excludeId || p.trashedAt) continue;
+    if (p.id === excludeId) continue;
+    if (p.trashedAt) {
+      // A product the user put in the trash is not brought back by a new registration of the same ASIN.
+      if (asinHit(p)) out.push({ id: p.id, name: p.name, reasons: ['ASINが一致（ゴミ箱の商品）'] });
+      continue;
+    }
     const reasons = [];
     if (cand.jan && p.jan && norm(cand.jan) === norm(p.jan)) reasons.push('JANが一致');
     if (cand.model && p.model && norm(cand.model).length >= 3 && norm(cand.model) === norm(p.model)) reasons.push('型番が一致');
     if (urls.size && p.links.some((l) => urls.has(normUrl(l.url)))) reasons.push('登録URLが一致');
+    else if (asinHit(p)) reasons.push('ASINが一致');
     const sim = similarity(cand.name, p.name);
     if (sim >= 0.85) reasons.push(`商品名が類似（${Math.round(sim * 100)}%）`);
     if (reasons.length) out.push({ id: p.id, name: p.name, reasons });
