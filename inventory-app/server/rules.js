@@ -171,6 +171,13 @@ export function photoUrl(p, ph, variant = 'thumb') {
  * What one destination (メルカリ／ジモティー／ヤフオク／ラクマ／フリマ) will receive: its own title/description/price/photos
  * where the user set them, otherwise the common listing. This is what an uploader reads.
  */
+/** 商品ID（productCode）を説明の末尾に1行（すでに書いてあれば足さない）。出品を頼まれた AI はこの説明をそのまま使う。 */
+export function withProductCode(text, code) {
+  const t = String(text || '');
+  if (!code || t.includes(code)) return t;
+  return `${t.replace(/\s+$/, '')}${t.trim() ? '\n\n' : ''}商品ID: ${code}`;
+}
+
 export function channelPackage(p, channel) {
   const o = p.override?.[channel] || {};
   const byId = new Map(livePhotos(p).map((ph) => [ph.id, ph]));
@@ -185,7 +192,9 @@ export function channelPackage(p, channel) {
     targeted: (p.targets || []).includes(channel),
     decision: p.decision,
     title: o.title || L.title,
-    description: o.description || L.description,
+    description: withProductCode(o.description || L.description, p.productCode),
+    productCode: p.productCode || '',
+    dateId: p.dateId || '',
     price: o.price ?? L.price,
     custom: { title: !!o.title, description: !!o.description, price: o.price != null, photos: p.channelPhotos?.[channel] != null },
     category: L.category,

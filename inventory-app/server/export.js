@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { listingText } from './store.js';
-import { listingPhotos, statusOf, livePhotos } from './rules.js';
+import { listingPhotos, statusOf, livePhotos, withProductCode } from './rules.js';
 import { safeSegment } from './util.js';
 import { guessCategory } from './category.js';
 
@@ -158,16 +158,16 @@ export function materialsEntries(store, products, { browserImage = () => null, s
     const rp = p.reviewPlan || {};
     const url = asin ? `https://www.amazon.co.jp/dp/${asin}` : (p.links?.find((l) => l.type === 'purchase')?.url || '');
     const info = {
-      id: p.id, name: p.name, category, place, presence,
+      id: p.id, productCode: p.productCode || '', dateId: p.dateId || '', name: p.name, category, place, presence,
       amazon: { asin, url, title: p.amazon?.title || '', price: p.research?.amazonPrice ?? p.amazon?.price ?? null },
       vineLists: Object.keys(p.browser?.lists || {}),
       review: { status: rp.status || '', formats: rp.formats || [], note: rp.note || '', draft: rp.draft || '', url: rp.url || '' },
-      listing: { decision: p.decision, targets: p.targets || [], title: p.listing?.title || '', description: p.listing?.description || '', price: p.listing?.price ?? null },
+      listing: { decision: p.decision, targets: p.targets || [], title: p.listing?.title || '', description: withProductCode(p.listing?.description, p.productCode), price: p.listing?.price ?? null },
       files,
     };
     entries.push({ name: `${folder}/info.json`, data: JSON.stringify(info, null, 2) });
     entries.push({ name: `${folder}/情報.txt`, data: [
-      `商品名: ${p.name || ''}`, `Amazon: ${info.amazon.title}`, `URL: ${url}`, `種類: ${category}`, `置き場: ${place || '（未設定）'}`,
+      `商品名: ${p.name || ''}`, info.productCode && `商品ID: ${info.productCode}`, `Amazon: ${info.amazon.title}`, `URL: ${url}`, `種類: ${category}`, `置き場: ${place || '（未設定）'}`,
       `あるかないか: ${PRES[presence] || '未確認'}`, `レビュー: ${REVIEW[info.review.status] || '未定'}${info.review.formats.length ? `（${info.review.formats.join('・')}）` : ''}`,
       info.review.note && `レビューのメモ: ${info.review.note}`, `出品先: ${(p.targets || []).join('・') || 'なし'}`,
       info.listing.title && `出品タイトル: ${info.listing.title}`, info.listing.description && `\n説明:\n${info.listing.description}`,

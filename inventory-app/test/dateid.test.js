@@ -156,3 +156,15 @@ test('注文の一覧から日付IDと商品IDを両方つける', () => {
   assert.equal(store.get(id).dateId, '08101078');
   assert.equal(store.get(id).productCode, '0300Q00b');
 });
+
+test('出品の原稿（channel_package）と素材の info.json の説明に商品IDが入る', async () => {
+  const { channelPackage, withProductCode } = await import('../server/rules.js');
+  const store = new Store(tmp());
+  const id = store.create({ name: 'x' }).product.id;
+  store.updateFields(id, 'user', { 'listing.description': '良い商品です。' });
+  store.setDateId(id, 'claude', '08101078', '0300Q00b');
+  const pkg = channelPackage(store.get(id), 'mercari');
+  assert.equal(pkg.productCode, '0300Q00b');
+  assert.equal(pkg.description, '良い商品です。\n\n商品ID: 0300Q00b');
+  assert.equal(withProductCode(pkg.description, '0300Q00b'), pkg.description, '二重に足さない');
+});
