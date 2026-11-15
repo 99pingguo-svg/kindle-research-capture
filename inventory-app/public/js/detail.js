@@ -9,6 +9,7 @@ import { shootWithNativeCamera, pickPhotosFor } from './native.js';
 import { quickMemo, searchPhotoFor, addSearchPhoto, presenceSeg, reviewSheet, placeSheet } from './quick.js';
 import { openAmazonSearch } from './amazon-search.js';
 import { booksCard } from './books.js';
+import { dateIdInfo } from './dateid.js';
 
 let pane;
 let photoTab = 'actual';
@@ -192,7 +193,7 @@ function topControls(p) {
         h('input', { type: 'checkbox', checked: !!p.openCheckedAt, onchange: (e) => act(api.post(url('/open-check'), { on: e.target.checked })) }), '開封チェック済み'),
       h('label', { class: 'small', title: '一覧の「すべて」などから外して「別枠」に置く', style: { display: 'flex', alignItems: 'center', gap: '4px' } },
         h('input', { type: 'checkbox', checked: !!p.asideAt, onchange: (e) => act(api.post(url('/aside'), { on: e.target.checked })) }), '別枠')),
-    browserInfo(p));
+    browserInfo(p), dateIdInfo(p));
 }
 
 /** 観察ブラウザ連携: which lists the product is in, its Vine order date and the fetched picture. */

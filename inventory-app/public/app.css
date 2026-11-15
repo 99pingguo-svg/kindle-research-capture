@@ -606,3 +606,16 @@ code, .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 
 /* AI エージェントが ?as=<名前> で開いたタブ */
 .agent-banner { position: sticky; top: 0; z-index: 50; padding: 6px 12px; background: var(--warn-weak); color: var(--warn); border-bottom: 1px solid var(--warn); font-size: 13px; font-weight: 600; }
+
+/* 日付ID（public/js/dateid.js） */
+.badge.dateid { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.badge.dateid.open { background: var(--warn-weak); color: var(--warn); }
+.dateid-info { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.dateid-num { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .04em; }
+.dateid-info .dateid-num { font-size: 18px; }
+.dateid-day { margin-top: 12px; }
+.dateid-day-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 4px; }
+.dateid-row { display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left; padding: 6px 4px; border: 0; border-bottom: 1px solid var(--border); background: none; color: inherit; font: inherit; font-size: 14px; cursor: pointer; }
+.dateid-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dateid-row.none { opacity: .6; cursor: default; }
+.dateid-changes { max-height: 220px; overflow: auto; }

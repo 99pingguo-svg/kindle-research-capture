@@ -17,6 +17,7 @@ import { quickMemo, rememberSearchPhoto, addSearchPhoto, presenceSeg, reviewShee
 import { bulkImportNativePhotos } from './bulkimport.js';
 import { openAmazonSearch } from './amazon-search.js';
 import { openBrowserSync, browserBadges } from './browser-sync.js';
+import { dateIdBadge, openDateIds } from './dateid.js';
 
 let els = null;
 
@@ -607,6 +608,7 @@ function badgesFor(p) {
   if (p.shootPlan) b.push(h('span', { class: 'badge info' }, '撮影予定'));
   if (p.asideAt) b.push(h('span', { class: 'badge' }, '別枠'));
   b.push(...browserBadges(p));
+  if (p.dateId) b.push(dateIdBadge(p));
   return b;
 }
 
@@ -928,7 +930,8 @@ function checkRow(p, idx, run) {
       h('div', { class: 'item-sub' },
         h('button', { class: 'chip-btn cat', title: 'この種類の置き場を決める', onclick: (e) => { e.stopPropagation(); placeSheet(p.category); } },
           p.category, p.categoryGuessed ? '?' : '', ' 📍', p.place || h('span', { class: 'muted' }, '置き場未定')),
-        vine && h('span', { class: `badge ${pending ? 'warn' : ''}` }, pending ? 'Vine レビュー待ち' : 'Vine')),
+        vine && h('span', { class: `badge ${pending ? 'warn' : ''}` }, pending ? 'Vine レビュー待ち' : 'Vine'),
+        p.dateId && dateIdBadge(p)),
       !state.selectMode && !p.trashedAt && h('div', { class: 'check-actions' },
         presenceSeg(p),
         h('button', { class: `chip-btn review r-${rv.status || 'none'}`, title: 'レビュー・発信の予定', onclick: (e) => { e.stopPropagation(); reviewSheet(p.id); } },
@@ -1153,6 +1156,7 @@ async function mainMenu() {
     { label: '💾 状態の保存・ロールバック', value: '#/snapshots' },
     { label: '📋 商品リストを一括登録', value: '#/import' },
     { label: '📅 日付を一括反映（既存商品）', value: '#/dates' },
+    { label: '🔢 日付ID（注文順の番号）', value: 'dateids' },
     { label: '📸 純正カメラの写真をまとめて取り込む', value: 'bulkimport' },
     { label: '📦 素材Zip（今の一覧の商品）', value: 'materials' },
     { label: '📦 素材Zip（「ある」商品すべて）', value: 'materials-have' },
@@ -1177,6 +1181,7 @@ async function mainMenu() {
   else if (v === 'official') openOfficialZip();
   else if (v === 'native') openNativeSetup();
   else if (v === 'browser') openBrowserSync();
+  else if (v === 'dateids') openDateIds();
   else if (v) location.hash = v;
 }
 

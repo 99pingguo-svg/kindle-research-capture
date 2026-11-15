@@ -30,6 +30,7 @@ import * as schema from './schema.js';
 import { parseLine, importDates } from './dates.js';
 import { Books, BOOK_KINDS, BOOK_STATUSES } from './books.js';
 import { Prices } from './prices.js';
+import { DateIds } from './dateid.js';
 import { parseMercariSales } from './adapters/mercari-sales.js';
 import { FLAGS as BOOK_FLAGS } from './classify.js';
 import { productReport, yearReport } from './book-report.js';
@@ -66,6 +67,8 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
   const official = background ? createOfficialFetcher(store, { port: Number(process.env.PORT || 8787) }) : null;
   const books = new Books(store.dataDir);
   const prices = new Prices(store.dataDir);
+  const dateIds = new DateIds(store.dataDir);
+  if (background) dateIds.watch(store);
   const routes = [];
   const route = (method, pattern, handler) => {
     const keys = [];
@@ -155,6 +158,12 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
   route('POST', '/api/products/:id/aside', ({ params, body, actor }) => full(store.setAside(params.id, actor, body?.on !== false)));
   // 観察ブラウザ連携（Mac の sync.py）が書く: どの一覧に入っているか。null で外す。
   route('PUT', '/api/products/:id/browser', ({ params, body, actor }) => sm(store.setBrowserInfo(params.id, actor, body?.browser ?? null)));
+  // 日付ID: 注文の一覧（文字・観察ブラウザの JSON）を取り込み、日ごとの注文順から番号をつける（server/dateid.js）。
+  route('GET', '/api/date-ids', () => dateIds.view(store.list()));
+  route('POST', '/api/date-ids/refresh', ({ actor }) => ({ applied: dateIds.refresh(store, actor) }));
+  route('POST', '/api/date-ids/import', ({ body, actor }) => dateIds.importList(store, actor, {
+    text: body?.text, rows: body?.rows, from: String(body?.from || '').slice(0, 80), dryRun: body?.dryRun !== false,
+  }));
   route('GET', '/api/browser-sync', () => browserSyncOverview(store.list()));
   route('GET', '/api/browser-images/:asin', ({ res, params }) => {
     // Small JPEGs (one per product): sent in one go so the route has answered before it returns.

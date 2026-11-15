@@ -621,6 +621,17 @@ export class Store extends EventEmitter {
     });
   }
 
+  /** 日付ID（server/dateid.js が注文の一覧から決める）。整理用なので QC はやり直しにならない。 */
+  setDateId(id, actor, dateId) {
+    const v = String(dateId || '');
+    if (v && !/^\d{7}[1-9?]$/.test(v)) throw new AppError(400, `日付IDの形が違います: ${v}`);
+    return this.mutate(id, actor, 'date_id', (p, ctx) => {
+      if ((p.dateId || '') === v) return;
+      ctx.note(p.dateId ? `日付ID ${p.dateId} → ${v || 'なし'}` : `日付ID ${v}`);
+      p.dateId = v;
+    });
+  }
+
   /** 現在の最新在庫チェック: 今手元にあることを確かめた日時（ユーザーのみ）。 */
   setStockChecked(id, actor, on) {
     forbidAi(actor, '最新在庫チェック');
