@@ -133,3 +133,26 @@ test('あとから台帳に入った商品にも、付け直しで番号がつ�
   assert.equal(store.get(id).dateId, '08111511');
   assert.equal(d.refresh(store), 0, '2回目は何もしない');
 });
+
+import { encodeDateId, decodeDateId, encodeA } from '../public/js/datecode.js';
+
+test('商品ID（令和日付・注文商品識別コード）: 仕様書の動作確認例', () => {
+  assert.deepEqual([1, 4, 5, 6, 10, 11, 23, 31].map(encodeA), ['1', '4', '0', '01', '00', '001', '00003', '0000001']);
+  const cases = [['2026-10-10', 7, 8, '0300Q00b'], ['2026-10-10', 1, 8, '0300Y00b'], ['2026-05-15', 4, 8, '030F000b'], ['2026-03-07', 3, 5, '033S02w'],
+    ['2026-01-01', 1, 1, '031Y1y'], ['2027-12-31', 6, 8, '04002L0000001b'], ['2028-02-04', 5, 8, '002W4b']];
+  for (const [d, i, t, code] of cases) assert.equal(encodeDateId(d, i, t), code, d);
+  assert.deepEqual(decodeDateId('0300Q00b'), [{ year: 8, month: 10, day: 10, index: 7, total: 8 }]);
+  assert.equal(decodeDateId('002W4b').length, 2, '令和10年2月4日 と 令和5年7月4日 の両方');
+  assert.deepEqual(decodeDateId('0300Q00s'), [], '3個中7番目は無効');
+  assert.equal(encodeDateId('2026-11-15', 1, null), '03001Y000?');
+  assert.equal(encodeDateId('2026-11-15', 9, 9), '', '9以上は作らない');
+});
+
+test('注文の一覧から日付IDと商品IDを両方つける', () => {
+  const store = new Store(tmp());
+  const id = store.create({ name: '七番目' }, 'user', { links: [{ url: `https://www.amazon.co.jp/dp/${asin(7)}` }] }).product.id;
+  const text = Array.from({ length: 8 }, (_, i) => line(`商品${8 - i}`, asin(8 - i), '2026-10-10')).join('\n');
+  new DateIds(store.dataDir).importList(store, 'user', { text, dryRun: false });
+  assert.equal(store.get(id).dateId, '08101078');
+  assert.equal(store.get(id).productCode, '0300Q00b');
+});

@@ -281,6 +281,7 @@ export function summary(p, settings) {
     stockUnknownAt: p.stockUnknownAt || null,
     asideAt: p.asideAt || null,
     dateId: p.dateId || '',
+    productCode: p.productCode || '',
     status: st,
     thumb: main ? photoUrl(p, main, 'thumb') : null,
     thumbIsReference: !!main && main.kind === 'reference',

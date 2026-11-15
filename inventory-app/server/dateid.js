@@ -1,5 +1,6 @@
 // 日付ID（ユーザー指定 2026-11-15）: 注文の一覧（商品名・Amazon のリンク・注文日）から、商品に8桁の番号をつける。
 //   令和の年2桁＋月2桁＋日2桁＋その日の注文順1桁＋その日の注文数1桁。例: 令和8年10月10日に8個注文した8番目 → 08101088。
+//   商品ID（productCode）も同じ注文から決める: public/js/datecode.js（令和日付・注文商品識別コード、0300Q00b＝令和8年10月10日・8個中7番目）。
 //   いちばん新しい日で注文数が8に届いていない間は、その日の注文がまだ増えるかもしれないので最後を「?」にする（0811151?）。
 //   次の一覧でそれより新しい日が入っていれば、その日は締まったとして「?」を数に置き換える。8件（1日の上限）なら一覧を待たずに締まる。
 // 注文順: 一覧は日付順（新しい順か古い順かは日付から判断）に並んでいて、同じ日の中も同じ向きに時刻順。
@@ -10,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { AppError, nowIso, readJson, writeJson, clone } from './util.js';
 import { asinOf } from './dates.js';
+import { encodeDateId } from '../public/js/datecode.js';
 
 export const DAILY_MAX = 8; // Vine の1日の注文上限
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -222,7 +224,8 @@ export class DateIds {
       const total = d.closed ? d.rows.length : null;
       d.rows.forEach((r, i) => {
         const dateId = d.rows.length > 9 ? '' : formatDateId(date, i + 1, total);
-        out.push({ date, seq: i + 1, total, dateId, title: r.title, asin: r.asin, ...matchRow(ix, r) });
+        const code = encodeDateId(date, i + 1, total); // 商品ID（0300Q00b 形式）
+        out.push({ date, seq: i + 1, total, dateId, code, title: r.title, asin: r.asin, ...matchRow(ix, r) });
       });
     }
     // One product, one order: when two orders point at the same product, neither is written.
@@ -233,7 +236,8 @@ export class DateIds {
       const p = o.productId && byId.get(o.productId);
       o.productName = p ? p.name : '';
       o.current = p ? p.dateId || '' : '';
-      o.change = !!p && !!o.dateId && o.current !== o.dateId;
+      o.currentCode = p ? p.productCode || '' : '';
+      o.change = !!p && !!o.dateId && (o.current !== o.dateId || o.currentCode !== o.code);
     }
     return out;
   }
@@ -241,17 +245,17 @@ export class DateIds {
   /** Products (not in the trash) holding an ID that no order gives them any more. */
   static removals(plan, products) {
     const given = new Set(plan.filter((o) => o.productId && o.dateId).map((o) => o.productId));
-    return products.filter((p) => p.dateId && !p.trashedAt && !given.has(p.id)).map((p) => ({ id: p.id, name: p.name, from: p.dateId, to: '' }));
+    return products.filter((p) => (p.dateId || p.productCode) && !p.trashedAt && !given.has(p.id)).map((p) => ({ id: p.id, name: p.name, from: p.dateId || '', to: '', code: '' }));
   }
 
   /** Re-tie the known orders to the products as they are now (a product added later gets its ID). No new list needed. */
   refresh(store, actor = 'system') {
     const plan = DateIds.plan(this.book, store.list());
-    const todo = [...plan.filter((o) => o.change).map((o) => ({ id: o.productId, to: o.dateId })), ...DateIds.removals(plan, store.list())];
+    const todo = [...plan.filter((o) => o.change).map((o) => ({ id: o.productId, to: o.dateId, code: o.code })), ...DateIds.removals(plan, store.list())];
     if (todo.length >= 10) store.saveSnapshot(actor, { label: `日付IDを付け直す前（${todo.length}件）`, kind: 'before' });
     let n = 0;
     for (const o of todo) {
-      try { store.setDateId(o.id, actor, o.to); n++; } catch (e) { console.error('日付ID:', o.id, e.message); }
+      try { store.setDateId(o.id, actor, o.to, o.code); n++; } catch (e) { console.error('日付ID:', o.id, e.message); }
     }
     return n;
   }
@@ -292,7 +296,7 @@ export class DateIds {
       warn: Object.entries(book.days).filter(([, d]) => d.warn?.length).map(([date, d]) => ({ date, warn: d.warn })),
       matched: plan.filter((o) => o.productId).length, unmatched: plan.filter((o) => !o.productId).length,
       unmatchedWhy: plan.filter((o) => !o.productId).reduce((m, o) => { const k = String(o.reason || '').split('（')[0]; m[k] = (m[k] || 0) + 1; return m; }, {}),
-      changes: [...changes.map((o) => ({ id: o.productId, name: o.productName, from: o.current, to: o.dateId, date: o.date })), ...removals],
+      changes: [...changes.map((o) => ({ id: o.productId, name: o.productName, from: o.current, to: o.dateId, code: o.code, date: o.date })), ...removals],
       applied: 0, errors: [], dryRun,
     };
     if (dryRun) return result;
@@ -302,7 +306,7 @@ export class DateIds {
     if (result.changes.length >= 10) result.snapshot = store.saveSnapshot(actor, { label: `日付IDをつける前（${result.changes.length}件）`, kind: 'before' }).id;
     for (const o of result.changes) {
       try {
-        store.setDateId(o.id, actor, o.to);
+        store.setDateId(o.id, actor, o.to, o.code);
         result.applied++;
       } catch (e) {
         result.errors.push({ id: o.id, error: e.message });

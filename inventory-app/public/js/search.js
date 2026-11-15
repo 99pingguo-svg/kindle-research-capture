@@ -21,7 +21,7 @@ const cache = new WeakMap();
 function prepared(p) {
   let c = cache.get(p);
   if (!c) {
-    const hay = norm([p.id, p.dateId, p.name, p.brand, p.model, p.jan, p.fnsku, p.notes, p.location, p.title, p.category, asinOf(p.sourceUrl)].join(' '));
+    const hay = norm([p.id, p.dateId, p.productCode, p.name, p.brand, p.model, p.jan, p.fnsku, p.notes, p.location, p.title, p.category, asinOf(p.sourceUrl)].join(' '));
     const name = norm([p.name, p.title].join(' '));
     c = { hay, grams: grams(hay), name, nameGrams: grams(name) };
     cache.set(p, c);

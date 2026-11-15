@@ -17,6 +17,7 @@ import {
 import { readiness, actualPhotos, listablePhotos, livePhotos, findDuplicates } from './rules.js';
 import { isFood } from './food.js';
 import { normalizeBrowserInfo, sameBrowserInfo } from './browser-sync.js';
+import { decodeDateId } from '../public/js/datecode.js';
 
 const VERSIONS_KEPT = 100;
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
@@ -622,13 +623,14 @@ export class Store extends EventEmitter {
   }
 
   /** 日付ID（server/dateid.js が注文の一覧から決める）。整理用なので QC はやり直しにならない。 */
-  setDateId(id, actor, dateId) {
+  setDateId(id, actor, dateId, productCode = '') {
     const v = String(dateId || '');
+    const c = String(productCode || '');
     if (v && !/^\d{7}[1-9?]$/.test(v)) throw new AppError(400, `日付IDの形が違います: ${v}`);
+    if (c && !decodeDateId(c).length) throw new AppError(400, `商品IDの形が違います: ${c}`);
     return this.mutate(id, actor, 'date_id', (p, ctx) => {
-      if ((p.dateId || '') === v) return;
-      ctx.note(p.dateId ? `日付ID ${p.dateId} → ${v || 'なし'}` : `日付ID ${v}`);
-      p.dateId = v;
+      if ((p.dateId || '') !== v) { ctx.note(p.dateId ? `日付ID ${p.dateId} → ${v || 'なし'}` : `日付ID ${v}`); p.dateId = v; }
+      if ((p.productCode || '') !== c) { ctx.note(p.productCode ? `商品ID ${p.productCode} → ${c || 'なし'}` : `商品ID ${c}`); p.productCode = c; }
     });
   }
 

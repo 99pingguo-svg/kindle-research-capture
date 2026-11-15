@@ -2,6 +2,7 @@
 // 番号を決めるのはサーバー（server/dateid.js）。観察ブラウザ連携が Vine 注文の一覧を送るたびに自動で付け直す。
 import { h, clear, sheet, toast, showError, copyText, fmtDate } from './ui.js';
 import { api } from './api.js';
+import { describeDateId as describeCode } from './datecode.js';
 
 /** "0811151?" → 令和8年11月15日・1番目・その日の数はまだ */
 export function describeDateId(id) {
@@ -13,17 +14,18 @@ export function describeDateId(id) {
 
 export function dateIdBadge(p) {
   if (!p.dateId) return null;
-  return h('span', { class: `badge dateid ${p.dateId.endsWith('?') ? 'open' : ''}`, title: `日付ID: ${describeDateId(p.dateId)}` }, `🔢 ${p.dateId}`);
+  return h('span', { class: `badge dateid ${p.dateId.endsWith('?') ? 'open' : ''}`, title: `日付ID: ${describeDateId(p.dateId)}${p.productCode ? `\n商品ID: ${describeCode(p.productCode)}` : ''}` }, `🔢 ${p.dateId}${p.productCode ? ` ${p.productCode}` : ''}`);
 }
 
 /** Detail: the ID in large digits with a copy button (for labels). */
 export function dateIdInfo(p) {
   const id = p.summary?.dateId || p.dateId;
-  if (!id) return null;
-  return h('div', { class: 'dateid-info small' },
-    h('b', { class: 'dateid-num' }, id),
-    h('span', { class: 'muted' }, describeDateId(id)),
-    h('button', { class: 'btn small ghost', onclick: () => copyText(id, `${id} をコピーしました`) }, '📋 コピー'));
+  const code = p.summary?.productCode || p.productCode;
+  if (!id && !code) return null;
+  const line = (label, v, text) => v && h('div', { class: 'dateid-info small' },
+    h('span', { class: 'muted' }, label), h('b', { class: 'dateid-num' }, v), h('span', { class: 'muted' }, text),
+    h('button', { class: 'btn small ghost', onclick: () => copyText(v, `${v} をコピーしました`) }, '📋 コピー'));
+  return h('div', null, line('日付ID', id, describeDateId(id)), line('商品ID', code, describeCode(code)));
 }
 
 const DAYS_STEP = 20;
@@ -47,7 +49,7 @@ export function openDateIds() {
         r.changes.length
           ? h('div', null,
             h('p', { class: 'small' }, `番号をつける・変える商品 ${r.changes.length}件${r.changes.length >= 10 ? '（先に自動のセーブポイントを作ります）' : ''}:`),
-            h('div', { class: 'dateid-changes small' }, r.changes.slice(0, 12).map((c) => h('div', null, `#${c.id} ${c.from || '（なし）'} → `, h('b', null, c.to), ` ${c.name || ''}`))),
+            h('div', { class: 'dateid-changes small' }, r.changes.slice(0, 12).map((c) => h('div', null, `#${c.id} ${c.from || '（なし）'} → `, h('b', null, `${c.to || 'なし'} ${c.code || ''}`), ` ${c.name || ''}`))),
             r.changes.length > 12 && h('p', { class: 'muted small' }, `ほか ${r.changes.length - 12}件`))
           : h('p', { class: 'small' }, '商品の番号は今のままで変わりません。'),
         h('div', { class: 'actions' },
@@ -87,7 +89,7 @@ export function openDateIds() {
       const open = view.days.filter((d) => !d.closed);
       clear(body).append(
         h('h2', null, '🔢 日付ID（注文順の番号）'),
-        h('p', { class: 'muted small' }, `令和の年月日6桁＋その日の注文順＋その日の注文数。例 08101088 = 令和8年10月10日に8個注文した8番目。いちばん新しい日で${view.max}個に届いていない間は最後が「?」になり、次の一覧が来たときに決まります。観察ブラウザ連携が Vine 注文を受け取ると自動で付け直します。`),
+        h('p', { class: 'muted small' }, `日付ID＝令和の年月日6桁＋その日の注文順＋その日の注文数（例 08101088）。商品ID＝[年][月][何番目＝大文字][日][注文数＝小文字]、数字は 0＝5、YRSFWLQB＝1〜8（例 0300Q00b＝令和8年10月10日・8個中7番目）。いちばん新しい日で${view.max}個に届いていない間は最後が「?」になり、次の一覧が来たときに決まります。観察ブラウザ連携が Vine 注文を受け取ると自動で付け直します。`),
         h('p', { class: 'small' }, view.days.length
           ? `覚えている注文 ${view.days.reduce((n, d) => n + d.count, 0)}件・${view.days.length}日分${open.length ? `・まだ締まっていない日 ${open.map((d) => d.date).join('・')}` : ''}${view.imports[0] ? `　最後の取り込み ${fmtDate(view.imports[0].at)}（${view.imports[0].from || '—'}）` : ''}`
           : 'まだ注文の一覧を取り込んでいません。'),
@@ -108,7 +110,7 @@ export function openDateIds() {
             class: `dateid-row ${o.productId ? '' : 'none'}`, disabled: !o.productId,
             title: o.productId ? '' : o.reason || '',
             onclick: () => { if (o.productId) { close(); location.hash = `#/p/${o.productId}`; } },
-          }, h('b', { class: 'dateid-num' }, o.dateId || '—'), h('span', null, o.productId ? `#${o.productId} ${o.productName}` : o.title), !o.productId && h('span', { class: 'muted' }, `（${o.reason}）`))))),
+          }, h('b', { class: 'dateid-num' }, o.dateId || '—'), h('b', { class: 'dateid-num' }, o.code || ''), h('span', null, o.productId ? `#${o.productId} ${o.productName}` : o.title), !o.productId && h('span', { class: 'muted' }, `（${o.reason}）`))))),
         shown < view.days.length && h('div', { class: 'actions' }, h('button', { class: 'btn ghost', onclick: () => { shown += DAYS_STEP; render(); } }, `もっと見る（あと${view.days.length - shown}日）`)),
         h('div', { class: 'actions sticky-actions' }, h('button', { class: 'btn', onclick: () => close() }, '閉じる')));
     }
