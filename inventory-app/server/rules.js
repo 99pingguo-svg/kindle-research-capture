@@ -181,8 +181,8 @@ export function withProductCode(text, code) {
 /** 撮影日: the days its own photos were taken (EXIF time, else upload time), in Japan time. When the item was seen. */
 export function shotDates(p) {
   const days = actualPhotos(p).filter((ph) => ph.source !== 'studio' && !ph.derivedFrom)
-    .map((ph) => ph.takenAt || ph.createdAt).filter(Boolean)
-    .map((t) => new Date(t).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })).sort();
+    .map((ph) => new Date(ph.takenAt || ph.createdAt || NaN)).filter((d) => !Number.isNaN(d.getTime()))
+    .map((d) => d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })).sort();
   return { shotDate: days.at(-1) || '', firstShotDate: days[0] || '' };
 }
 

@@ -819,7 +819,7 @@ export class Store extends EventEmitter {
       height: Number(meta.height) || null,
       clientId: meta.clientId || null,
       sha256: sha256(files.original.buffer),
-      takenAt: meta.takenAt || null,
+      takenAt: meta.takenAt && !Number.isNaN(Date.parse(meta.takenAt)) ? new Date(meta.takenAt).toISOString() : null,
       createdAt: nowIso(),
       by: actor,
       deletedAt: null,

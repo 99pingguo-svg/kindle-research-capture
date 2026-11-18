@@ -179,3 +179,8 @@ test('撮影日: 現物写真の撮影時刻（なければ取り込んだ時刻
   ] };
   assert.deepEqual(shotDates(p), { shotDate: '2026-11-18', firstShotDate: '2026-11-10' });
 });
+
+test('撮影日: 読めない撮影時刻は飛ばす（一覧が壊れない）', async () => {
+  const { shotDates } = await import('../server/rules.js');
+  assert.deepEqual(shotDates({ photos: [{ id: 'x', kind: 'actual', takenAt: 'garbage' }, { id: 'y', kind: 'actual', createdAt: '2026-11-10T03:00:00Z' }] }), { shotDate: '2026-11-10', firstShotDate: '2026-11-10' });
+});
