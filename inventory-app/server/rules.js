@@ -178,6 +178,14 @@ export function withProductCode(text, code) {
   return `${t.replace(/\s+$/, '')}${t.trim() ? '\n\n' : ''}商品ID: ${code}`;
 }
 
+/** 撮影日: the days its own photos were taken (EXIF time, else upload time), in Japan time. When the item was seen. */
+export function shotDates(p) {
+  const days = actualPhotos(p).filter((ph) => ph.source !== 'studio' && !ph.derivedFrom)
+    .map((ph) => ph.takenAt || ph.createdAt).filter(Boolean)
+    .map((t) => new Date(t).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })).sort();
+  return { shotDate: days.at(-1) || '', firstShotDate: days[0] || '' };
+}
+
 export function channelPackage(p, channel) {
   const o = p.override?.[channel] || {};
   const byId = new Map(livePhotos(p).map((ph) => [ph.id, ph]));
@@ -301,6 +309,7 @@ export function summary(p, settings) {
     counts: { actual: actual.length, generated: generatedPhotos(p).length, listing: lp.length, reference: referencePhotos(p).length },
     channels: Object.fromEntries(Object.entries(p.channels || {}).filter(([, c]) => c?.status).map(([k, c]) => [k, c.status])),
     lastPhotoAt: p.lastPhotoAt,
+    ...shotDates(p),
     shotDoneAt: p.shotDoneAt || null,
     openPhotoRequests: openPhotoRequests(p).map((r) => ({ id: r.id, label: r.label })),
     proposals: Object.keys(p.proposals).length + p.facts.filter((f) => f.proposal).length,

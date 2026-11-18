@@ -168,3 +168,14 @@ test('出品の原稿（channel_package）と素材の info.json の説明に商
   assert.equal(pkg.description, '良い商品です。\n\n商品ID: 0300Q00b');
   assert.equal(withProductCode(pkg.description, '0300Q00b'), pkg.description, '二重に足さない');
 });
+
+test('撮影日: 現物写真の撮影時刻（なければ取り込んだ時刻）の日本の日付。仕上げ画像は数えない', async () => {
+  const { shotDates } = await import('../server/rules.js');
+  const p = { photos: [
+    { id: 'a', kind: 'actual', takenAt: '2026-11-17T16:00:00Z', createdAt: '2026-11-18T01:00:00Z' },
+    { id: 'b', kind: 'actual', createdAt: '2026-11-10T03:00:00Z' },
+    { id: 'c', kind: 'actual', source: 'studio', createdAt: '2026-11-20T03:00:00Z' },
+    { id: 'd', kind: 'reference', createdAt: '2026-11-21T03:00:00Z' },
+  ] };
+  assert.deepEqual(shotDates(p), { shotDate: '2026-11-18', firstShotDate: '2026-11-10' });
+});

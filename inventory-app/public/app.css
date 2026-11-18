@@ -619,3 +619,10 @@ code, .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-
 .dateid-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .dateid-row.none { opacity: .6; cursor: default; }
 .dateid-changes { max-height: 220px; overflow: auto; }
+
+/* 写真の取り込み: 候補の見比べ（public/js/bulkimport.js） */
+.bulk-cands { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 8px; }
+.bulk-cand { display: flex; flex-direction: column; gap: 4px; align-items: stretch; text-align: left; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: inherit; font: inherit; cursor: pointer; }
+.bulk-cand img, .bulk-cand-noimg { width: 100%; aspect-ratio: 1; object-fit: contain; background: #fff; border-radius: 6px; }
+.bulk-cand-noimg { display: grid; place-items: center; color: var(--muted); font-size: 12px; background: var(--bg); }
+.bulk-cand-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

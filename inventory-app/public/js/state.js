@@ -206,6 +206,8 @@ export const DATE_KINDS = [
   { field: 'orderDate', label: '注文日', long: '注文日・購入日' },
   { field: 'arrivalDate', label: '到着日', long: '到着日' },
   { field: 'vineOrderDate', label: 'Vine注文日', long: 'Vine注文日（観察ブラウザ）' },
+  { field: 'shotDate', label: '撮影日', long: '撮影日（いちばん新しい現物写真）' },
+  { field: 'firstShotDate', label: '初撮影日', long: '初めて撮った日（いちばん古い現物写真）' },
 ];
 export const dateKindOf = (field = state.prefs.dateKind) => DATE_KINDS.find((k) => k.field === field) || DATE_KINDS[0];
 
@@ -218,6 +220,8 @@ export const SORTS = [
   { id: 'order', label: '注文日・購入日', date: 'orderDate', desc: true, dir: ['古い順', '新しい順'] },
   { id: 'arrival', label: '到着日', date: 'arrivalDate', desc: true, dir: ['古い順', '新しい順'] },
   { id: 'vine', label: 'Vine注文日', date: 'vineOrderDate', desc: true, dir: ['古い順', '新しい順'] },
+  { id: 'shot', label: '撮影日（新しい現物写真）', date: 'shotDate', desc: true, dir: ['古い順', '新しい順'] },
+  { id: 'firstshot', label: '初めて撮った日', date: 'firstShotDate', desc: true, dir: ['古い順', '新しい順'] },
   { id: 'amazon', label: 'Amazon価格', desc: true, dir: ['安い順', '高い順'], value: (p) => p.research?.amazonPrice ?? null },
   { id: 'net', label: 'メルカリ手取り', desc: true, dir: ['少ない順', '多い順'], value: (p) => p.net?.net ?? null },
   { id: 'market', label: 'メルカリ相場', desc: true, dir: ['安い順', '高い順'], value: (p) => p.market?.median ?? null },
