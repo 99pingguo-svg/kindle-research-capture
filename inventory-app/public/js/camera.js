@@ -7,6 +7,7 @@ import { captureFrame, makeVariants } from './images.js';
 import { fmtDay } from './calendar.js';
 import * as uploads from './uploads.js';
 import { shootWithNativeCamera } from './native.js';
+import { takenAt } from './photo-time.js';
 
 let open = null;
 
@@ -277,7 +278,7 @@ class CameraSession {
       this.chain = this.chain
         .then(async () => {
           const v = await makeVariants(f);
-          await uploads.enqueue({ ...meta, original: f, work: v.work, thumb: v.thumb, width: v.width, height: v.height, takenAt: new Date(f.lastModified || Date.now()).toISOString() });
+          await uploads.enqueue({ ...meta, original: f, work: v.work, thumb: v.thumb, width: v.width, height: v.height, takenAt: new Date(await takenAt(f)).toISOString() });
         })
         .catch(showError);
     }

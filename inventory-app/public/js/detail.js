@@ -10,6 +10,7 @@ import { quickMemo, searchPhotoFor, addSearchPhoto, presenceSeg, reviewSheet, pl
 import { openAmazonSearch } from './amazon-search.js';
 import { booksCard } from './books.js';
 import { dateIdInfo } from './dateid.js';
+import { takenAt } from './photo-time.js';
 
 let pane;
 let photoTab = 'actual';
@@ -298,7 +299,7 @@ async function addFiles(productId, fileList, kind, source) {
   for (const f of files) {
     try {
       const v = await makeVariants(f);
-      await uploads.enqueue({ productId, kind, source, original: f, work: v.work, thumb: v.thumb, width: v.width, height: v.height, takenAt: new Date(f.lastModified || Date.now()).toISOString() });
+      await uploads.enqueue({ productId, kind, source, original: f, work: v.work, thumb: v.thumb, width: v.width, height: v.height, takenAt: new Date(await takenAt(f)).toISOString() });
     } catch (e) {
       showError(e);
     }

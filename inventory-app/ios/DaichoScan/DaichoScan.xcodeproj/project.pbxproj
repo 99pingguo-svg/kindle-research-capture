@@ -1,0 +1,84 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+		200000000000000000000011 = {isa = PBXBuildFile; fileRef = 200000000000000000000031; };
+		200000000000000000000012 = {isa = PBXBuildFile; fileRef = 200000000000000000000032; };
+		200000000000000000000013 = {isa = PBXBuildFile; fileRef = 200000000000000000000033; };
+		200000000000000000000014 = {isa = PBXBuildFile; fileRef = 200000000000000000000034; };
+		200000000000000000000015 = {isa = PBXBuildFile; fileRef = 200000000000000000000035; };
+		200000000000000000000016 = {isa = PBXBuildFile; fileRef = 200000000000000000000036; };
+		200000000000000000000031 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Api.swift; sourceTree = "<group>"; };
+		200000000000000000000032 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Photos.swift; sourceTree = "<group>"; };
+		200000000000000000000033 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scanner.swift; sourceTree = "<group>"; };
+		200000000000000000000034 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanModel.swift; sourceTree = "<group>"; };
+		200000000000000000000035 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		200000000000000000000036 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
+		200000000000000000000099 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DaichoScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000060 = {isa = PBXGroup; children = (200000000000000000000061, 200000000000000000000062); sourceTree = "<group>"; };
+		200000000000000000000061 = {isa = PBXGroup; children = (200000000000000000000031, 200000000000000000000032, 200000000000000000000033, 200000000000000000000034, 200000000000000000000035, 200000000000000000000036); path = DaichoScan; sourceTree = "<group>"; };
+		200000000000000000000062 = {isa = PBXGroup; children = (200000000000000000000099); name = Products; sourceTree = "<group>"; };
+		200000000000000000000040 = {isa = PBXNativeTarget; buildConfigurationList = 200000000000000000000070; buildPhases = (200000000000000000000050, 200000000000000000000051, 200000000000000000000052); buildRules = (); dependencies = (); name = DaichoScan; productName = DaichoScan; productReference = 200000000000000000000099; productType = "com.apple.product-type.application"; };
+		200000000000000000000050 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (200000000000000000000011, 200000000000000000000012, 200000000000000000000013, 200000000000000000000014, 200000000000000000000015, 200000000000000000000016); runOnlyForDeploymentPostprocessing = 0; };
+		200000000000000000000051 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		200000000000000000000052 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		200000000000000000000090 = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastUpgradeCheck = 2600; TargetAttributes = { 200000000000000000000040 = { CreatedOnToolsVersion = 26.0; }; }; }; buildConfigurationList = 200000000000000000000071; compatibilityVersion = "Xcode 14.0"; developmentRegion = ja; hasScannedForEncodings = 0; knownRegions = (ja, en, Base); mainGroup = 200000000000000000000060; productRefGroup = 200000000000000000000062; projectDirPath = ""; projectRoot = ""; targets = (200000000000000000000040); };
+		200000000000000000000080 = { isa = XCBuildConfiguration; buildSettings = {
+			ALWAYS_SEARCH_USER_PATHS = NO;
+			CLANG_ENABLE_MODULES = YES;
+			IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+			SDKROOT = iphoneos;
+			SWIFT_VERSION = 5.0;
+			SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+			SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+		}; name = Debug; };
+		200000000000000000000081 = { isa = XCBuildConfiguration; buildSettings = {
+			ALWAYS_SEARCH_USER_PATHS = NO;
+			CLANG_ENABLE_MODULES = YES;
+			IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+			SDKROOT = iphoneos;
+			SWIFT_VERSION = 5.0;
+		}; name = Release; };
+		200000000000000000000082 = { isa = XCBuildConfiguration; buildSettings = {
+			CODE_SIGN_STYLE = Automatic;
+			CURRENT_PROJECT_VERSION = 1;
+			DEVELOPMENT_TEAM = L8LHSN2DPZ;
+			GENERATE_INFOPLIST_FILE = YES;
+			INFOPLIST_KEY_CFBundleDisplayName = "台帳スキャン";
+			INFOPLIST_KEY_NSCameraUsageDescription = "商品ラベルのバーコードを読み、写真で存在を記録します";
+			INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "撮った写真から商品を読み取ります";
+			INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+			INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+			INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+			MARKETING_VERSION = 0.1.0;
+			PRODUCT_BUNDLE_IDENTIFIER = jp.personal.daichoscan;
+			PRODUCT_NAME = DaichoScan;
+			SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+			SWIFT_VERSION = 5.0;
+			TARGETED_DEVICE_FAMILY = 1;
+		}; name = Debug; };
+		200000000000000000000083 = { isa = XCBuildConfiguration; buildSettings = {
+			CODE_SIGN_STYLE = Automatic;
+			CURRENT_PROJECT_VERSION = 1;
+			DEVELOPMENT_TEAM = L8LHSN2DPZ;
+			GENERATE_INFOPLIST_FILE = YES;
+			INFOPLIST_KEY_CFBundleDisplayName = "台帳スキャン";
+			INFOPLIST_KEY_NSCameraUsageDescription = "商品ラベルのバーコードを読み、写真で存在を記録します";
+			INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "撮った写真から商品を読み取ります";
+			INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+			INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+			INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+			MARKETING_VERSION = 0.1.0;
+			PRODUCT_BUNDLE_IDENTIFIER = jp.personal.daichoscan;
+			PRODUCT_NAME = DaichoScan;
+			SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+			SWIFT_VERSION = 5.0;
+			TARGETED_DEVICE_FAMILY = 1;
+		}; name = Release; };
+		200000000000000000000070 = { isa = XCConfigurationList; buildConfigurations = (200000000000000000000082, 200000000000000000000083); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		200000000000000000000071 = { isa = XCConfigurationList; buildConfigurations = (200000000000000000000080, 200000000000000000000081); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+	};
+	rootObject = 200000000000000000000090;
+}

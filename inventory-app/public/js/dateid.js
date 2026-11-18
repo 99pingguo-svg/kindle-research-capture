@@ -21,11 +21,13 @@ export function dateIdBadge(p) {
 export function dateIdInfo(p) {
   const id = p.summary?.dateId || p.dateId;
   const code = p.summary?.productCode || p.productCode;
-  if (!id && !code) return null;
+  const arr = p.summary?.arrivalId || p.arrivalId;
+  if (!id && !code && !arr) return null;
   const line = (label, v, text) => v && h('div', { class: 'dateid-info small' },
     h('span', { class: 'muted' }, label), h('b', { class: 'dateid-num' }, v), h('span', { class: 'muted' }, text),
     h('button', { class: 'btn small ghost', onclick: () => copyText(v, `${v} をコピーしました`) }, '📋 コピー'));
-  return h('div', null, line('日付ID', id, describeDateId(id)), line('商品ID', code, describeCode(code)));
+  return h('div', null, line('日付ID', id, describeDateId(id)), line('商品ID', code, describeCode(code)),
+    line('到着ID', arr, arr && `${Number(arr.slice(0, 4))}年${Number(arr.slice(4, 6))}月${Number(arr.slice(6))}日に到着`));
 }
 
 const DAYS_STEP = 20;

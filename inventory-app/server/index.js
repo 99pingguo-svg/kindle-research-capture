@@ -35,6 +35,7 @@ import { parseMercariSales } from './adapters/mercari-sales.js';
 import { FLAGS as BOOK_FLAGS } from './classify.js';
 import { productReport, yearReport } from './book-report.js';
 import { simulate, scenarios, TAX_YEARS } from './tax.js';
+import { scanLookup, scanCard } from './scan.js';
 import { browserBrief, browserSyncOverview, imageFile, isVineProvided, BROWSER_LISTS, IMAGE_STATES } from './browser-sync.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -160,6 +161,20 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
   route('PUT', '/api/products/:id/browser', ({ params, body, actor }) => sm(store.setBrowserInfo(params.id, actor, body?.browser ?? null)));
   // 日付ID: 注文の一覧（文字・観察ブラウザの JSON）を取り込み、日ごとの注文順から番号をつける（server/dateid.js）。
   route('GET', '/api/date-ids', () => dateIds.view(store.list()));
+  // ---- iPhone「台帳スキャン」: 読んだバーコード・ラベルの文字 → 候補と読み上げ文。決めた商品は「ある」＋FNSKU を記録 ----
+  route('POST', '/api/scan', ({ body }) => scanLookup(store.list().map(sm), {
+    codes: (Array.isArray(body?.codes) ? body.codes : []).map(String).slice(0, 20),
+    lines: (Array.isArray(body?.lines) ? body.lines : []).map(String).slice(0, 80),
+  }));
+  route('POST', '/api/scan/confirm', ({ body, actor }) => {
+    const id = String(body?.id || '');
+    const p0 = store.get(id);
+    const fnsku = /^X00[0-9A-Z]{7}$/.test(String(body?.fnsku || '')) ? body.fnsku : '';
+    if (fnsku && !p0.fnsku) store.updateFields(id, actor, { fnsku });
+    const noted = fnsku && p0.fnsku && p0.fnsku !== fnsku ? `この商品には別の管理番号 ${p0.fnsku} が入っています` : '';
+    if (body?.presence !== false) store.setPresence(id, actor, 'have');
+    return { ...scanCard(sm(store.get(id))), noted };
+  });
   route('POST', '/api/date-ids/refresh', ({ actor }) => ({ applied: dateIds.refresh(store, actor) }));
   route('POST', '/api/date-ids/import', ({ body, actor }) => dateIds.importList(store, actor, {
     text: body?.text, rows: body?.rows, from: String(body?.from || '').slice(0, 80), dryRun: body?.dryRun !== false,
@@ -247,7 +262,8 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
       edit = null;
     }
     const { photo, duplicate } = store.addPhoto(params.id, actor, { ...fields, edit, replaceInListing: fields.replaceInListing === 'true' }, files);
-    if (!duplicate) { studio.enqueue(params.id, photo); codes.enqueue(params.id, photo); }
+    // A scan photo only proves the item was here that day; it is not finished for listing.
+    if (!duplicate) { if (photo.source !== 'scan') studio.enqueue(params.id, photo); codes.enqueue(params.id, photo); }
     return { photo, duplicate, product: sm(store.get(params.id)) };
   });
   // ---- 純正カメラ連携: アプリで撮影対象を決め → iPhone の「カメラ」で撮影 → ショートカットが撮った写真を送る ----

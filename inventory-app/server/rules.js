@@ -6,6 +6,7 @@ import { mercariNet, marketBrief, channelNets } from './market.js';
 import { isFood } from './food.js';
 import { norm, normUrl, similarity } from './util.js';
 import { asinOf } from './dates.js';
+import { arrivalIdOf } from '../public/js/datecode.js';
 
 export const livePhotos = (p) => p.photos.filter((ph) => !ph.deletedAt);
 export const actualPhotos = (p) => livePhotos(p).filter((ph) => ph.kind === 'actual');
@@ -299,6 +300,7 @@ export function summary(p, settings) {
     asideAt: p.asideAt || null,
     dateId: p.dateId || '',
     productCode: p.productCode || '',
+    arrivalId: arrivalIdOf(p.arrivalDate),
     status: st,
     thumb: main ? photoUrl(p, main, 'thumb') : null,
     thumbIsReference: !!main && main.kind === 'reference',

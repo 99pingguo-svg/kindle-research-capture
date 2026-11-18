@@ -54,3 +54,6 @@ export function describeDateId(code) {
   if (c.length === 1) return one(c[0]);
   return `読み方が${c.length}つ: ${c.map((r) => `${one(r)}（${encodeA(r.year)}|${encodeA(r.month)}|…）`).join(' ／ ')}`;
 }
+
+/** 到着ID: the arrival date as 8 digits (2026-10-16 → 20261016), '' when unknown. */
+export const arrivalIdOf = (date) => (/^\d{4}-\d\d-\d\d$/.test(date || '') ? date.replaceAll('-', '') : '');

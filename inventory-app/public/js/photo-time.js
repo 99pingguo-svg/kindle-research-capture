@@ -3,8 +3,16 @@
 /** Capture time from the JPEG's EXIF (DateTimeOriginal), else the file date. */
 export async function takenAt(file) {
   try {
-    const buf = new DataView(await file.slice(0, 256 * 1024).arrayBuffer());
-    if (buf.getUint16(0) !== 0xffd8) throw 0;
+    const t = exifTime(new DataView(await file.slice(0, 256 * 1024).arrayBuffer()));
+    if (t) return t;
+  } catch { /* fall back */ }
+  return file.lastModified || Date.now();
+}
+
+/** DateTimeOriginal of a JPEG (DataView over its first bytes) as ms, or null. Shared with the server. */
+export function exifTime(buf) {
+  try {
+    if (buf.getUint16(0) !== 0xffd8) return null;
     let o = 2;
     while (o + 4 < buf.byteLength) {
       const marker = buf.getUint16(o);
@@ -37,8 +45,8 @@ export async function takenAt(file) {
       if ((marker & 0xff00) !== 0xff00) break;
       o += 2 + len;
     }
-  } catch { /* fall back */ }
-  return file.lastModified || Date.now();
+  } catch { /* unreadable */ }
+  return null;
 }
 
 /** Split photos (sorted by time) where the gap is larger than `gapSec`. */

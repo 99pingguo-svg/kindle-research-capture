@@ -3,6 +3,7 @@ import { h, toast, showError, sheet } from './ui.js';
 import { api } from './api.js';
 import { state, applyProduct } from './state.js';
 import * as uploads from './uploads.js';
+import { takenAt } from './photo-time.js';
 
 // ---------- メモ ----------
 const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -85,7 +86,7 @@ export async function addSearchPhoto(id) {
   s.usedBy.add(id);
   await uploads.enqueue({
     productId: id, kind: 'actual', source: 'search', original: s.file, work: s.work, thumb: s.thumb, width: s.width, height: s.height,
-    takenAt: new Date(s.file.lastModified || Date.now()).toISOString(),
+    takenAt: new Date(await takenAt(s.file)).toISOString(),
   });
   toast('検索に使った写真を商品写真に追加しました（Mac で自動仕上げします）');
   return true;

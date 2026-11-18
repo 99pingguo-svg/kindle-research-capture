@@ -18,6 +18,7 @@ import { readiness, actualPhotos, listablePhotos, livePhotos, findDuplicates } f
 import { isFood } from './food.js';
 import { normalizeBrowserInfo, sameBrowserInfo } from './browser-sync.js';
 import { decodeDateId } from '../public/js/datecode.js';
+import { exifTime } from '../public/js/photo-time.js';
 
 const VERSIONS_KEPT = 100;
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
@@ -208,6 +209,13 @@ export function normalizeListViews(v) {
     if (JSON.stringify(view).length > 4000) throw new AppError(400, `「${name}」の条件が長すぎます`);
     return { name, view };
   });
+}
+
+/** When the photo was really taken: the JPEG's own EXIF time (also for photos picked from the library), else what the sender said. */
+export function photoTakenAt(buf, claimed) {
+  const exif = buf?.length ? exifTime(new DataView(buf.buffer, buf.byteOffset, Math.min(buf.length, 256 * 1024))) : null;
+  if (exif) return new Date(exif).toISOString();
+  return claimed && !Number.isNaN(Date.parse(claimed)) ? new Date(claimed).toISOString() : null;
 }
 
 export class Store extends EventEmitter {
@@ -819,7 +827,7 @@ export class Store extends EventEmitter {
       height: Number(meta.height) || null,
       clientId: meta.clientId || null,
       sha256: sha256(files.original.buffer),
-      takenAt: meta.takenAt && !Number.isNaN(Date.parse(meta.takenAt)) ? new Date(meta.takenAt).toISOString() : null,
+      takenAt: photoTakenAt(files.original.buffer, meta.takenAt),
       createdAt: nowIso(),
       by: actor,
       deletedAt: null,
