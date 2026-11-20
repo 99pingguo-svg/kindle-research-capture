@@ -8,7 +8,7 @@
 
 ---
 
-## 1. 今の状態（2026-11-20 00:30 JST 時点）
+## 1. 今の状態（2026-11-20 20:30 JST 時点）
 
 | 項目 | 状態 |
 |---|---|
@@ -19,7 +19,8 @@
 | テスト | `npm test` で 112 件すべて通る（作業ツリーの状態で） |
 | データ | 688 商品（ゴミ箱を除く）。ある 200・ない 161・？ 74・未確認 253。日付ID 553・到着ID 561・FNSKU 27 |
 | 自動の仕事 | 公式画像の取得（30分ごと10件・ログアウト状態）: 最後の回 11/20 00:08 は対象4件すべて失敗（ロボット確認ではない） |
-| セーブポイント | `data/snapshots/` に 377 個・3.1 GB（データ全体 16 GB） |
+| セーブポイント | `data/snapshots/` に 79 個・684 MB。11/20 に重複 298 個（2.5 GB）を Mac のゴミ箱「商品台帳_重複セーブポイント298個_2.5GB_20261120」へ移した（空にするのは利用者） |
+| iPhone アプリ | 「台帳スキャン」を導入済み（11/20、署名の期限 2026-11-25 23:41）。無料署名の枠は3本で満杯（観察ブラウザ・台帳スキャン・講演ライブラリ）。期限切れだった Vine Lite は外した（利用者の判断。自分で作ったデータはなかった） |
 
 ### コミットされていない変更（別の作業者のもの・触らない）
 `public/js/retake.js`（撮り直し用の画面）・`test/presence-hide.test.js` と、11 ファイル・約250行（`app.css`・`index.html`・`detail.js`・`list.js`・`native.js`・`state.js`・`sw.js`・`server/index.js`・`mcp.js`・`rules.js`・`store.js`）。
@@ -33,11 +34,17 @@
 - **撮影日**（`shotDate`／`firstShotDate`）: 現物写真を撮った日。サーバーが写真の EXIF を読むので、ライブラリから選んだ写真も撮った日になる。
 - **iPhone アプリ「台帳スキャン」**（`ios/DaichoScan`）: カメラでラベルを読み「◯月◯日到着、◯◯」と読み上げる。`POST /api/scan` と `/api/scan/confirm`。
 
-### 利用者の判断待ち（Muse から聞いてよい。決めるのは利用者）
-1. **セーブポイントの片づけ**: 11/09〜11/11 の連携の不具合で、同じ内容のセーブポイントが約300個・約2.5 GB できた。ゴミ箱へ移すかどうか（完全に消すのは利用者だけ）。
-2. **399商品の取り込みが止まっている**（11/10〜）: 取り込み元の `~/Documents/Codex/…` が iCloud のクラウドのみになっていて読めない。ファイルを Mac に戻すか、この取り込みをやめるか。
-3. **台帳スキャンの iPhone への導入**: ビルドは通るが、署名（CodeSign）で止まった。Mac の画面のキーチェーン確認（パスワード入力）と、iPhone をつないでロック解除するのは利用者。そのあと `ios/DaichoScan/install.sh`。
-4. **コミットされていない変更**（上の表）を誰がどうするか。
+### 利用者が決めたこと（2026-11-20）
+1. 重複セーブポイントは片づける → 済み（上の表）。
+2. **商品のデータは外付けSSDを正本、iCloud は控え**にする。台帳などで見失わないように管理する（保管庫の台帳 `~/AI-Workspace/storage-ledger` と合わせる）→ **途中**（4. E の T-002）。
+3. 台帳スキャンを導入する → 済み。
+4. コミットされていない変更は **Antigravity の作業と思われる。そのまま保留**（触らない・コミットしない）。
+5. 399商品のボツ画像は基準が厳しすぎた。**明らかに別の形・別の物以外は採用**できるよう、Opus（低い effort）で再判定する → 再判定用のフォルダを SSD に用意済み（4. E の T-001、引き継ぎは `docs/HANDOFF_399_REJUDGE.md`）。
+
+### まだ残っていること
+- 11/20 の片づけの途中で、iCloud のクラウドのみだった 399商品の画像 2,491枚を消してしまった（利用者が止める前）。iCloud.com の「最近削除した項目」に約30日ある。戻すのは利用者。一覧 `~/AI-Workspace/storage-ledger/data/icloud-deleted-399-images-20261120.txt`。
+- 399商品の途中経過の zip（`2026-10-02/task/resume_snapshots`、40.5 GB）は利用者の OK で iCloud から消した（戻す予定なし）。
+- 399商品の取り込み（`scripts/import-399.js`、LaunchAgent `com.yoshikuni.shohin-daicho-sync`）は 11/10 から毎回失敗している（取り込み元が iCloud のクラウドのみ）。T-002 で SSD から読むように直すまで失敗が続く（台帳には害はない）。
 
 ---
 
@@ -120,7 +127,18 @@ tail -20 ~/Library/Logs/amazon-browser-sync.log                             # �
 - 利用者の手が要る: iPhone を Mac につなぐ・ロック解除、初回や期限後は Mac の画面のキーチェーン確認（パスワード）。
 - そのあと `~/Projects/kindle-research-capture/inventory-app/ios/DaichoScan/install.sh`。
 - 台帳のアドレスとトークンは、スクリプトが `~/.shohin-daicho` から `Config.swift`（git の管理外）へ書く。**中身を表示しない・どこにも貼らない。**
+- 無料署名で入れられるのは3本まで（今は満杯）。4本目を入れるときは、どれを外すかを利用者に聞く。外す前にアプリのデータを Mac に控える（`xcrun devicectl device copy from … --domain-type appDataContainer`）。
 - 観察ブラウザ（別アプリ）も同じ7日の期限がある。今の期限は 2026-11-25 17:26（手順は `~/AI-Workspace/projects/amazon-research-browser/AmazonResearchBrowser/HANDOFF_OPUS.md` の末尾）。
+
+### E. 399商品の残りの仕事
+- **T-001 ボツ画像の再判定**（利用者の依頼 2026-11-20）: 手順は全部 `docs/HANDOFF_399_REJUDGE.md`（SSD のフォルダ `/Volumes/Crucial X9/商品データ/399商品/再判定/README.md` と同じ内容）。874束・Opus 低い effort。台帳へ足すのは利用者に件数を見せて OK をもらってから。
+- **T-002 399商品のデータを SSD を正本に**（利用者の依頼 2026-11-20、未着手）。Opus に頼む。考えてある進め方:
+  1. 取り込みに要るもの（`2026-10-04/task/recovery_audit_20261004`・`2026-10-02/task` の残り約 7 GB）を SSD の `商品データ/399商品/Codex/` に同じ形で写し、全ファイルを sha256 で照合する。クラウドのみのファイルは読むと Mac に戻るので、Mac の空き（約 39 GB）を見ながら小分けにし、写したあと `~/AI-Workspace/storage-ledger` の `icloud_evict` でクラウドのみに戻す（iCloud＝控え）。
+  2. `399商品_Claude画像制作共有` は SSD の `CodexProjects/399商品画像制作/data/project` に照合済みの写しがある（10/31）。これを正本として使い、二重に写さない。
+  3. `scripts/import-399.js` を SSD から読むように直す: 取り込み元の場所を環境変数で渡す（`CODEX_399_ROOT`、共有フォルダは別の変数）、台帳類の中の `/Users/yoshikuni/Documents/Codex/…` という絶対パスを SSD の場所へ読み替える、**SSD が外れているときは失敗せずに休む**（利用者は時々 SSD を外す）。テストを足す。
+  4. LaunchAgent `com.yoshikuni.shohin-daicho-sync` に環境変数を足す（設定の変更なので利用者に一言伝えてから）。
+  5. 保管庫の台帳に記録: `~/AI-Workspace/storage-ledger/data/moves.jsonl` に1行（SSD が正本・iCloud は控え）、`references/history.md` に数行。`where.py "<元の場所>"` で SSD の場所が出ることを確かめる。
+  6. 再判定（T-001）の reject が決まって利用者が OK したら、元の場所のボツ画像を片づける（README 5.）。
 
 ### D. データの仕事（台帳のプログラムは変えない）
 - メールから注文・到着を入れる: `docs/SHARED_ENTRY.md` 4.（重複確認 → 足す／空欄だけ埋める）。
@@ -144,4 +162,5 @@ tail -20 ~/Library/Logs/amazon-browser-sync.log                             # �
 1. この書類（今の状態とタスクの回し方）
 2. `docs/SHARED_ENTRY.md`（台帳への つなぎ方・できること）
 3. `CLAUDE.md`（機能の一覧と開発の決まり。Opus に渡すときの前提）
-4. 必要なときだけ: `docs/AGENT_HUB.md`（AI 用の口）・`docs/DESIGN.md`・`docs/SETUP.md`・`.claude/skills/inventory-ai/SKILL.md`
+4. 399商品の再判定をするとき: `docs/HANDOFF_399_REJUDGE.md`
+5. 必要なときだけ: `docs/AGENT_HUB.md`（AI 用の口）・`docs/DESIGN.md`・`docs/SETUP.md`・`.claude/skills/inventory-ai/SKILL.md`
