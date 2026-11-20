@@ -26,7 +26,11 @@ const run = promisify(execFile);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = process.env.INVENTORY_URL || 'http://127.0.0.1:8787';
 const ACTOR = 'import';
-const CODEX = process.env.CODEX_399_ROOT || path.join(os.homedir(), 'Documents/Codex');
+// 取り込み元の正本は外付けSSD（2026-11-20〜、写すのは scripts/collect-399-sources.py）。iCloud の ~/Documents/Codex は控え。
+const ORIG_CODEX = path.join(os.homedir(), 'Documents/Codex');
+const CODEX = process.env.CODEX_399_ROOT || ORIG_CODEX;
+/** 台帳類に書かれた ~/Documents/Codex/… の絶対パスを、取り込み元（SSD）の同じ場所へ読み替える。 */
+export const relocate = (p, root = CODEX) => (p && root !== ORIG_CODEX && String(p).startsWith(ORIG_CODEX + '/') ? path.join(root, String(p).slice(ORIG_CODEX.length + 1)) : p);
 const R = path.join(CODEX, '2026-10-04/task/recovery_audit_20261004');
 const SRC = {
   assignment: path.join(R, 'iphone_work_handoff_20261004/399_assignment.csv'),
@@ -136,6 +140,7 @@ function oldLedgerImages(rec) {
   // `file` is normally the exact path; tolerate a folder path by appending the image name.
   const resolve = (im) => {
     if (!im.file) return null;
+    im = { ...im, file: relocate(im.file) };
     try {
       if (fs.statSync(im.file).isDirectory()) return path.join(im.file, im.name);
     } catch {
@@ -150,7 +155,7 @@ function oldLedgerImages(rec) {
 function adoptedImages(item) {
   const byRole = new Map();
   for (const g of oldLedgerImages(item.ledger)) byRole.set(g.role, g);
-  for (const r of item.adoptions || []) byRole.set(r.role, { role: r.role, name: path.basename(r.png), file: r.png, sha256: r.sha256 || null, adoptedAt: r.adopted_at_utc });
+  for (const r of item.adoptions || []) byRole.set(r.role, { role: r.role, name: path.basename(r.png), file: relocate(r.png), sha256: r.sha256 || null, adoptedAt: r.adopted_at_utc });
   return [...byRole.values()].filter((g) => g.file && fs.existsSync(g.file)).sort((a, b) => a.role.localeCompare(b.role));
 }
 
@@ -234,7 +239,7 @@ function sourceOf(item) {
   const { asin } = item;
   const ms = readJsonIf(path.join(SRC.manuscripts, asin, 'manuscript.json')) || {};
   const rs = readJsonIf(path.join(SRC.resale, asin, 'manuscript.json'));
-  const refs = (readJsonIf(path.join(SRC.manuscripts, asin, 'reference_inventory.json')) || []).filter((r) => r.original_path && fs.existsSync(r.original_path));
+  const refs = (readJsonIf(path.join(SRC.manuscripts, asin, 'reference_inventory.json')) || []).map((r) => ({ ...r, original_path: relocate(r.original_path) })).filter((r) => r.original_path && fs.existsSync(r.original_path));
   const gens = adoptedImages(item).map((g) => ({ ...g, sha256: g.sha256 || sha256File(g.file) }));
   // 販売用原稿（在庫の実物向け）があればそれを正本にする。通常原稿は候補として残す。
   const text = rs?.description ? rs : ms;
@@ -460,6 +465,11 @@ function acquireLock() {
 }
 
 async function main() {
+  // SSD を外しているとき（利用者は時々 iPhone に使う）は失敗にせず休む。次の回に続ける。
+  if (!fs.existsSync(SRC.assignment)) {
+    console.log(`[${new Date().toLocaleString('ja-JP')}] 取り込み元が見つからないので休み: ${CODEX}`);
+    return;
+  }
   if (!DRY) acquireLock();
   console.log(`[${new Date().toLocaleString('ja-JP')}] 同期開始`);
   const rows = parseCsv(fs.readFileSync(SRC.assignment, 'utf8'));

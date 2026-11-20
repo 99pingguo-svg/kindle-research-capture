@@ -132,7 +132,9 @@ tail -20 ~/Library/Logs/amazon-browser-sync.log                             # �
 
 ### E. 399商品の残りの仕事
 - **T-001 ボツ画像の再判定**（利用者の依頼 2026-11-20）: 手順は全部 `docs/HANDOFF_399_REJUDGE.md`（SSD のフォルダ `/Volumes/Crucial X9/商品データ/399商品/再判定/README.md` と同じ内容）。874束・Opus 低い effort。台帳へ足すのは利用者に件数を見せて OK をもらってから。
-- **T-002 399商品のデータを SSD を正本に**（利用者の依頼 2026-11-20、未着手）。Opus に頼む。考えてある進め方:
+- **T-002 の進み具合（2026-11-21）**: `scripts/import-399.js` は SSD から読む形に直した（`CODEX_399_ROOT`・絶対パスの読み替え `relocate`・SSD が無ければ休む。テスト `test/import-399.test.js`）。取り込みに要るファイルだけを `scripts/collect-399-sources.py` で SSD `商品データ/399商品/取り込み元/Codex/` へ写している途中（iCloud からの読み込みが遅い。終わると MANIFEST.tsv ができる）。**残り**: ①写し終わったら `CODEX_399_ROOT=<そこ> node scripts/import-399.js --dry-run` で全商品が読めるか確かめる ②LaunchAgent `com.yoshikuni.shohin-daicho-sync` に `CODEX_399_ROOT` を足す ③フォルダ全体の tar.gz 保管（`brctl download` は依頼済み・クラウドのみ約3.4万件）→照合→元はクラウドのみに戻す（読む前のクラウドのみ一覧は storage-ledger/data/399-dataless-before-20261120.txt）④保管庫の台帳に記録。
+- **iCloud から消した 2,491枚の復元**: iCloud.com の「最近削除した項目」から。アプリ内ブラウザで iCloud.com を開いたがサインインしていない。サインインは利用者。復元するのは一覧の画像だけ（resume_snapshots の zip は戻さない）。
+- **T-002 399商品のデータを SSD を正本に**（利用者の依頼 2026-11-20）。Opus に頼む。考えてある進め方:
   1. 取り込みに要るもの（`2026-10-04/task/recovery_audit_20261004`・`2026-10-02/task` の残り約 7 GB）を SSD の `商品データ/399商品/Codex/` に同じ形で写し、全ファイルを sha256 で照合する。クラウドのみのファイルは読むと Mac に戻るので、Mac の空き（約 39 GB）を見ながら小分けにし、写したあと `~/AI-Workspace/storage-ledger` の `icloud_evict` でクラウドのみに戻す（iCloud＝控え）。
   2. `399商品_Claude画像制作共有` は SSD の `CodexProjects/399商品画像制作/data/project` に照合済みの写しがある（10/31）。これを正本として使い、二重に写さない。
   3. `scripts/import-399.js` を SSD から読むように直す: 取り込み元の場所を環境変数で渡す（`CODEX_399_ROOT`、共有フォルダは別の変数）、台帳類の中の `/Users/yoshikuni/Documents/Codex/…` という絶対パスを SSD の場所へ読み替える、**SSD が外れているときは失敗せずに休む**（利用者は時々 SSD を外す）。テストを足す。
