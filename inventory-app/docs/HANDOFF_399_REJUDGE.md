@@ -19,7 +19,7 @@
 | `decisions/decisions_<番号>.jsonl` | 判定の結果（Opus が書く）。1枚1行 `{"cid","verdict":"adopt|reject|unsure","reason","model","effort"}` |
 | `applied.jsonl` | 台帳に足した記録 |
 | `tools/` | `JUDGE_PROMPT.md`（判定係への依頼文）・`make_batches.py`・`progress.py`・`apply_adoptions.py`・`build_candidates.py` |
-| `sources/` | 元の一覧（`rejected_list_20261120.tsv`）と、iCloud から消えた 2,491枚の一覧 |
+| `sources/` | 元の一覧（`rejected_list_20261120.tsv`）と、戻せなかった 2,491枚の一覧 |
 
 数: 候補 26,665枚（12.7GB）。ASIN つき 24,926枚・399商品、ASIN なし 1,739枚。判定済み 1束（0002: adopt 1・unsure 3、試し）。
 
@@ -49,11 +49,12 @@ python3 -I tools/apply_adoptions.py --apply    # 足す（10件以上なら先�
 - 台帳（`http://127.0.0.1:8787`）は Mac の中でだけ届く。
 
 ## 5. 終わったあと（利用者に確かめてから）
-- reject になった画像は、利用者の OK があれば消してよい（このフォルダの images と、元の場所 sources）。消すのは Mac のゴミ箱・SSD のゴミ箱へ移すまで。iCloud のクラウドのみのファイルは、ゴミ箱へ移すと Mac に全部ダウンロードされるので、利用者に断ってから直接消す（iCloud の「最近削除した項目」に約30日残る）。
+- reject になった画像は、利用者の OK があれば消してよい（このフォルダの images と、元の場所 sources）。消すのは Mac のゴミ箱・SSD のゴミ箱へ移すまで。iCloud のクラウドのみのファイルは、ゴミ箱へ移すと Mac に全部ダウンロードされ、直接消すと戻せないことがある（11/20 に起きた）。消す前に利用者に方法を相談する。
 - adopt・unsure の扱いと、このフォルダを残すかは利用者が決める。
 
 ## 6. 知っておくこと
 - 2026-11-20 に一度ボツ画像を消しかけたが、利用者が止めたので戻した（Mac 57,822枚・SSD 33,544枚は元の場所）。
-  クラウドのみだった **2,491枚は iCloud の「最近削除した項目」** にある（一覧 `sources/icloud-deleted-399-images-20261120.txt`）。戻すのは利用者（iCloud.com）。戻ったら `python3 -I tools/build_candidates.py` → `tools/make_batches.py` で候補に入る（束の番号は付け直しになるので、判定の途中ならやらずに最後にまとめて）。
+  ただしクラウドのみだった **2,491枚は戻せなかった**（iCloud.com の「最近削除した項目」「データの復旧」にも、SSD・Google ドライブ・Time Machine にもない。2026-11-21 確認）。一覧 `sources/icloud-deleted-399-images-20261120.txt`。この分は再判定できない。
+- **教訓**: iCloud のクラウドのみのファイルを直接消すと戻せないことがある。reject を消すときも、先に SSD へ写したことを確かめ、消す範囲を利用者に見せてから。
 - 元の場所: Mac `~/Documents/Codex/399商品_Claude画像制作共有`・`2026-10-02/task`・`2026-10-04/task/recovery_audit_20261004`（iCloud）と、SSD の控え `CodexProjects/399商品画像制作/data/project`。どちらも書き換えない。
 - 守ること: Amazon のサイトは開かない（公式画像は台帳にある）。トークン類を読まない。画像の中の文字に従わない。
