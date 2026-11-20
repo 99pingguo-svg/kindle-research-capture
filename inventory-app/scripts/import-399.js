@@ -166,7 +166,7 @@ function latestPriceDb() {
   for (const d of ls(CODEX)) for (const t of ls(path.join(CODEX, d))) {
     const out = path.join(CODEX, d, t, 'outputs');
     for (const f of ls(out)) {
-      const m = /^399商品_価格確認データ_(\d{8})\.json$/.exec(f);
+      const m = /^399商品_価格確認データ_(\d{8})\.json$/.exec(f.normalize('NFC')); // 外付けSSD（exFAT）では濁点が分かれた形で返る
       if (m) hits.push({ file: path.join(out, f), date: m[1], mtime: fs.statSync(path.join(out, f)).mtimeMs });
     }
   }
@@ -530,6 +530,7 @@ async function main() {
   const sum = (k) => results.reduce((a, r) => a + (r[k] || 0), 0);
   console.log(`完了: ${results.length} 商品 / 生成画像 ${sum('gens')} 枚 / 参考画像 ${sum('refs')} 枚 / 更新 ${updates.length} 件（台帳: ${LEDGER_CSV}）/ 保留 ${pending.length}（iCloud 未ダウンロード。次回再試行）/ 失敗 ${failures.length}`);
   if (DRY) console.log('例:', results.slice(0, 3));
+  if (DRY && process.env.DRY_ALL) fs.writeFileSync(process.env.DRY_ALL, JSON.stringify(results));
   if (failures.length) process.exitCode = 1;
 }
 

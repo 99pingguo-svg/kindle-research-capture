@@ -65,5 +65,7 @@ with open(os.path.join(DEST, 'MANIFEST.tsv'), 'w', encoding='utf-8') as f:
     for r in rows: f.write('\t'.join(map(str, r)) + '\n')
 for r, ds, fs in os.walk(DEST):
     for x in fs:
-        if x.startswith('._'): os.remove(os.path.join(r, x))
+        if x.startswith('._'):
+            try: os.remove(os.path.join(r, x))
+            except FileNotFoundError: pass  # 本体と一緒に消えたもの
 print(json.dumps({'files': len(rows), 'bytes': total, 'outsideCodex': len(outside), 'dest': DEST}, ensure_ascii=False))

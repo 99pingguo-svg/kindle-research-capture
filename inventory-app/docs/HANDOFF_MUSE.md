@@ -132,7 +132,10 @@ tail -20 ~/Library/Logs/amazon-browser-sync.log                             # �
 
 ### E. 399商品の残りの仕事
 - **T-001 ボツ画像の再判定**（利用者の依頼 2026-11-20）: 手順は全部 `docs/HANDOFF_399_REJUDGE.md`（SSD のフォルダ `/Volumes/Crucial X9/商品データ/399商品/再判定/README.md` と同じ内容）。874束・Opus 低い effort。台帳へ足すのは利用者に件数を見せて OK をもらってから。
-- **T-002 の進み具合（2026-11-21）**: `scripts/import-399.js` は SSD から読む形に直した（`CODEX_399_ROOT`・絶対パスの読み替え `relocate`・SSD が無ければ休む。テスト `test/import-399.test.js`）。取り込みに要るファイルだけを `scripts/collect-399-sources.py` で SSD `商品データ/399商品/取り込み元/Codex/` へ写している途中（iCloud からの読み込みが遅い。終わると MANIFEST.tsv ができる）。**残り**: ①写し終わったら `CODEX_399_ROOT=<そこ> node scripts/import-399.js --dry-run` で全商品が読めるか確かめる ②LaunchAgent `com.yoshikuni.shohin-daicho-sync` に `CODEX_399_ROOT` を足す ③フォルダ全体の tar.gz 保管（`brctl download` は依頼済み・クラウドのみ約3.4万件）→照合→元はクラウドのみに戻す（読む前のクラウドのみ一覧は storage-ledger/data/399-dataless-before-20261120.txt）④保管庫の台帳に記録。
+- **T-002 の状態（2026-11-21 01:10）**: ほぼ済み。
+  - 済み: 取り込みに要る 4,185 ファイル（1.4GB）を SSD `商品データ/399商品/取り込み元/Codex/` に写して照合（`MANIFEST.tsv`、作り直しは `python3 -I scripts/collect-399-sources.py`）。`scripts/import-399.js` は SSD から読む（`CODEX_399_ROOT`・絶対パスの読み替え・exFAT の濁点の形を揃える・SSD が無ければ休む）。LaunchAgent `com.yoshikuni.shohin-daicho-sync` に `CODEX_399_ROOT` を足した（控え `~/AI-Workspace/storage-ledger/data/backups/…plist.bak-20261121`）。SSD から1回取り込んで失敗0（10/12 以降に正式採用された分＝画像追加35・差し替え5・文章10）。保管庫の台帳に記録（`where.py 399_assignment.csv` で SSD の場所が出る）。
+  - 自動で進行中: フォルダ全体（recovery_audit・2026-10-02/task）の tar.gz 保管。`~/AI-Workspace/storage-ledger/scripts/ssd_keep_archive.py` が iCloud からの戻り（残り約3万件・2.6GB、1時間に約2,000件）を待ち、SSD `商品データ/399商品/保管/` に固めて全ファイルを照合し、元をクラウドのみに戻して `moves.jsonl` に書く。ログ `~/AI-Workspace/storage-ledger/data/logs/399-keep-archive-20261121.log`（最後が DONE なら済み、48時間で止まる）。SSD を外すと待つ。Mac を再起動すると止まるので、そのときは同じログの先頭のコマンドの形で起こし直す。
+  - 注意: この保管にはボツ画像も入る。再判定（T-001）で reject が決まり利用者が OK したら、保管を作り直すかどうか利用者に聞く。
 - **iCloud から消した 2,491枚の復元**: iCloud.com の「最近削除した項目」から。アプリ内ブラウザで iCloud.com を開いたがサインインしていない。サインインは利用者。復元するのは一覧の画像だけ（resume_snapshots の zip は戻さない）。
 - **T-002 399商品のデータを SSD を正本に**（利用者の依頼 2026-11-20）。Opus に頼む。考えてある進め方:
   1. 取り込みに要るもの（`2026-10-04/task/recovery_audit_20261004`・`2026-10-02/task` の残り約 7 GB）を SSD の `商品データ/399商品/Codex/` に同じ形で写し、全ファイルを sha256 で照合する。クラウドのみのファイルは読むと Mac に戻るので、Mac の空き（約 39 GB）を見ながら小分けにし、写したあと `~/AI-Workspace/storage-ledger` の `icloud_evict` でクラウドのみに戻す（iCloud＝控え）。
