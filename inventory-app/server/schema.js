@@ -117,6 +117,8 @@ export const PHOTO_KINDS = [
 export const PHOTO_KIND_IDS = PHOTO_KINDS.map((k) => k.id);
 /** Kinds that may be chosen as 出品用 photos. */
 export const LISTABLE_KINDS = ['actual', 'generated'];
+/** Positive allowlist of actual photo sources eligible for listing selection (excludes 'scan'). */
+export const LISTABLE_ACTUAL_SOURCES = ['manual_camera', 'manual_library', 'camera', 'studio', 'native'];
 
 export const FACT_CONFIDENCE = [
   { id: 'confirmed', label: '確定' },
@@ -177,6 +179,7 @@ export const FIELDS = [
   { path: 'quantity', label: '数量', type: 'int', group: 'basic' },
   { path: 'color', label: '色', type: 'text', group: 'basic' },
   { path: 'conditionNote', label: '商品状態メモ', type: 'textarea', group: 'basic' },
+  { path: 'aiInstruction', label: 'AIへの指示', type: 'textarea', group: 'basic' },
   { path: 'notes', label: 'メモ', type: 'textarea', group: 'basic' },
   { path: 'purchaseDate', label: '購入時期（メモ）', type: 'text', group: 'basic' },
   { path: 'purchasePrice', label: '購入価格', type: 'int', group: 'basic' },

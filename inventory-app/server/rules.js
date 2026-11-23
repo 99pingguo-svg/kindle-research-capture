@@ -1,5 +1,5 @@
 // Pure functions over a product: readiness, deterministic lint, list summary, duplicates.
-import { MERCARI_LIMITS, CONFIRM_FIELDS, FIELD_MAP, stageLabel, decisionLabel, LISTABLE_KINDS, PREPARE_DECISIONS, COMMITTED_STATUSES, OFFERED_STATUSES, channelLabel } from './schema.js';
+import { MERCARI_LIMITS, CONFIRM_FIELDS, FIELD_MAP, stageLabel, decisionLabel, LISTABLE_KINDS, LISTABLE_ACTUAL_SOURCES, PREPARE_DECISIONS, COMMITTED_STATUSES, OFFERED_STATUSES, channelLabel } from './schema.js';
 import { shippingOf } from './shipping.js';
 import { guessCategory } from './category.js';
 import { mercariNet, marketBrief, channelNets } from './market.js';
@@ -9,16 +9,21 @@ import { asinOf } from './dates.js';
 import { arrivalIdOf } from '../public/js/datecode.js';
 
 export const livePhotos = (p) => p.photos.filter((ph) => !ph.deletedAt);
-export const actualPhotos = (p) => livePhotos(p).filter((ph) => ph.kind === 'actual');
-export const referencePhotos = (p) => livePhotos(p).filter((ph) => ph.kind === 'reference');
+/** Positive condition for actual photos eligible as listing candidates (excludes source='scan'). */
+export const isListableActualPhoto = (ph) => !!ph && !ph.deletedAt && ph.kind === 'actual' && LISTABLE_ACTUAL_SOURCES.includes(ph.source || 'camera');
+/** Positive condition for any photo eligible for listing (eligible actual photo or generated image). */
+export const isListablePhoto = (ph) => !!ph && !ph.deletedAt && (isListableActualPhoto(ph) || ph.kind === 'generated');
+export const actualPhotos = (p) => livePhotos(p).filter((ph) => isListableActualPhoto(ph));
+export const referencePhotos = (p) => livePhotos(p).filter((ph) => ph.kind === 'reference' && ph.source !== 'scan');
+export const scanScenePhoto = (p) => livePhotos(p).find((ph) => ph.source === 'scan') || null;
 export const generatedPhotos = (p) => livePhotos(p).filter((ph) => ph.kind === 'generated');
-/** Photos that can go on a listing: own photos of the item, or AI-generated images that carry their own disclaimer. */
-export const listablePhotos = (p) => livePhotos(p).filter((ph) => LISTABLE_KINDS.includes(ph.kind));
+/** Photos that can go on a listing: eligible own photos of the item, or AI-generated images. */
+export const listablePhotos = (p) => livePhotos(p).filter((ph) => isListablePhoto(ph));
 export const openPhotoRequests = (p) => p.photoRequests.filter((r) => !r.doneAt && !r.cancelledAt);
 
 export function listingPhotos(p) {
   const byId = new Map(livePhotos(p).map((ph) => [ph.id, ph]));
-  return p.listingPhotoIds.map((id) => byId.get(id)).filter((ph) => ph && LISTABLE_KINDS.includes(ph.kind));
+  return p.listingPhotoIds.map((id) => byId.get(id)).filter((ph) => isListablePhoto(ph));
 }
 
 const EXAGGERATION = ['絶対', '完璧', '完全', '最高', '激レア', '超レア', '確実', '100%', '１００％', '保証します', '間違いなく'];
@@ -144,6 +149,7 @@ export function readiness(p, settings = {}) {
 export function statusOf(p) {
   if (p.trashedAt) return { id: 'trash', label: 'ゴミ箱' };
   if (p.archived) return { id: 'archived', label: 'アーカイブ' };
+  if (p.stage === 'sold' || p.stage === 'trading') return { id: p.stage, label: stageLabel(p.stage) };
   if (p.decision === 'hold') return { id: 'hold', label: '保留' };
   if (p.decision === 'no_sell') return { id: 'no_sell', label: decisionLabel('no_sell') };
   if (p.decision === 'no_stock') return { id: 'no_stock', label: decisionLabel('no_stock') };
@@ -191,7 +197,7 @@ export function channelPackage(p, channel) {
   const o = p.override?.[channel] || {};
   const byId = new Map(livePhotos(p).map((ph) => [ph.id, ph]));
   const ids = p.channelPhotos?.[channel] ?? p.listingPhotoIds;
-  const photos = ids.map((id) => byId.get(id)).filter((ph) => ph && LISTABLE_KINDS.includes(ph.kind));
+  const photos = ids.map((id) => byId.get(id)).filter((ph) => isListablePhoto(ph));
   const L = p.listing;
   return {
     channel,
@@ -246,7 +252,7 @@ export function suggestedTargets(p) {
 }
 
 /** The product's shop page (Amazon first), for a quick open-in-new-window link from the list. */
-const sourceUrlOf = (p) => (p.links.find((l) => /amazon\./i.test(l.url)) || p.links.find((l) => l.type === 'purchase'))?.url || null;
+const sourceUrlOf = (p) => (p.links.find((l) => /amazon\./i.test(l.url)) || p.links.find((l) => l.type === 'purchase'))?.url || p.research?.url || null;
 
 /** あるかないか: have / gone（在庫なし）/ unknown / null（未確認）。今までの3つの印から決める。 */
 export const presenceOf = (p) => (p.decision === 'no_stock' ? 'gone' : p.stockCheckedAt ? 'have' : p.stockUnknownAt ? 'unknown' : null);
@@ -260,6 +266,7 @@ export function summary(p, settings) {
   const main = lp[0] || actual[0] || referencePhotos(p)[0];
   // The Amazon main image (official photo) so every row is recognisable even when it shows a generated or own photo.
   const official = referencePhotos(p)[0];
+  const scanScene = scanScenePhoto(p);
   const ship = shippingOf(p.amazon, p.sizeEstimate);
   const st = statusOf(p);
   const issues = rd.missing
@@ -275,6 +282,8 @@ export function summary(p, settings) {
     fnsku: p.fnsku || '',
     quantity: p.quantity,
     location: p.location,
+    conditionNote: p.conditionNote || '',
+    aiInstruction: p.aiInstruction || '',
     notes: p.notes,
     sourceUrl: sourceUrlOf(p),
     targets: p.targets || [],
@@ -297,6 +306,7 @@ export function summary(p, settings) {
     review: p.reviewPlan ? { status: p.reviewPlan.status || '', formats: p.reviewPlan.formats || [], hasDraft: !!p.reviewPlan.draft, url: p.reviewPlan.url || '' } : null,
     stockCheckedAt: p.stockCheckedAt || null,
     stockUnknownAt: p.stockUnknownAt || null,
+    lastScanAt: p.lastScanAt || null,
     asideAt: p.asideAt || null,
     dateId: p.dateId || '',
     productCode: p.productCode || '',
@@ -305,11 +315,15 @@ export function summary(p, settings) {
     thumb: main ? photoUrl(p, main, 'thumb') : null,
     thumbIsReference: !!main && main.kind === 'reference',
     official: official && official !== main ? photoUrl(p, official, 'thumb') : null,
+    scanScene: scanScene ? photoUrl(p, scanScene, 'work') : null,
+    scanSceneThumb: scanScene ? photoUrl(p, scanScene, 'thumb') : null,
+    scanSceneAt: scanScene ? (scanScene.takenAt || scanScene.createdAt || null) : null,
     ship,
     market: marketBrief(p),
     net: mercariNet(p, ship),
     counts: { actual: actual.length, generated: generatedPhotos(p).length, listing: lp.length, reference: referencePhotos(p).length },
     channels: Object.fromEntries(Object.entries(p.channels || {}).filter(([, c]) => c?.status).map(([k, c]) => [k, c.status])),
+    channelUrls: Object.fromEntries(Object.entries(p.channels || {}).filter(([, c]) => c?.itemUrl || c?.draftUrl).map(([k, c]) => [k, c.itemUrl || c.draftUrl])),
     lastPhotoAt: p.lastPhotoAt,
     ...shotDates(p),
     shotDoneAt: p.shotDoneAt || null,
@@ -323,6 +337,10 @@ export function summary(p, settings) {
     plannedPrice: p.plannedPrice,
     mercari: p.channels.mercari?.status || null,
     title: p.listing.title,
+    rev: p.rev,
+    hasJmtyOverride: !!(p.override?.jmty?.title || p.override?.jmty?.description),
+    titleSource: p.listing?.titleSource || 'unknown',
+    descriptionSource: p.listing?.descriptionSource || 'unknown',
     updatedAt: p.updatedAt,
     createdAt: p.createdAt,
     // 代表の日付: 区別しない日付 → 注文日 → 到着日 の順で最初にあるもの（期間・日付順の既定）。
@@ -341,14 +359,20 @@ export function findDuplicates(cand, products, { excludeId } = {}) {
   // The same Amazon item under another link form (/gp/product/…, ?th=1, ref=…) — e.g. a link taken from an order email.
   const asins = new Set((cand.links || []).map((l) => asinOf(l.url ?? l)).filter(Boolean));
   const asinHit = (p) => asins.size > 0 && [p.browser?.asin, p.amazon?.asin, ...(p.links || []).map((l) => asinOf(l.url))].some((a) => a && asins.has(String(a).toUpperCase()));
+  const candFnsku = cand.fnsku ? String(cand.fnsku).trim().toUpperCase() : '';
   for (const p of products) {
     if (p.id === excludeId) continue;
+    const fnskuHit = candFnsku && p.fnsku && candFnsku === String(p.fnsku).trim().toUpperCase();
     if (p.trashedAt) {
       // A product the user put in the trash is not brought back by a new registration of the same ASIN.
-      if (asinHit(p)) out.push({ id: p.id, name: p.name, reasons: ['ASINが一致（ゴミ箱の商品）'] });
+      const trashReasons = [];
+      if (fnskuHit) trashReasons.push('FNSKUが一致（ゴミ箱の商品）');
+      if (asinHit(p)) trashReasons.push('ASINが一致（ゴミ箱の商品）');
+      if (trashReasons.length) out.push({ id: p.id, name: p.name, reasons: trashReasons });
       continue;
     }
     const reasons = [];
+    if (fnskuHit) reasons.push('FNSKUが一致');
     if (cand.jan && p.jan && norm(cand.jan) === norm(p.jan)) reasons.push('JANが一致');
     if (cand.model && p.model && norm(cand.model).length >= 3 && norm(cand.model) === norm(p.model)) reasons.push('型番が一致');
     if (urls.size && p.links.some((l) => urls.has(normUrl(l.url)))) reasons.push('登録URLが一致');

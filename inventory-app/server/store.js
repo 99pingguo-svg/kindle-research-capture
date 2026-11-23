@@ -14,17 +14,20 @@ import {
   decisionLabel, PREPARE_DECISIONS, PHOTO_KINDS, PHOTO_KIND_IDS, LISTABLE_KINDS, CHANNEL_IDS, channelLabel,
   REVIEW_STATUSES, REVIEW_FORMATS,
 } from './schema.js';
-import { readiness, actualPhotos, listablePhotos, livePhotos, findDuplicates } from './rules.js';
+import { readiness, actualPhotos, listablePhotos, livePhotos, isListablePhoto, findDuplicates } from './rules.js';
 import { isFood } from './food.js';
 import { normalizeBrowserInfo, sameBrowserInfo } from './browser-sync.js';
 import { decodeDateId } from '../public/js/datecode.js';
 import { exifTime } from '../public/js/photo-time.js';
 
 const VERSIONS_KEPT = 100;
+const OPERATIONS_KEPT = 5000;
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'image/heif': 'heif', 'image/gif': 'gif' };
 
 export const isUser = (actor) => actor === 'user';
+export const FNSKU_RE = /^X00[0-9A-Z]{7}$/;
+export const normalizeFnsku = (raw) => String(raw ?? '').normalize('NFKC').trim().toUpperCase();
 /** The photo is one of the listing photos (common or a destination's own list). */
 export const photoInUse = (p, photoId) => p.listingPhotoIds.includes(photoId) || Object.values(p.channelPhotos || {}).some((ids) => (ids || []).includes(photoId));
 
@@ -41,6 +44,8 @@ function guardedOverride(p, def) {
 }
 
 const fmtStamp = (iso) => new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+const SCAN_EVENTS_KEPT = 50;
 
 function forbidAi(actor, what) {
   if (!isUser(actor)) throw new AppError(403, `${what}はユーザーのみ実行できます（AIの権限外）`, 'forbidden');
@@ -61,6 +66,7 @@ function newProduct(id, at, settings) {
     quantity: 1,
     color: '',
     conditionNote: '',
+    aiInstruction: '',
     notes: '',
     itemDate: '',
     orderDate: '',
@@ -80,6 +86,9 @@ function newProduct(id, at, settings) {
     reviewPlan: null, // レビュー・発信の予定 { status, formats[], note, draft, url, updatedAt, by }
     stockCheckedAt: null, // 現在の最新在庫チェック日時（ユーザーのみ）
     stockUnknownAt: null, // 在庫状況「不明」チェック日時（ユーザーのみ）
+    lastScanAt: null, // 台帳スキャンで最後に読んだ日時（取り消していないスキャンのうち一番新しいもの）
+    scanEvents: [], // スキャンの記録（取り消し用に、触った項目の前後の値。取り消しても消さず undoneAt を付ける。新しい50件）
+    fnskuCorrections: [], // FNSKU 訂正履歴（旧番号・新番号・理由・操作ID）
     asideAt: null, // 別枠に移した日時（ユーザーのみ）。一覧の「すべて」などから外し、「別枠」チップで見る
     browser: null, // 観察ブラウザ連携: { asin, lists: { vineOrders|reviewPending|reviewed|orders: { ordered, delivered } }, vineOrderDate, syncedAt }
     lastPhotoAt: null,
@@ -112,6 +121,8 @@ function newProduct(id, at, settings) {
       shippingDays: settings.shippingDays || '',
       priceCandidates: [],
       aiNotes: '',
+      titleSource: 'unknown',
+      descriptionSource: 'unknown',
     },
     locks: {},
     proposals: {},
@@ -224,7 +235,18 @@ export class Store extends EventEmitter {
     this.dataDir = path.resolve(dataDir);
     this.productsDir = path.join(this.dataDir, 'products');
     this.products = new Map();
+    this.fnskuIndex = new Map(); // normalizedFnsku -> productId (live products only)
+    this.clientPhotoIndex = new Map(); // clientPhotoId -> { productId, photoId }
+    this.operations = new Map(); // operationId -> { productId, kind, at, meta }
+    this._writeQueue = Promise.resolve();
     this.load();
+  }
+
+  /** Process-wide exclusive write lock: serializes read -> validate -> atomic persist across all write routes. */
+  withWriteLock(fn) {
+    const run = this._writeQueue.then(() => fn());
+    this._writeQueue = run.catch(() => {});
+    return run;
   }
 
   // ---------- persistence ----------
@@ -234,15 +256,93 @@ export class Store extends EventEmitter {
     this.meta = readJson(path.join(this.dataDir, 'meta.json'), { nextId: 1, settings: {} });
     this.meta.settings = { ...DEFAULT_SETTINGS, ...this.meta.settings };
     this.products.clear();
+    this.fnskuIndex.clear();
+    this.clientPhotoIndex.clear();
     for (const dir of fs.readdirSync(this.productsDir)) {
       const file = path.join(this.productsDir, dir, 'product.json');
       if (!fs.existsSync(file)) continue;
       const p = this.migrate(readJson(file));
       if (this.backfillPhotoHashes(p)) this.persist(p);
       this.products.set(p.id, p);
+      if (!p.trashedAt && p.fnsku) {
+        const nf = normalizeFnsku(p.fnsku);
+        if (nf && !this.fnskuIndex.has(nf)) this.fnskuIndex.set(nf, p.id);
+      }
+      for (const ph of p.photos || []) {
+        const cpid = ph.clientPhotoId || ph.clientId;
+        if (cpid) this.clientPhotoIndex.set(cpid, { productId: p.id, photoId: ph.id });
+      }
       const n = parseInt(p.id, 10);
       if (Number.isFinite(n) && n >= this.meta.nextId) this.meta.nextId = n + 1;
     }
+    this.operations.clear();
+    const ops = readJson(path.join(this.dataDir, 'operations.json'), {});
+    for (const [k, v] of Object.entries(ops || {})) this.operations.set(k, v);
+  }
+
+  _saveOperations() {
+    const entries = [...this.operations.entries()].slice(-OPERATIONS_KEPT);
+    this.operations = new Map(entries);
+    writeJson(path.join(this.dataDir, 'operations.json'), Object.fromEntries(entries));
+  }
+
+  _checkOperationId(operationId, productId) {
+    const opId = String(operationId || '').trim();
+    if (!opId) return null;
+    const hit = this.operations.get(opId);
+    if (!hit) return null;
+    if (hit.productId !== String(productId)) {
+      const err = new AppError(409, `操作ID ${opId} は別商品 #${hit.productId} で既に使用されています`, 'OPERATION_ID_CONFLICT');
+      err.productId = hit.productId;
+      throw err;
+    }
+    return hit;
+  }
+
+  _recordOperationId(operationId, productId, kind, meta = {}) {
+    const opId = String(operationId || '').trim();
+    if (!opId) return;
+    this.operations.set(opId, { productId: String(productId), kind, at: nowIso(), meta });
+    this._saveOperations();
+  }
+
+  _ownerSummary(ownerId) {
+    const o = this.products.get(String(ownerId));
+    return o ? { productId: o.id, id: o.id, name: o.name || '', fnsku: o.fnsku || '' } : { productId: String(ownerId), id: String(ownerId), name: '', fnsku: '' };
+  }
+
+  _validateFnskuForProduct(draft) {
+    const normCode = normalizeFnsku(draft.fnsku);
+    if (normCode && !FNSKU_RE.test(normCode)) {
+      throw new AppError(400, `Amazon管理番号の形が違います: ${normCode}`, 'INVALID_FNSKU_FORMAT');
+    }
+    draft.fnsku = normCode;
+    if (!draft.trashedAt && normCode) {
+      const ownerId = this.fnskuIndex.get(normCode);
+      if (ownerId && ownerId !== draft.id) {
+        const owner = this._ownerSummary(ownerId);
+        const err = new AppError(409, `この FNSKU（${normCode}）は既に #${owner.id}「${owner.name}」に登録されています`, 'FNSKU_OWNED_BY_OTHER');
+        err.owner = owner;
+        err.fnskuOwner = owner;
+        throw err;
+      }
+    }
+  }
+
+  _syncFnskuIndex(current, draft) {
+    const oldCode = current && !current.trashedAt ? normalizeFnsku(current.fnsku) : '';
+    const newCode = draft && !draft.trashedAt ? normalizeFnsku(draft.fnsku) : '';
+    if (oldCode && oldCode !== newCode && this.fnskuIndex.get(oldCode) === current.id) {
+      this.fnskuIndex.delete(oldCode);
+      // If another live product somehow held the same code (legacy anomaly), re-point to it.
+      for (const p of this.products.values()) {
+        if (p.id !== current.id && !p.trashedAt && normalizeFnsku(p.fnsku) === oldCode) {
+          this.fnskuIndex.set(oldCode, p.id);
+          break;
+        }
+      }
+    }
+    if (newCode) this.fnskuIndex.set(newCode, draft.id);
   }
 
   migrate(p) {
@@ -362,16 +462,25 @@ export class Store extends EventEmitter {
    * Run `fn` against a draft copy; on success persist, snapshot the previous state
    * (for undo) and append to history. Throwing inside `fn` leaves nothing changed.
    */
-  mutate(id, actor, action, fn) {
+  mutate(id, actor, action, fn, { extraHistory } = {}) {
     const current = this.get(id);
     const draft = clone(current);
     const ctx = new Ctx();
     const result = fn(draft, ctx);
     if (!ctx.dirty) return result ?? draft;
+    this._validateFnskuForProduct(draft);
     if (ctx.bumped) draft.rev += 1;
     this.reconcileStage(draft, ctx);
     draft.updatedAt = nowIso();
-    const entry = { id: newId('h'), at: draft.updatedAt, actor, action, summary: ctx.summary(), changes: ctx.changes.filter((c) => !c.silent) };
+    const entry = {
+      id: newId('h'),
+      at: draft.updatedAt,
+      actor,
+      action,
+      summary: ctx.summary(),
+      changes: ctx.changes.filter((c) => !c.silent),
+      ...(extraHistory || {}),
+    };
     writeJson(path.join(this.dir(id), 'versions', `${entry.id}.json`), current);
     this.persist(draft);
     this.changedAt = draft.updatedAt;
@@ -381,6 +490,7 @@ export class Store extends EventEmitter {
       at: entry.at, actor, productId: id, productName: draft.name, action, summary: entry.summary, historyId: entry.id,
     });
     this.products.set(id, draft);
+    this._syncFnskuIndex(current, draft);
     this.pruneVersions(id);
     this.emit('change', { type: 'product', id, actor, action });
     return result ?? draft;
@@ -419,7 +529,21 @@ export class Store extends EventEmitter {
   // ---------- products ----------
 
   create(fields = {}, actor = 'user', { links = [], allowDuplicate = true } = {}) {
-    const dups = this.duplicatesFor({ ...fields, links });
+    const preFnsku = fields.fnsku !== undefined ? normalizeFnsku(fields.fnsku) : '';
+    if (preFnsku && !FNSKU_RE.test(preFnsku)) {
+      throw new AppError(400, `Amazon管理番号の形が違います: ${preFnsku}`, 'INVALID_FNSKU_FORMAT');
+    }
+    if (preFnsku) {
+      const ownerId = this.fnskuIndex.get(preFnsku);
+      if (ownerId) {
+        const owner = this._ownerSummary(ownerId);
+        const err = new AppError(409, `この FNSKU（${preFnsku}）は既に #${owner.id}「${owner.name}」に登録されています`, 'FNSKU_OWNED_BY_OTHER');
+        err.owner = owner;
+        err.fnskuOwner = owner;
+        throw err;
+      }
+    }
+    const dups = this.duplicatesFor({ ...fields, fnsku: preFnsku, links });
     if (dups.length && !allowDuplicate) {
       const e = new AppError(409, `重複の可能性: ${dups.map((d) => `#${d.id} ${d.name}（${d.reasons.join('・')}）`).join(' / ')}`, 'duplicate');
       e.duplicates = dups;
@@ -438,16 +562,19 @@ export class Store extends EventEmitter {
         const def = FIELD_MAP[k];
         if (!def) throw new AppError(400, `不明な項目: ${k}`);
         try {
-          setPath(p, k, coerceField(def, v));
+          const coerced = coerceField(def, v);
+          setPath(p, k, k === 'fnsku' ? normalizeFnsku(coerced) : coerced);
         } catch (e) {
           throw new AppError(400, e.message);
         }
       }
     }
+    this._validateFnskuForProduct(p);
     for (const l of links) p.links.push(makeLink(l, actor));
     fs.mkdirSync(path.join(this.dir(id), 'photos'), { recursive: true });
     this.products.set(id, p);
     this.persist(p);
+    this._syncFnskuIndex(null, p);
     const entry = { id: newId('h'), at, actor, action: 'create', summary: `商品登録「${p.name || '名称未設定'}」`, changes: [] };
     appendJsonl(path.join(this.dir(id), 'history.jsonl'), entry);
     appendJsonl(path.join(this.dataDir, 'activity.jsonl'), { at, actor, productId: id, productName: p.name, action: 'create', summary: entry.summary, historyId: entry.id });
@@ -459,10 +586,22 @@ export class Store extends EventEmitter {
    * Set fields by path. User writes confirm (lock) the field. AI writes to a locked
    * field are stored as proposals instead of overwriting the user's decision.
    */
-  updateFields(id, actor, set, { reason, lock = true } = {}) {
+  updateFields(id, actor, set, { reason, lock = true, append, expectedRev } = {}) {
+    const curCheck = this.get(id);
+    if (expectedRev !== undefined && expectedRev !== null && Number(expectedRev) !== curCheck.rev) {
+      const err = new AppError(409, `別の場所で更新されています（現在 rev=${curCheck.rev}、想定 rev=${expectedRev}）`, 'REVISION_CONFLICT');
+      err.currentRev = curCheck.rev;
+      err.currentTitle = curCheck.listing?.title || '';
+      err.currentDescription = curCheck.listing?.description || '';
+      throw err;
+    }
     const outcome = { set: [], proposed: [], unchanged: [] };
     this.mutate(id, actor, 'update', (p, ctx) => {
-      for (const [field, raw] of Object.entries(set || {})) {
+      const entries = [
+        ...Object.entries(set || {}).map(([field, raw]) => [field, raw, false]),
+        ...Object.entries(append || {}).map(([field, raw]) => [field, raw, true]),
+      ];
+      for (const [field, raw, isAppend] of entries) {
         const def = FIELD_MAP[field];
         if (!def) throw new AppError(400, `不明な項目: ${field}`);
         let value;
@@ -471,10 +610,29 @@ export class Store extends EventEmitter {
         } catch (e) {
           throw new AppError(400, e.message);
         }
+        if (field === 'fnsku') value = normalizeFnsku(value);
         const old = getPath(p, field);
+        if (isAppend) {
+          const addition = String(value ?? '').trim();
+          if (!addition) { outcome.unchanged.push(field); continue; }
+          value = old ? `${old}\n${addition}` : addition;
+        }
+        // UTF-16 length guard for listing title (40) and description (1000)
+        if (field === 'listing.title' && String(value ?? '').length > MERCARI_LIMITS.titleMax) {
+          throw new AppError(400, `タイトルは${MERCARI_LIMITS.titleMax}文字以内にしてください（現在${String(value).length}文字）`, 'LENGTH_EXCEEDED');
+        }
+        if (field === 'listing.description' && String(value ?? '').length > MERCARI_LIMITS.descriptionMax) {
+          throw new AppError(400, `商品説明は${MERCARI_LIMITS.descriptionMax}文字以内にしてください（現在${String(value).length}文字）`, 'LENGTH_EXCEEDED');
+        }
+        const humanProtected =
+          !isUser(actor) &&
+          ((field === 'listing.title' && p.listing?.titleSource === 'human_edited') ||
+            (field === 'listing.description' && p.listing?.descriptionSource === 'human_edited'));
         if (isUser(actor)) {
           if (!same(old, value)) {
             setPath(p, field, value);
+            if (field === 'listing.title') p.listing.titleSource = 'human_edited';
+            if (field === 'listing.description') p.listing.descriptionSource = 'human_edited';
             ctx.change(field, old, value);
             // 日付・種類などの整理用の項目は出品内容ではないので、QC をやり直させない。
             if (!def.meta) ctx.bump();
@@ -488,16 +646,18 @@ export class Store extends EventEmitter {
             delete p.proposals[field];
             ctx.dirty = true;
           }
-        } else if (p.locks[field] || guardedOverride(p, def)) {
+        } else if (p.locks[field] || humanProtected || guardedOverride(p, def)) {
           if (same(old, value)) {
             outcome.unchanged.push(field);
             continue;
           }
           p.proposals[field] = { value, by: actor, at: nowIso(), reason: reason || '' };
-          ctx.note(`${def.label} の変更を提案（${p.locks[field] ? 'ユーザー確定済み' : guardedOverride(p, def)}のため上書きせず）`);
+          ctx.note(`${def.label} の変更を提案（${humanProtected ? '人間編集済み' : p.locks[field] ? 'ユーザー確定済み' : guardedOverride(p, def)}のため上書きせず）`);
           outcome.proposed.push(field);
         } else if (!same(old, value)) {
           setPath(p, field, value);
+          if (field === 'listing.title' && p.listing.titleSource !== 'human_edited') p.listing.titleSource = 'ai_generated';
+          if (field === 'listing.description' && p.listing.descriptionSource !== 'human_edited') p.listing.descriptionSource = 'ai_generated';
           ctx.change(field, old, value);
           if (!def.meta) ctx.bump();
           outcome.set.push(field);
@@ -677,6 +837,285 @@ export class Store extends EventEmitter {
   }
 
   /**
+   * 台帳スキャン（iPhone のラベル読み取り・その記録の取り込み）: 利用者が現物を手に取って確かめた記録を写す。
+   * ある と同じ印（stockCheckedAt・stockUnknownAt を外す・在庫なし→未定）を、読んだ時刻 scannedAt で付ける。
+   * setPresence は呼ばないが、ある の印を付けるのは同じくユーザーだけ。presence:false なら在庫の印は変えずに記録だけ（昔の写真・AI の取り込み）。
+   * FNSKU は空なら入れ、別の番号が入っていれば上書きせず conflict で返す。前の値は scanEvents に残し、undoScan で戻せる。
+   */
+  recordScan(id, actor, { fnsku = '', scannedAt, presence = true, via = 'scan', operationId = '', strictFnsku = false } = {}) {
+    const code = normalizeFnsku(fnsku);
+    if (code && !FNSKU_RE.test(code)) throw new AppError(400, `Amazon管理番号の形が違います: ${code}`, 'INVALID_FNSKU_FORMAT');
+    const t = Date.parse(scannedAt);
+    if (Number.isNaN(t)) throw new AppError(400, `scannedAt が日時ではありません: ${scannedAt}`);
+    const at = new Date(t).toISOString();
+    // ある の印はユーザーだけ（setPresence と同じ境界）。AI が取り込む記録は FNSKU・lastScanAt・履歴だけ。
+    if (presence) forbidAi(actor, 'スキャンでの在庫確認（ある）');
+    const opHit = this._checkOperationId(operationId, id);
+    if (opHit) return { product: this.get(id), idempotent: true, ...(opHit.meta?.conflict ? { conflict: opHit.meta.conflict } : {}) };
+
+    const cur = this.get(id);
+    if (code) {
+      const ownerId = this.fnskuIndex.get(code);
+      if (ownerId && ownerId !== cur.id && (strictFnsku || !cur.fnsku)) {
+        const owner = this._ownerSummary(ownerId);
+        const err = new AppError(409, `この FNSKU（${code}）は既に #${owner.id}「${owner.name}」に登録されています`, 'FNSKU_OWNED_BY_OTHER');
+        err.owner = owner;
+        err.fnskuOwner = owner;
+        throw err;
+      }
+      if (strictFnsku && cur.fnsku && normalizeFnsku(cur.fnsku) !== code) {
+        const err = new AppError(409, `対象商品 #${cur.id} には別の管理番号 ${cur.fnsku} が登録されています（読んだ番号 ${code}）`, 'PRODUCT_HAS_DIFFERENT_FNSKU');
+        err.productId = cur.id;
+        err.currentFnsku = cur.fnsku;
+        err.scannedFnsku = code;
+        throw err;
+      }
+    }
+
+    let conflict = '';
+    const product = this.mutate(id, actor, 'scan', (p, ctx) => {
+      const snap = () => ({ fnsku: p.fnsku || '', fnskuLock: p.locks?.fnsku || null, stockCheckedAt: p.stockCheckedAt || null, stockUnknownAt: p.stockUnknownAt || null, decision: p.decision, lastScanAt: p.lastScanAt || null });
+      const before = snap();
+      if (code && p.fnsku && normalizeFnsku(p.fnsku) !== code) conflict = `この商品には別の管理番号 ${p.fnsku} が入っています（読んだ番号 ${code}）`;
+      else if (code && !p.fnsku) {
+        if (p.locks?.fnsku && !isUser(actor)) conflict = `管理番号はユーザー確定済みのため入れませんでした（読んだ番号 ${code}）`;
+        else {
+          p.fnsku = code;
+          ctx.change('fnsku', '', code);
+          if (isUser(actor) && !p.locks.fnsku) p.locks.fnsku = { by: actor, at: nowIso() }; // the old confirm route locked it too
+        }
+      }
+      if (presence) {
+        // A record imported late must not move the last-seen date backwards.
+        if (!p.stockCheckedAt || p.stockCheckedAt < at) p.stockCheckedAt = at;
+        p.stockUnknownAt = null;
+        if (p.decision === 'no_stock') {
+          p.decision = 'undecided';
+          ctx.changes.push({ path: 'decision', label: '出品判断', from: decisionLabel('no_stock'), to: decisionLabel('undecided') });
+        }
+      }
+      if (!p.lastScanAt || p.lastScanAt < at) p.lastScanAt = at;
+      const event = {
+        id: newId('s'),
+        at: nowIso(),
+        scannedAt: at,
+        actor,
+        via,
+        fnsku: code,
+        presence: !!presence,
+        ...(operationId ? { operationId: String(operationId).trim() } : {}),
+        before,
+        after: snap(),
+        undoneAt: null,
+        undoneBy: null,
+        invalidatedAt: null,
+        invalidationReason: null,
+      };
+      p.scanEvents = [...(p.scanEvents || []), event].slice(-SCAN_EVENTS_KEPT);
+      ctx.note(presence ? 'スキャンで在庫確認' : 'スキャンを記録（在庫の印は変えない）');
+    });
+    this._recordOperationId(operationId, id, 'scan', { conflict });
+    return { product, ...(conflict ? { conflict } : {}) };
+  }
+
+  /**
+   * FNSKU の専用訂正操作（付け替えではなく訂正履歴を history.jsonl と fnskuCorrections に残す）。
+   * 過去のスキャン記録（scanEvents）は書き換えない。他商品と競合する番号への訂正は拒否。
+   */
+  correctFnsku(id, actor, { newFnsku = '', reason = '', operationId = '' } = {}) {
+    forbidAi(actor, 'FNSKU の訂正');
+    const opHit = this._checkOperationId(operationId, id);
+    if (opHit) return { product: this.get(id), idempotent: true, correction: opHit.meta?.correction || null };
+    const next = normalizeFnsku(newFnsku);
+    if (next && !FNSKU_RE.test(next)) {
+      throw new AppError(400, `Amazon管理番号の形が違います: ${next}`, 'INVALID_FNSKU_FORMAT');
+    }
+    const cur = this.get(id);
+    if (next) {
+      const ownerId = this.fnskuIndex.get(next);
+      if (ownerId && ownerId !== cur.id) {
+        const owner = this._ownerSummary(ownerId);
+        const err = new AppError(409, `この FNSKU（${next}）は既に #${owner.id}「${owner.name}」に登録されています`, 'FNSKU_OWNED_BY_OTHER');
+        err.owner = owner;
+        err.fnskuOwner = owner;
+        throw err;
+      }
+    }
+    const oldFnsku = normalizeFnsku(cur.fnsku);
+    const cleanReason = String(reason || '').trim();
+    const opId = String(operationId || '').trim() || null;
+    const correction = { id: newId('fc'), at: nowIso(), actor, oldFnsku, newFnsku: next, reason: cleanReason, operationId: opId };
+    const product = this.mutate(id, actor, 'fnsku_correct', (p, ctx) => {
+      p.fnsku = next;
+      p.locks.fnsku = { by: actor, at: correction.at };
+      p.fnskuCorrections = [...(p.fnskuCorrections || []), correction];
+      ctx.change('fnsku', oldFnsku, next);
+      ctx.note(`FNSKU訂正: ${oldFnsku || '（空）'} → ${next || '（空）'}${cleanReason ? `（理由: ${cleanReason}）` : ''}`);
+    }, { extraHistory: { oldFnsku, newFnsku: next, reason: cleanReason, operationId: opId } });
+    this._recordOperationId(operationId, id, 'fnsku_correct', { correction });
+    return { product, correction };
+  }
+
+  /**
+   * 誤って記録された scanEvent を物理削除せず無効化マークを付け、有効な記録から在庫確認状態を再計算する。
+   */
+  invalidateScanEvent(id, actor, eventId, reason = '') {
+    forbidAi(actor, 'スキャン記録の無効化');
+    const cleanReason = String(reason || '').trim() || '誤スキャン無効化';
+    let target = null;
+    const product = this.mutate(id, actor, 'scan_invalidate', (p, ctx) => {
+      const ev = (p.scanEvents || []).find((e) => e.id === eventId);
+      if (!ev) throw new AppError(404, `スキャン記録 ${eventId} が見つかりません`, 'not_found');
+      if (!ev.invalidatedAt) {
+        ev.invalidatedAt = nowIso();
+        ev.invalidationReason = cleanReason;
+        ev.invalidatedBy = actor;
+        target = { ...ev };
+        const valid = (p.scanEvents || []).filter((e) => !e.undoneAt && !e.invalidatedAt);
+        p.lastScanAt = valid.map((e) => e.scannedAt).sort().at(-1) || null;
+        const validPresenceAt = valid.filter((e) => e.presence !== false).map((e) => e.scannedAt).sort().at(-1) || null;
+        if (validPresenceAt) {
+          p.stockCheckedAt = validPresenceAt;
+        } else if (ev.presence !== false && p.stockCheckedAt === ev.scannedAt) {
+          p.stockCheckedAt = null;
+        }
+        ctx.note(`スキャン記録を無効化（${ev.id} / ${ev.fnsku || '番号なし'} / ${cleanReason}）`);
+      } else {
+        target = { ...ev };
+      }
+    });
+    return { product, event: target };
+  }
+
+  /**
+   * 読み取り専用の FNSKU 整合性チェック:
+   * 1. anomalies（確実な異常）: 複数商品への重複FNSKU / 訂正履歴なしの scanEvents FNSKU 食い違い
+   * 2. explainable（説明可能な差異）: 正式な訂正履歴または無効化マークにより説明がつく差異
+   * 3. indeterminate（判定不能）: 番号未記録の古いスキャンイベント等
+   */
+  auditFnskuIntegrity() {
+    const live = this.list({ includeTrash: false });
+    const byFnsku = new Map();
+    for (const p of live) {
+      const code = normalizeFnsku(p.fnsku);
+      if (!code) continue;
+      if (!byFnsku.has(code)) byFnsku.set(code, []);
+      byFnsku.get(code).push({ id: p.id, name: p.name || '' });
+    }
+    const anomalies = [];
+    const explainable = [];
+    const indeterminate = [];
+    let duplicateFnskuCount = 0;
+
+    for (const [fnsku, owners] of byFnsku.entries()) {
+      if (owners.length > 1) {
+        duplicateFnskuCount += 1;
+        anomalies.push({ type: 'duplicate_fnsku', fnsku, products: owners });
+      }
+    }
+
+    for (const p of live) {
+      const cur = normalizeFnsku(p.fnsku);
+      const correctedOlds = new Set((p.fnskuCorrections || []).map((c) => normalizeFnsku(c.oldFnsku)).filter(Boolean));
+      for (const ev of p.scanEvents || []) {
+        const evCode = normalizeFnsku(ev.fnsku);
+        if (ev.invalidatedAt) {
+          explainable.push({
+            type: 'invalidated_scan_event',
+            productId: p.id,
+            productName: p.name || '',
+            eventId: ev.id,
+            scannedAt: ev.scannedAt,
+            eventFnsku: evCode,
+            currentFnsku: cur,
+            invalidatedAt: ev.invalidatedAt,
+            invalidationReason: ev.invalidationReason || '',
+          });
+          continue;
+        }
+        if (!evCode) {
+          indeterminate.push({
+            type: 'scan_without_fnsku',
+            productId: p.id,
+            productName: p.name || '',
+            eventId: ev.id,
+            scannedAt: ev.scannedAt,
+            currentFnsku: cur,
+          });
+          continue;
+        }
+        if (cur && evCode !== cur) {
+          if (correctedOlds.has(evCode)) {
+            explainable.push({
+              type: 'explained_by_correction',
+              productId: p.id,
+              productName: p.name || '',
+              eventId: ev.id,
+              scannedAt: ev.scannedAt,
+              eventFnsku: evCode,
+              currentFnsku: cur,
+            });
+          } else {
+            const ownerId = this.fnskuIndex.get(evCode) || null;
+            anomalies.push({
+              type: 'scan_fnsku_mismatch',
+              productId: p.id,
+              productName: p.name || '',
+              eventId: ev.id,
+              scannedAt: ev.scannedAt,
+              eventFnsku: evCode,
+              currentFnsku: cur,
+              undoneAt: ev.undoneAt || null,
+              fnskuOwnerId: ownerId,
+            });
+          }
+        }
+      }
+    }
+
+    return {
+      summary: {
+        duplicateFnskuCount,
+        anomalyCount: anomalies.length,
+        explainableCount: explainable.length,
+        indeterminateCount: indeterminate.length,
+      },
+      anomalies,
+      explainable,
+      indeterminate,
+    };
+  }
+
+  /**
+   * 一番新しいスキャンを取り消す: そのスキャンが変えた項目を前の値へ戻す（後から別の操作で変わった項目はそのまま、kept で返す）。
+   * 記録は消さず undoneAt・undoneBy を付ける。ユーザーはどのスキャンも、AI は自分が記録したスキャンだけ取り消せる。
+   */
+  undoScan(id, actor) {
+    const ev = [...(this.get(id).scanEvents || [])].reverse().find((e) => !e.undoneAt);
+    if (!ev) throw new AppError(404, '取り消せるスキャンがありません', 'no_scan');
+    if (!isUser(actor) && ev.actor !== actor) throw new AppError(403, 'ほかの人が記録したスキャンの取り消しはユーザーのみ実行できます（AIの権限外）', 'forbidden');
+    const kept = [];
+    const product = this.mutate(id, actor, 'scan-undo', (p, ctx) => {
+      const b = ev.before;
+      const a = ev.after;
+      const back = (field, cur, set) => {
+        if (same(a[field], b[field])) return;
+        if (!same(cur, a[field])) { kept.push(field); return; } // changed again after the scan: leave the newer value
+        set(b[field]);
+      };
+      back('fnsku', p.fnsku || '', (v) => { ctx.change('fnsku', p.fnsku, v); p.fnsku = v; });
+      back('fnskuLock', p.locks?.fnsku || null, (v) => { if (v) p.locks.fnsku = v; else delete p.locks.fnsku; });
+      back('stockCheckedAt', p.stockCheckedAt || null, (v) => { p.stockCheckedAt = v; });
+      back('stockUnknownAt', p.stockUnknownAt || null, (v) => { p.stockUnknownAt = v; });
+      back('decision', p.decision, (v) => { ctx.changes.push({ path: 'decision', label: '出品判断', from: decisionLabel(p.decision), to: decisionLabel(v) }); p.decision = v; });
+      p.scanEvents = (p.scanEvents || []).map((e) => (e.id === ev.id ? { ...e, undoneAt: nowIso(), undoneBy: actor } : e));
+      p.lastScanAt = p.scanEvents.filter((e) => !e.undoneAt).map((e) => e.scannedAt).sort().at(-1) || null;
+      ctx.note(`スキャン取り消し（${fmtStamp(ev.scannedAt)} のスキャン）`);
+    });
+    return { product, undone: ev.id, kept };
+  }
+
+  /**
    * レビュー・発信の予定。ユーザーは全部決められる。AI（投稿エージェント等）は 下書き（draft・status drafted）と、
    * ユーザーが「投稿OK」にしたものの投稿済み報告（status posted・url）だけ。
    */
@@ -751,6 +1190,11 @@ export class Store extends EventEmitter {
     if (String(confirmId) !== p.id) throw new AppError(400, '確認のため商品IDを入力してください');
     fs.rmSync(this.dir(id), { recursive: true, force: true });
     this.products.delete(id);
+    this._syncFnskuIndex(p, null);
+    for (const ph of p.photos || []) {
+      const cpid = ph.clientPhotoId || ph.clientId;
+      if (cpid && this.clientPhotoIndex.get(cpid)?.productId === id) this.clientPhotoIndex.delete(cpid);
+    }
     appendJsonl(path.join(this.dataDir, 'activity.jsonl'), { at: nowIso(), actor, productId: id, productName: p.name, action: 'purge', summary: '完全削除' });
     this.emit('change', { type: 'product', id, actor, action: 'purge' });
   }
@@ -799,11 +1243,21 @@ export class Store extends EventEmitter {
    * `clientId` makes retried uploads idempotent (the iPhone queue may resend).
    */
   addPhoto(id, actor, meta, files) {
-    const kind = meta.kind || 'actual';
+    const isScanScene = meta.source === 'scan';
+    const kind = isScanScene ? 'reference' : (meta.kind || 'actual');
     if (!PHOTO_KIND_IDS.includes(kind)) throw new AppError(400, `kind が不正: ${kind}`);
     if (!files?.original?.buffer?.length) throw new AppError(400, '画像データがありません');
-    const existing = meta.clientId && this.get(id).photos.find((ph) => ph.clientId === meta.clientId);
-    if (existing) return { photo: existing, duplicate: true };
+    const cpid = String(meta.clientPhotoId || meta.clientId || '').trim() || null;
+    if (cpid) {
+      const hit = this.clientPhotoIndex.get(cpid);
+      if (hit && hit.productId !== String(id)) {
+        const err = new AppError(409, `clientPhotoId ${cpid} は別商品 #${hit.productId} で既に使用されています`, 'CLIENT_PHOTO_ID_CONFLICT');
+        err.productId = hit.productId;
+        throw err;
+      }
+      const existing = this.get(id).photos.find((ph) => (ph.clientPhotoId || ph.clientId) === cpid);
+      if (existing) return { photo: existing, duplicate: true };
+    }
     if (kind === 'actual' && meta.derivedFrom) {
       const src = this.get(id).photos.find((ph) => ph.id === meta.derivedFrom);
       if (!src) throw new AppError(400, '編集元の写真が見つかりません');
@@ -818,14 +1272,15 @@ export class Store extends EventEmitter {
       id: pid,
       kind,
       source: meta.source || (kind === 'actual' ? 'camera' : kind),
-      tag: meta.tag && PHOTO_TAGS.includes(meta.tag) ? meta.tag : meta.tag || '',
+      tag: meta.tag && PHOTO_TAGS.includes(meta.tag) ? meta.tag : meta.tag || (isScanScene ? 'スキャン場面' : ''),
       note: meta.note || '',
       sourceUrl: meta.sourceUrl || '',
       derivedFrom: meta.derivedFrom || null,
       edit: meta.edit || null,
       width: Number(meta.width) || null,
       height: Number(meta.height) || null,
-      clientId: meta.clientId || null,
+      clientId: cpid,
+      clientPhotoId: cpid,
       sha256: sha256(files.original.buffer),
       takenAt: photoTakenAt(files.original.buffer, meta.takenAt),
       createdAt: nowIso(),
@@ -844,10 +1299,24 @@ export class Store extends EventEmitter {
     if (files.thumb?.buffer?.length) write('thumb', files.thumb.buffer, 'jpg');
     else record.files.thumb = record.files.work;
 
+    // manual_camera / manual_library photos default to NOT adopted (isAdopted = false).
+    const isManualSource = ['manual_camera', 'manual_library'].includes(record.source);
+    const shouldAutoSelect = meta.autoSelect !== undefined ? meta.autoSelect === true || meta.autoSelect === 'true' : !isManualSource;
+
+    let replaced = [];
     this.mutate(id, actor, 'photo_add', (p, ctx) => {
+      // 読み取り場面の画像は1商品につき1つだけ（新しいスキャンで差し替える）。
+      if (isScanScene) {
+        replaced = p.photos.filter((x) => x.source === 'scan');
+        if (replaced.length) {
+          const oldIds = new Set(replaced.map((x) => x.id));
+          p.photos = p.photos.filter((x) => x.source !== 'scan');
+          p.listingPhotoIds = p.listingPhotoIds.filter((lid) => !oldIds.has(lid));
+        }
+      }
       p.photos.push(record);
-      const kindLabel = kind === 'actual' ? (record.derivedFrom ? '編集写真' : '現物写真') : kind === 'generated' ? '生成画像' : '参考画像';
-      ctx.note(`${kindLabel}追加${record.tag ? `（${record.tag}）` : ''}`);
+      const kindLabel = isScanScene ? 'スキャン場面画像' : kind === 'actual' ? (record.derivedFrom ? '編集写真' : '現物写真') : kind === 'generated' ? '生成画像' : '参考画像';
+      ctx.note(`${kindLabel}${replaced.length ? 'を更新' : '追加'}${!isScanScene && record.tag ? `（${record.tag}）` : ''}`);
       if (kind === 'actual') {
         p.lastPhotoAt = record.createdAt;
         ctx.bump();
@@ -862,6 +1331,7 @@ export class Store extends EventEmitter {
           const i = [meta.replacePhotoId, record.derivedFrom].map((x) => (x ? p.listingPhotoIds.indexOf(x) : -1)).find((x) => x >= 0) ?? -1;
           if (i >= 0) p.listingPhotoIds[i] = pid;
         } else if (
+          shouldAutoSelect &&
           this.settings.autoSelectListingPhotos &&
           !record.derivedFrom &&
           !p.locks.listingPhotos &&
@@ -871,6 +1341,14 @@ export class Store extends EventEmitter {
         }
       }
     });
+    if (cpid) this.clientPhotoIndex.set(cpid, { productId: String(id), photoId: pid });
+    for (const old of replaced) {
+      const oldCpid = old.clientPhotoId || old.clientId;
+      if (oldCpid && oldCpid !== cpid && this.clientPhotoIndex.get(oldCpid)?.photoId === old.id) this.clientPhotoIndex.delete(oldCpid);
+      for (const rel of new Set(Object.values(old.files || {}))) {
+        if (rel) fs.rmSync(path.join(this.dir(id), rel), { force: true });
+      }
+    }
     return { photo: record, duplicate: false };
   }
 
@@ -891,9 +1369,24 @@ export class Store extends EventEmitter {
         if (!PHOTO_KIND_IDS.includes(patch.kind)) throw new AppError(400, `kind が不正: ${patch.kind}`);
         if (patch.kind === 'actual') forbidAi(actor, '現物写真への変更（自分で撮った写真かはユーザーにしか分からない）');
         ph.kind = patch.kind;
-        if (!LISTABLE_KINDS.includes(ph.kind)) p.listingPhotoIds = p.listingPhotoIds.filter((x) => x !== ph.id);
+        if (!isListablePhoto(ph)) p.listingPhotoIds = p.listingPhotoIds.filter((x) => x !== ph.id);
         ctx.note(`写真の種別を「${PHOTO_KINDS.find((k) => k.id === ph.kind).label}」に変更`);
         ctx.bump();
+      }
+      if (patch.adopted !== undefined) {
+        const want = !!patch.adopted;
+        const has = p.listingPhotoIds.includes(ph.id);
+        if (want && !has) {
+          if (!isListablePhoto(ph)) throw new AppError(400, `写真 ${ph.id} は出品用候補の対象外です`);
+          if (p.listingPhotoIds.length >= MERCARI_LIMITS.photosMax) throw new AppError(400, `出品用写真は${MERCARI_LIMITS.photosMax}枚までです`);
+          p.listingPhotoIds.push(ph.id);
+          ctx.note(`写真を出品用に採用（${ph.id}）`);
+          ctx.bump();
+        } else if (!want && has) {
+          p.listingPhotoIds = p.listingPhotoIds.filter((x) => x !== ph.id);
+          ctx.note(`写真の出品採用を外した（${ph.id}）`);
+          ctx.bump();
+        }
       }
     });
   }
@@ -960,7 +1453,7 @@ export class Store extends EventEmitter {
     for (const x of uniq) {
       const ph = valid.get(x);
       if (!ph) throw new AppError(400, `写真 ${x} が見つかりません`);
-      if (!LISTABLE_KINDS.includes(ph.kind)) throw new AppError(400, `写真 ${x} は参考資料画像のため出品用にできません`);
+      if (!isListablePhoto(ph)) throw new AppError(400, `写真 ${x} は参考資料画像またはスキャン場面のため出品用にできません`);
     }
     if (uniq.length > MERCARI_LIMITS.photosMax) throw new AppError(400, `出品用写真は${MERCARI_LIMITS.photosMax}枚までです`);
     if (same(uniq, p.listingPhotoIds)) return false;
@@ -1196,6 +1689,14 @@ export class Store extends EventEmitter {
       if (stage && stage !== p.stage) {
         ctx.changes.push({ path: 'stage', label: 'ステータス', from: stageLabel(p.stage), to: stageLabel(stage) });
         p.stage = stage;
+      }
+      if (patch?.status === 'sold' || patch?.status === 'trading' || stage === 'sold' || stage === 'trading') {
+        p.stockCheckedAt = null;
+        p.stockUnknownAt = null;
+        if (p.decision !== 'no_stock') {
+          ctx.changes.push({ path: 'decision', label: '出品判断', from: decisionLabel(p.decision), to: decisionLabel('no_stock') });
+          p.decision = 'no_stock';
+        }
       }
       ctx.note(summary || `${channel} 情報を更新`);
     });

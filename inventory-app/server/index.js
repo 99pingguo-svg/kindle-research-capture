@@ -26,6 +26,7 @@ import { createDefaults } from './defaults.js';
 import { exportEntries, productsCsv, officialEntries, officialStats, materialsEntries } from './export.js';
 import { createMcpHandler, matchesFilter } from './mcp.js';
 import * as mercari from './adapters/mercari.js';
+import * as channels from './channels.js';
 import * as schema from './schema.js';
 import { parseLine, importDates } from './dates.js';
 import { Books, BOOK_KINDS, BOOK_STATUSES } from './books.js';
@@ -35,7 +36,7 @@ import { parseMercariSales } from './adapters/mercari-sales.js';
 import { FLAGS as BOOK_FLAGS } from './classify.js';
 import { productReport, yearReport } from './book-report.js';
 import { simulate, scenarios, TAX_YEARS } from './tax.js';
-import { scanLookup, scanCard } from './scan.js';
+import { scanLookup, scanCard, recentScans, importScans, checkScanDuplicates, registerFromScan } from './scan.js';
 import { browserBrief, browserSyncOverview, imageFile, isVineProvided, BROWSER_LISTS, IMAGE_STATES } from './browser-sync.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -79,7 +80,13 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
 
   // 観察ブラウザ連携（どの一覧か・画像取得の状況）は台帳の外のファイルも見るので、summary の外で足す。
   const sm = (p) => ({ ...summary(p, store.settings), browser: browserBrief(p), vineOrderDate: p.browser?.vineOrderDate || null, vineProvided: isVineProvided(p) });
-  const full = (p) => ({ ...p, summary: sm(p), readiness: readiness(p, store.settings), lint: lint(p, store.settings) });
+  const full = (p) => ({
+    ...p,
+    hasJmtyOverride: !!(p.override?.jmty?.title || p.override?.jmty?.description),
+    summary: sm(p),
+    readiness: readiness(p, store.settings),
+    lint: lint(p, store.settings),
+  });
 
   // ---- meta / settings ----
   route('GET', '/api/meta', () => ({
@@ -138,9 +145,11 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
     importDates(store, actor, { text: body?.text || '', dryRun: body?.dryRun !== false, include: body?.include || [], field: body?.field || 'itemDate' }));
   route('GET', '/api/products/:id', ({ params }) => full(store.get(params.id)));
   route('PATCH', '/api/products/:id', ({ params, body, actor }) => {
-    const { set, confirm, unlock } = body || {};
+    const { set, append, confirm, unlock, expectedRev } = body || {};
     let r = { proposed: [] };
-    if (set && Object.keys(set).length) r = store.updateFields(params.id, actor, set);
+    if ((set && Object.keys(set).length) || (append && Object.keys(append).length)) {
+      r = store.updateFields(params.id, actor, set, { append, expectedRev });
+    }
     if (confirm?.length) store.confirmFields(params.id, actor, confirm);
     if (unlock?.length) store.unlockFields(params.id, actor, unlock);
     return { product: full(store.get(params.id)), proposed: r.proposed };
@@ -168,12 +177,53 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
   }));
   route('POST', '/api/scan/confirm', ({ body, actor }) => {
     const id = String(body?.id || '');
-    const p0 = store.get(id);
-    const fnsku = /^X00[0-9A-Z]{7}$/.test(String(body?.fnsku || '')) ? body.fnsku : '';
-    if (fnsku && !p0.fnsku) store.updateFields(id, actor, { fnsku });
-    const noted = fnsku && p0.fnsku && p0.fnsku !== fnsku ? `この商品には別の管理番号 ${p0.fnsku} が入っています` : '';
-    if (body?.presence !== false) store.setPresence(id, actor, 'have');
-    return { ...scanCard(sm(store.get(id))), noted };
+    store.get(id);
+    const rawFnsku = String(body?.fnsku ?? '').trim();
+    const presence = body?.presence !== false;
+    // 「ある」を付けるのは今までどおりユーザーだけ（setPresence と同じ境界）。
+    if (presence && !isUser(actor)) throw new AppError(403, 'あるかないかのチェックはユーザーのみ実行できます（AIの権限外）', 'forbidden');
+    const scannedAt = body?.scannedAt ? String(body.scannedAt) : new Date().toISOString();
+    const operationId = body?.operationId ? String(body.operationId).trim() : '';
+    const { product, conflict, idempotent } = store.recordScan(id, actor, {
+      fnsku: rawFnsku,
+      scannedAt,
+      presence,
+      via: 'confirm',
+      operationId,
+      strictFnsku: true,
+    });
+    return { ...scanCard(sm(product), '', 0, recentScans(product)), noted: conflict || '', ...(idempotent ? { idempotent: true } : {}) };
+  });
+  // FNSKU の専用訂正操作（履歴に旧番号・新番号・理由・操作IDを残す。scanEvents は書き換えない）。
+  route('POST', '/api/products/:id/fnsku/correct', ({ params, body, actor }) => {
+    const { product, correction, idempotent } = store.correctFnsku(params.id, actor, {
+      newFnsku: body?.newFnsku ?? '',
+      reason: body?.reason ?? '',
+      operationId: body?.operationId ?? '',
+    });
+    return { product: full(product), correction, ...(idempotent ? { idempotent: true } : {}) };
+  });
+  // 読み取り専用の FNSKU 整合性チェック（確実な異常・説明可能な差異・判定不能の3分類）。
+  route('GET', '/api/audit/fnsku', () => store.auditFnskuIntegrity());
+  // 誤スキャンイベントの無効化（物理削除せずマークし、有効記録から在庫確認状態を再計算）。
+  route('POST', '/api/products/:id/scan-events/:eventId/invalidate', ({ params, body, actor }) => {
+    const { product, event } = store.invalidateScanEvent(params.id, actor, params.eventId, body?.reason ?? '');
+    return { product: full(product), event };
+  });
+  // 新規登録前の重複・類似チェック（同じ FNSKU や似た既存商品を返す）。
+  route('POST', '/api/scan/check-duplicates', ({ body }) => checkScanDuplicates(store, {
+    fnsku: body?.fnsku, name: body?.name, brand: body?.brand, model: body?.model, jan: body?.jan, url: body?.url,
+    lines: Array.isArray(body?.lines) ? body.lines.map(String).slice(0, 40) : [],
+  }));
+  // 状態C等から新規商品を登録し、FNSKU＋スキャン記録までまとめて確定する。
+  route('POST', '/api/scan/register', ({ body, actor }) => registerFromScan(store, actor, body || {}));
+  // 台帳スキャンの記録をまとめて取り込む（既定 dryRun）。{ records: [{ fnsku, scannedAt, productId?, asin? }] }
+  route('POST', '/api/scan/import', ({ body, actor }) => importScans(store, actor, { records: body?.records, dryRun: body?.dryRun !== false }));
+  // 一番新しいスキャンを取り消す（前の値へ戻す。記録は「取り消し済み」として残る）。
+  route('POST', '/api/scan/undo', ({ body, actor }) => {
+    const id = String(body?.productId || body?.id || '');
+    const { product, undone, kept } = store.undoScan(id, actor);
+    return { ...scanCard(sm(product), '', 0, recentScans(product)), undone, kept };
   });
   route('POST', '/api/date-ids/refresh', ({ actor }) => ({ applied: dateIds.refresh(store, actor) }));
   route('POST', '/api/date-ids/import', ({ body, actor }) => dateIds.importList(store, actor, {
@@ -262,8 +312,11 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
       edit = null;
     }
     const { photo, duplicate } = store.addPhoto(params.id, actor, { ...fields, edit, replaceInListing: fields.replaceInListing === 'true' }, files);
-    // A scan photo only proves the item was here that day; it is not finished for listing.
-    if (!duplicate) { if (photo.source !== 'scan') studio.enqueue(params.id, photo); codes.enqueue(params.id, photo); }
+    // A scan photo only proves the item was here that day; manual_camera / manual_library must never mutate FNSKU.
+    if (!duplicate) {
+      if (photo.source !== 'scan') studio.enqueue(params.id, photo);
+      if (!['scan', 'manual_camera', 'manual_library'].includes(photo.source)) codes.enqueue(params.id, photo);
+    }
     return { photo, duplicate, product: sm(store.get(params.id)) };
   });
   // ---- 純正カメラ連携: アプリで撮影対象を決め → iPhone の「カメラ」で撮影 → ショートカットが撮った写真を送る ----
@@ -393,6 +446,19 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
   // ---- destinations (メルカリ／ジモティー／フリマ) ----
   route('PUT', '/api/products/:id/targets', ({ params, body, actor }) => full(store.setTargets(params.id, actor, body?.targets || [], { confirmFoodFlea: body?.confirmFoodFlea === true })));
   route('PUT', '/api/products/:id/channel-photos/:channel', ({ params, body, actor }) => full(store.setChannelPhotos(params.id, actor, params.channel, body?.ids ?? null)));
+  route('PUT', '/api/products/:id/channels/:channel', ({ req, params, body, actor }) => {
+    const status = body?.status || 'listed';
+    channels.applyObserved(store, params.id, actor, params.channel, { status, ...body });
+    if (status === 'sold' || status === 'trading') notifyAozoraShelf(req, params.id, false);
+    return full(store.get(params.id));
+  });
+  route('POST', '/api/channels/sync', ({ req, body, actor }) => {
+    const res = channels.syncObserved(store, actor, body?.channel || 'mercari', body?.observations || []);
+    for (const u of res.updated || []) {
+      if (u.to === 'sold' || u.to === 'trading') notifyAozoraShelf(req, u.id, false);
+    }
+    return res;
+  });
   route('GET', '/api/products/:id/package/:channel', ({ params }) => {
     const pkg = channelPackage(store.get(params.id), params.channel);
     return { ...pkg, photos: pkg.photos.map((ph) => ({ ...ph, url: `/files/products/${params.id}/${ph.work}` })) };
@@ -699,7 +765,10 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
           body = raw.length ? JSON.parse(raw.toString('utf8')) : {};
         }
         const actor = String(req.headers['x-actor'] || 'api');
-        const out = await r.handler({ req, res, params, query: Object.fromEntries(url.searchParams), body, actor });
+        const readOnlyPost = ['/api/scan', '/api/scan/check-duplicates', '/api/duplicates', '/api/tax/simulate', '/api/ocr'].includes(url.pathname);
+        const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !readOnlyPost;
+        const exec = () => r.handler({ req, res, params, query: Object.fromEntries(url.searchParams), body, actor });
+        const out = isWrite ? await store.withWriteLock(exec) : await exec();
         if (!res.headersSent) sendJson(res, 200, out ?? { ok: true });
         return;
       }
@@ -709,7 +778,20 @@ export function createApp({ dataDir, token = '', background = !process.env.NODE_
       if (res.headersSent) return res.end();
       const status = e instanceof AppError ? e.status : e instanceof SyntaxError ? 400 : 500;
       if (status >= 500) console.error(e);
-      sendJson(res, status, { error: e.message, code: e.code, duplicates: e.duplicates });
+      sendJson(res, status, {
+        error: e.message,
+        code: e.code,
+        duplicates: e.duplicates,
+        ...(e.owner ? { owner: e.owner } : {}),
+        ...(e.fnskuOwner ? { fnskuOwner: e.fnskuOwner } : {}),
+        ...(e.similar ? { similar: e.similar } : {}),
+        ...(e.currentFnsku !== undefined ? { currentFnsku: e.currentFnsku } : {}),
+        ...(e.scannedFnsku !== undefined ? { scannedFnsku: e.scannedFnsku } : {}),
+        ...(e.productId !== undefined ? { productId: e.productId } : {}),
+        ...(e.currentRev !== undefined ? { currentRev: e.currentRev } : {}),
+        ...(e.currentTitle !== undefined ? { currentTitle: e.currentTitle } : {}),
+        ...(e.currentDescription !== undefined ? { currentDescription: e.currentDescription } : {}),
+      });
     }
   }
 
